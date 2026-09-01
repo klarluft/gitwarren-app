@@ -1,0 +1,1 @@
+ALTER TABLE `comment_threads` ADD `start_line` integer;

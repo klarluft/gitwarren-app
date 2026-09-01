@@ -27,10 +27,12 @@ import { api } from '@/lib/api'
 import { errorMessage } from '@/lib/errors'
 import { plural } from '@/lib/format'
 import { useStoredFlag, useStoredPreference } from '@/lib/preferences'
+import type { DiffFocus } from '@/lib/router'
 import { CommentThreadCard } from '../comments/comment-thread-card'
 import { useCommentMutations, useReviewComments } from '../comments/use-comments'
-import { ChangedFilesTree, fileDomId } from './changed-files-tree'
+import { ChangedFilesTree } from './changed-files-tree'
 import { CompareErrorCard, NoWorktreeNotice, WorkingTreeBanner } from './compare-notices'
+import { fileDomId, lineDomId } from './dom-ids'
 import { DiffSnippet } from './diff-snippet'
 import { DiffStat, FileDiffCard, type AnchoredThread } from './diff-view'
 import { useEditors, useReviewDiff } from './use-reviews'
@@ -66,6 +68,7 @@ function anchorByFile(
         filePath: thread.filePath,
         side: thread.side,
         line: thread.line,
+        startLine: thread.startLine,
         anchorText: thread.anchorText
       })
     }
@@ -120,7 +123,58 @@ function useActiveFile(paths: string[]): string | null {
   return active
 }
 
-export function ReviewFilesTab({ review }: { review: Review }) {
+/**
+ * Scroll to the line the URL asked for, and mark it while the reader finds it.
+ *
+ * The target may not be in the DOM yet - the diff is still rendering, or the
+ * file card is collapsed and about to open - so this retries for a few frames
+ * rather than firing once and missing. A line that never appears (the comment
+ * was on code this diff does not contain) falls back to the file's card, which
+ * is where such a thread is listed.
+ */
+function useFocusScroll(focus: DiffFocus | undefined, ready: boolean): DiffFocus | null {
+  const [marked, setMarked] = useState<DiffFocus | null>(null)
+  const key = focus ? `${focus.filePath}:${focus.side}:${focus.line}` : null
+
+  useEffect(() => {
+    if (!focus || !ready) return
+
+    let frames = 0
+    let frame = 0
+    let clear = 0
+
+    const find = (): void => {
+      const line = document.getElementById(lineDomId(focus.filePath, focus.side, focus.line))
+      const target = line ?? document.getElementById(fileDomId(focus.filePath))
+
+      if (target) {
+        target.scrollIntoView({ block: line ? 'center' : 'start', behavior: 'smooth' })
+        if (line) {
+          setMarked(focus)
+          // Long enough to catch the eye after a smooth scroll, short enough
+          // that the diff is not left permanently highlighted.
+          clear = window.setTimeout(() => setMarked(null), 2500)
+        }
+        return
+      }
+      // ~30 frames is half a second of waiting for a card to open.
+      if (frames++ < 30) frame = requestAnimationFrame(find)
+    }
+
+    frame = requestAnimationFrame(find)
+    return () => {
+      cancelAnimationFrame(frame)
+      window.clearTimeout(clear)
+      setMarked(null)
+    }
+    // `key` stands in for the focus object, which is rebuilt on every route read.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, ready])
+
+  return marked
+}
+
+export function ReviewFilesTab({ review, focus }: { review: Review; focus?: DiffFocus }) {
   const [includeUncommitted, setIncludeUncommitted] = useState(true)
   const [treeOpen, setTreeOpen] = useStoredFlag('files-tree', true)
   const [editorId, setEditorId] = useStoredPreference('editor', null)
@@ -172,6 +226,8 @@ export function ReviewFilesTab({ review }: { review: Review }) {
     },
     [review.id, includeUncommitted, editorId]
   )
+
+  const marked = useFocusScroll(focus, !isLoading && data !== undefined)
 
   if (isLoading) return <LoadingState />
 
@@ -370,6 +426,10 @@ export function ReviewFilesTab({ review }: { review: Review }) {
                   // the old one has to go.
                   key={includeUncommitted ? 'with-uncommitted' : 'committed-only'}
                   file={file}
+                  // Only the card that owns the line hears about it, so one
+                  // arriving link cannot light up the same number in every file.
+                  focus={focus?.filePath === file.path ? focus : undefined}
+                  marked={marked?.filePath === file.path ? marked : undefined}
                   comments={{
                     reviewId: review.id,
                     threads: threadsByFile.get(file.path) ?? [],

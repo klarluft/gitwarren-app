@@ -35,11 +35,6 @@ interface DirectoryNode {
 
 type TreeNode = FileNode | DirectoryNode
 
-/** DOM id of a file's card, shared by the tree and the diff list. */
-export function fileDomId(path: string): string {
-  return `file-${encodeURIComponent(path)}`
-}
-
 function buildTree(files: FileDiff[]): TreeNode[] {
   const root: DirectoryNode = { kind: 'directory', path: '', name: '', children: [] }
 

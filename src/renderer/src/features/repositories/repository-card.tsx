@@ -1,5 +1,6 @@
 import { ChevronRight, FolderOpen, Pencil, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Tooltip } from '@/components/ui/tooltip'
 import { Card } from '@/components/ui/card'
 import { api } from '@/lib/api'
 import { navigate } from '@/lib/router'
@@ -56,35 +57,38 @@ export function RepositoryCard({ repository, onEdit, onRemove }: RepositoryCardP
         onKeyDown={(event) => event.stopPropagation()}
         role="presentation"
       >
-        <Button
-          variant="ghost"
-          size="icon"
-          title={missing ? 'Folder is missing' : 'Show in file manager'}
-          aria-label="Show in file manager"
-          disabled={missing}
-          onClick={() => void api.system.revealPath(repository.path)}
-        >
-          <FolderOpen />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          title="Edit"
-          aria-label={`Edit ${repository.name}`}
-          onClick={() => onEdit(repository)}
-        >
-          <Pencil />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          title="Remove"
-          aria-label={`Remove ${repository.name}`}
-          className="text-muted-foreground hover:text-destructive"
-          onClick={() => onRemove(repository)}
-        >
-          <Trash2 />
-        </Button>
+        <Tooltip label={missing ? 'Folder is missing' : 'Show in file manager'}>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Show in file manager"
+            disabled={missing}
+            onClick={() => void api.system.revealPath(repository.path)}
+          >
+            <FolderOpen />
+          </Button>
+        </Tooltip>
+        <Tooltip label="Edit this repository">
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={`Edit ${repository.name}`}
+            onClick={() => onEdit(repository)}
+          >
+            <Pencil />
+          </Button>
+        </Tooltip>
+        <Tooltip label="Remove from GitWarren">
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={`Remove ${repository.name}`}
+            className="text-muted-foreground hover:text-destructive"
+            onClick={() => onRemove(repository)}
+          >
+            <Trash2 />
+          </Button>
+        </Tooltip>
       </div>
 
       <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />

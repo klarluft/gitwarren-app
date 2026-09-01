@@ -9,6 +9,7 @@ import { useState } from 'react'
 import useSWR from 'swr'
 import { Check, ChevronDown, Copy, Plug } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Tooltip } from '@/components/ui/tooltip'
 import { Card } from '@/components/ui/card'
 import { api, CACHE_KEYS } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -85,16 +86,17 @@ export function AgentAccessPanel() {
             >
               {snippet}
             </pre>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => void copy()}
-              className="absolute right-1.5 top-1.5"
-              title="Copy"
-              aria-label="Copy MCP configuration"
-            >
-              {copied ? <Check className="text-success" /> : <Copy />}
-            </Button>
+            <Tooltip label={copied ? 'Copied' : 'Copy this configuration'}>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => void copy()}
+                className="absolute right-1.5 top-1.5"
+                aria-label="Copy MCP configuration"
+              >
+                {copied ? <Check className="text-success" /> : <Copy />}
+              </Button>
+            </Tooltip>
           </div>
 
           <dl className="mt-4 space-y-1.5 text-xs">

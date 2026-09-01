@@ -347,6 +347,8 @@ server.registerTool(
       'review as a whole; give both to attach it to a line, the way a pull-request review ' +
       'comment works. `side` picks which side of the diff `line` counts on - "head" (the ' +
       'default) for the code as it will be, "base" to remark on a line the change removed. ' +
+      'Add `startLine` to comment on a block rather than a single line; `line` is then the ' +
+      'last line of it, and the one the whole range follows if the code moves. ' +
       'The line is not required to be part of the diff: the comment is kept either way, and the ' +
       'returned thread says whether it could be anchored to a visible line. ' +
       'Comments are attributed automatically from the MCP handshake - see `agent_identity`.\n\n' +

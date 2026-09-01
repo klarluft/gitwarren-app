@@ -67,7 +67,7 @@ test('an untouched line stays anchored where it was', () => {
     anchorText: 'const b = 2'
   })
 
-  assert.deepEqual(resolved, { state: 'anchored', line: 2 })
+  assert.deepEqual(resolved, { state: 'anchored', line: 2, startLine: null })
 })
 
 test('a line pushed down by an insert above follows its text', () => {
@@ -86,7 +86,7 @@ test('a line pushed down by an insert above follows its text', () => {
     anchorText: 'const b = 2'
   })
 
-  assert.deepEqual(resolved, { state: 'moved', line: 3 })
+  assert.deepEqual(resolved, { state: 'moved', line: 3, startLine: null })
 })
 
 test('a rewritten line goes outdated rather than pointing at the new code', () => {
@@ -102,7 +102,7 @@ test('a rewritten line goes outdated rather than pointing at the new code', () =
     anchorText: 'const b = 2'
   })
 
-  assert.deepEqual(resolved, { state: 'outdated', line: null })
+  assert.deepEqual(resolved, { state: 'outdated', line: null, startLine: null })
 })
 
 test('a file that has dropped out of the diff goes outdated', () => {
@@ -113,7 +113,7 @@ test('a file that has dropped out of the diff goes outdated', () => {
     anchorText: 'whatever'
   })
 
-  assert.deepEqual(resolved, { state: 'outdated', line: null })
+  assert.deepEqual(resolved, { state: 'outdated', line: null, startLine: null })
 })
 
 test('with no captured text there is nothing to verify, so it is outdated', () => {
@@ -126,7 +126,7 @@ test('with no captured text there is nothing to verify, so it is outdated', () =
     anchorText: null
   })
 
-  assert.deepEqual(resolved, { state: 'outdated', line: null })
+  assert.deepEqual(resolved, { state: 'outdated', line: null, startLine: null })
 })
 
 test('among identical lines the nearest one wins', () => {
@@ -149,7 +149,7 @@ test('among identical lines the nearest one wins', () => {
     anchorText: '}'
   })
 
-  assert.deepEqual(resolved, { state: 'moved', line: 5 })
+  assert.deepEqual(resolved, { state: 'moved', line: 5, startLine: null })
 })
 
 test('base-side anchors use base numbers, and ignore inserted lines', () => {
@@ -162,7 +162,7 @@ test('base-side anchors use base numbers, and ignore inserted lines', () => {
     anchorText: 'const c = 3'
   })
 
-  assert.deepEqual(resolved, { state: 'outdated', line: null })
+  assert.deepEqual(resolved, { state: 'outdated', line: null, startLine: null })
 })
 
 test('a deleted line is anchorable on the base side', () => {
@@ -178,7 +178,81 @@ test('a deleted line is anchorable on the base side', () => {
     anchorText: 'gone'
   })
 
-  assert.deepEqual(resolved, { state: 'anchored', line: 2 })
+  assert.deepEqual(resolved, { state: 'anchored', line: 2, startLine: null })
+})
+
+/* -------------------------------------------------------------------------- */
+/* Comments about a block of lines                                            */
+/* -------------------------------------------------------------------------- */
+
+const block = fileWith('src/app.ts', [
+  ['context', 'function work() {', 1, 1],
+  ['context', '  const a = 1', 2, 2],
+  ['context', '  const b = 2', 3, 3],
+  ['context', '}', 4, 4]
+])
+
+test('a range keeps the length it was written at', () => {
+  const resolved = resolveAnchor(block, {
+    filePath: 'src/app.ts',
+    side: 'head',
+    line: 3,
+    startLine: 1,
+    anchorText: '  const b = 2'
+  })
+
+  assert.deepEqual(resolved, { state: 'anchored', line: 3, startLine: 1 })
+})
+
+test('a range moves as one block when the code above it grows', () => {
+  const shifted = fileWith('src/app.ts', [
+    ['insert', "import x from 'x'", null, 1],
+    ['insert', '', null, 2],
+    ['context', 'function work() {', 1, 3],
+    ['context', '  const a = 1', 2, 4],
+    ['context', '  const b = 2', 3, 5],
+    ['context', '}', 4, 6]
+  ])
+
+  const resolved = resolveAnchor(shifted, {
+    filePath: 'src/app.ts',
+    side: 'head',
+    line: 3,
+    startLine: 1,
+    anchorText: '  const b = 2'
+  })
+
+  // The last line is re-found by its text at 5, and the start follows it down
+  // by the same two lines rather than being re-found on its own.
+  assert.deepEqual(resolved, { state: 'moved', line: 5, startLine: 3 })
+})
+
+test('a range never starts above the first line of the file', () => {
+  const resolved = resolveAnchor(block, {
+    filePath: 'src/app.ts',
+    side: 'head',
+    line: 2,
+    // Written when there were four more lines above; the code has moved up
+    // further than the range is long.
+    startLine: 1,
+    anchorText: '  const a = 1'
+  })
+
+  assert.deepEqual(resolved, { state: 'anchored', line: 2, startLine: 1 })
+})
+
+test('a range of one line reports no range at all', () => {
+  const resolved = resolveAnchor(block, {
+    filePath: 'src/app.ts',
+    side: 'head',
+    line: 3,
+    startLine: 3,
+    anchorText: '  const b = 2'
+  })
+
+  // "A range of one" and "not a range" have to look the same downstream, or
+  // every consumer ends up comparing the two numbers itself.
+  assert.deepEqual(resolved, { state: 'anchored', line: 3, startLine: null })
 })
 
 test('a renamed file is found under either name', () => {

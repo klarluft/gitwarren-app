@@ -113,8 +113,19 @@ export const commentThreads = sqliteTable(
     filePath: text('file_path'),
     /** Which side of the diff `line` numbers: the base (removed) or head side. */
     side: text('side', { enum: ['base', 'head'] }),
-    /** Line number on `side`, as it stood when the thread was opened. */
+    /**
+     * Line number on `side`, as it stood when the thread was opened. For a
+     * comment on a block of code this is the *last* line of it, because that is
+     * the line `anchorText` describes and therefore the one the whole range
+     * follows when the code moves.
+     */
     line: integer('line'),
+    /**
+     * First line of the range, for a comment about several lines at once. NULL
+     * for a comment on one line, which is the overwhelming majority - storing
+     * `line` twice would make every single-line thread look like a range.
+     */
+    startLine: integer('start_line'),
     /**
      * The text of that line when the thread was opened. NULL when the line was
      * not in the diff at the time, which marks the thread outdated on arrival.

@@ -7,6 +7,7 @@
 import { useState } from 'react'
 import { AlertCircle, FolderGit2, Plus, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Tooltip } from '@/components/ui/tooltip'
 import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { errorCode, errorMessage } from '@/lib/errors'
@@ -45,16 +46,17 @@ export function RepositoryList() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => void refresh()}
-            disabled={isLoading}
-            title="Re-read git state"
-            aria-label="Refresh"
-          >
-            <RefreshCw className={isRefreshing ? 'animate-spin' : undefined} />
-          </Button>
+          <Tooltip label="Re-read git state">
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => void refresh()}
+              disabled={isLoading}
+              aria-label="Refresh"
+            >
+              <RefreshCw className={isRefreshing ? 'animate-spin' : undefined} />
+            </Button>
+          </Tooltip>
           <Button onClick={openAdd}>
             <Plus />
             Add repository

@@ -22,6 +22,14 @@ import type { CommentThread } from './schemas.js'
 /** How many lines of lead-in a snippet carries by default. */
 export const SNIPPET_CONTEXT_LINES = 3
 
+/**
+ * Ceiling on a snapshot taken for a multi-line comment. Someone can select two
+ * hundred lines; storing all of them in every thread row would make the
+ * discussion bigger than the code it is about, and nobody reads a two-hundred
+ * line quotation above a comment either.
+ */
+export const MAX_SNIPPET_LINES = 40
+
 export interface AnchorSnippet {
   /** The commented line last, with up to `context` lines of lead-in before it. */
   lines: DiffLine[]
@@ -86,11 +94,22 @@ export interface ThreadSnippet {
   filePath: string
   side: DiffSide
   line: number | null
+  /** First line of the range, when the comment covers more than one. */
+  startLine: number | null
   lines: DiffLine[]
   clipped: boolean
   state: AnchorState
   historical: boolean
   capturedSha: string | null
+}
+
+/**
+ * Lead-in for a thread: enough to cover its whole range, plus the usual few
+ * lines above it, capped so a large selection cannot bloat the snapshot.
+ */
+export function contextForRange(startLine: number | null, line: number): number {
+  const span = startLine === null ? 0 : Math.max(line - startLine, 0)
+  return Math.min(span, MAX_SNIPPET_LINES) + SNIPPET_CONTEXT_LINES
 }
 
 /** The single stored line, for threads that predate snapshots. */
@@ -122,7 +141,14 @@ export function threadSnippet(
   if (!isInlineAnchor(thread)) return null
 
   const live =
-    anchor === null || anchor.line === null ? null : snippetAt(file, thread.side, anchor.line)
+    anchor === null || anchor.line === null
+      ? null
+      : snippetAt(
+          file,
+          thread.side,
+          anchor.line,
+          contextForRange(anchor.startLine, anchor.line)
+        )
 
   if (live !== null && anchor !== null) {
     return {
@@ -131,6 +157,7 @@ export function threadSnippet(
       filePath: file?.path ?? thread.filePath,
       side: thread.side,
       line: anchor.line,
+      startLine: anchor.startLine,
       lines: live.lines,
       clipped: live.clipped,
       state: anchor.state,
@@ -145,6 +172,7 @@ export function threadSnippet(
     filePath: file?.path ?? thread.filePath,
     side: thread.side,
     line: thread.line,
+    startLine: thread.startLine,
     lines: snapshot?.lines ?? fromAnchorText(thread, thread.side),
     clipped: snapshot?.clipped ?? false,
     state: anchor === null ? 'anchored' : anchor.state,

@@ -48,6 +48,7 @@ import { Button } from '@/components/ui/button'
 import { Markdown } from '@/components/markdown'
 import { Tabs, TabsList, TabsPanel, TabsTab } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
+import { Tooltip } from '@/components/ui/tooltip'
 import { errorMessage } from '@/lib/errors'
 import { cn } from '@/lib/utils'
 import {
@@ -456,15 +457,36 @@ function Toolbar({
   return (
     <div className="flex flex-wrap items-center gap-0.5 border-b border-border px-1 py-1">
       {actions.map(({ icon: Icon, title, run }) => (
+        <Tooltip key={title} label={title}>
+          <button
+            type="button"
+            aria-label={title}
+            disabled={disabled}
+            onMouseDown={(event) => {
+              event.preventDefault()
+              transform(run)
+            }}
+            className={cn(
+              'rounded p-1.5 text-muted-foreground transition-colors',
+              'hover:bg-muted hover:text-foreground',
+              'disabled:pointer-events-none disabled:opacity-50'
+            )}
+          >
+            <Icon className="size-4" />
+          </button>
+        </Tooltip>
+      ))}
+
+      <span className="mx-1 h-4 w-px bg-border" />
+
+      <Tooltip label="Attach an image">
         <button
-          key={title}
           type="button"
-          title={title}
-          aria-label={title}
+          aria-label="Attach an image"
           disabled={disabled}
           onMouseDown={(event) => {
             event.preventDefault()
-            transform(run)
+            onAttach()
           }}
           className={cn(
             'rounded p-1.5 text-muted-foreground transition-colors',
@@ -472,29 +494,9 @@ function Toolbar({
             'disabled:pointer-events-none disabled:opacity-50'
           )}
         >
-          <Icon className="size-4" />
+          <ImageIcon className="size-4" />
         </button>
-      ))}
-
-      <span className="mx-1 h-4 w-px bg-border" />
-
-      <button
-        type="button"
-        title="Attach an image"
-        aria-label="Attach an image"
-        disabled={disabled}
-        onMouseDown={(event) => {
-          event.preventDefault()
-          onAttach()
-        }}
-        className={cn(
-          'rounded p-1.5 text-muted-foreground transition-colors',
-          'hover:bg-muted hover:text-foreground',
-          'disabled:pointer-events-none disabled:opacity-50'
-        )}
-      >
-        <ImageIcon className="size-4" />
-      </button>
+      </Tooltip>
     </div>
   )
 }

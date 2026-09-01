@@ -20,12 +20,13 @@ import {
   Trash2
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
+import { Tooltip } from '@/components/ui/tooltip'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsCount, TabsList, TabsPanel, TabsTab } from '@/components/ui/tabs'
 import { errorMessage } from '@/lib/errors'
-import { navigate, replace, type ReviewTab } from '@/lib/router'
+import { navigate, replace, type DiffFocus, type ReviewTab } from '@/lib/router'
 import { useReviewComments } from '../comments/use-comments'
 import { ReviewCommitsTab } from './review-commits-tab'
 import { ReviewConversationTab } from './review-conversation-tab'
@@ -38,9 +39,11 @@ import type { Review } from '@shared/schemas'
 interface ReviewDetailProps {
   reviewId: number
   tab: ReviewTab
+  /** A line of the diff to scroll to, when arriving from a conversation thread. */
+  focus?: DiffFocus
 }
 
-export function ReviewDetail({ reviewId, tab }: ReviewDetailProps) {
+export function ReviewDetail({ reviewId, tab, focus }: ReviewDetailProps) {
   const { data: review, error, isLoading } = useReview(reviewId)
   const { updateReview } = useReviewMutations()
   const commits = useReviewCommits(reviewId)
@@ -148,16 +151,17 @@ export function ReviewDetail({ reviewId, tab }: ReviewDetailProps) {
             >
               {isOpen ? 'Close review' : 'Reopen'}
             </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="text-muted-foreground hover:text-destructive"
-              title="Delete review"
-              aria-label="Delete review"
-              onClick={() => setRemoving(review)}
-            >
-              <Trash2 />
-            </Button>
+            <Tooltip label="Delete this review">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="text-muted-foreground hover:text-destructive"
+                aria-label="Delete review"
+                onClick={() => setRemoving(review)}
+              >
+                <Trash2 />
+              </Button>
+            </Tooltip>
           </div>
         </div>
       </div>
@@ -171,6 +175,8 @@ export function ReviewDetail({ reviewId, tab }: ReviewDetailProps) {
       <Tabs
         value={tab}
         onValueChange={(next) =>
+          // No focus: clicking a tab is a fresh arrival, not a jump to a line
+          // someone asked for a moment ago.
           replace({ name: 'review', reviewId, tab: next as ReviewTab })
         }
       >
@@ -196,7 +202,7 @@ export function ReviewDetail({ reviewId, tab }: ReviewDetailProps) {
           <ReviewCommitsTab review={review} />
         </TabsPanel>
         <TabsPanel value="files">
-          <ReviewFilesTab review={review} />
+          <ReviewFilesTab review={review} focus={focus} />
         </TabsPanel>
       </Tabs>
 

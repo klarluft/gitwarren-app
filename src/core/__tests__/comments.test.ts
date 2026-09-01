@@ -290,7 +290,7 @@ test('a line comment captures the line it was written against', async () => {
   assert.ok(thread.anchorSha)
 
   const [anchored] = await commentsService.listAnchored({ reviewId })
-  assert.deepEqual(anchored?.anchor, { state: 'anchored', line: 3 })
+  assert.deepEqual(anchored?.anchor, { state: 'anchored', line: 3, startLine: null })
 })
 
 test('a comment follows its line when the branch grows above it', async () => {
@@ -307,9 +307,47 @@ test('a comment follows its line when the branch grows above it', async () => {
   git(checkout, 'commit', '-m', 'insert above')
 
   const [anchored] = await commentsService.listAnchored({ reviewId })
-  assert.deepEqual(anchored?.anchor, { state: 'moved', line: 4 })
+  assert.deepEqual(anchored?.anchor, { state: 'moved', line: 4, startLine: null })
 
   git(checkout, 'reset', '--hard', 'HEAD~1')
+})
+
+test('a comment can be about a block of lines, and is snapshotted across it', async () => {
+  const thread = await commentsService.createThread(
+    { reviewId, body: 'This whole block', filePath: 'app.ts', startLine: 1, line: 3 },
+    claude
+  )
+
+  assert.equal(thread.startLine, 1)
+  assert.equal(thread.line, 3)
+  // The anchor is the last line of the range - that is the one the block
+  // follows when the code moves.
+  assert.equal(thread.anchorText, 'const c = 3')
+  assert.deepEqual(
+    thread.anchorSnapshot?.lines.map((line) => line.content),
+    ['const a = 1', 'const b = 2', 'const c = 3']
+  )
+
+  const [anchored] = await commentsService.listAnchored({ reviewId })
+  assert.deepEqual(anchored?.anchor, { state: 'anchored', line: 3, startLine: 1 })
+})
+
+test('a range of one line is stored as a single-line comment', async () => {
+  const thread = await commentsService.createThread(
+    { reviewId, body: 'Just this one', filePath: 'app.ts', startLine: 3, line: 3 },
+    claude
+  )
+
+  assert.equal(thread.startLine, null)
+})
+
+test('a range cannot end before it starts', async () => {
+  await expectError('INVALID_INPUT', () =>
+    commentsService.createThread(
+      { reviewId, body: 'Backwards', filePath: 'app.ts', startLine: 3, line: 1 },
+      claude
+    )
+  )
 })
 
 test('a comment on rewritten code is reported as outdated rather than moved', async () => {
@@ -323,7 +361,7 @@ test('a comment on rewritten code is reported as outdated rather than moved', as
   git(checkout, 'commit', '-m', 'change c')
 
   const [anchored] = await commentsService.listAnchored({ reviewId })
-  assert.deepEqual(anchored?.anchor, { state: 'outdated', line: null })
+  assert.deepEqual(anchored?.anchor, { state: 'outdated', line: null, startLine: null })
 
   git(checkout, 'reset', '--hard', 'HEAD~1')
 })
@@ -354,7 +392,7 @@ test('the snapshot survives the code being rewritten under it', async () => {
   // The anchor is gone, so there is nowhere in the current diff to draw this
   // comment. Without the snapshot the discussion would be stranded next to
   // nothing; with it, a reader can still see what was being objected to.
-  assert.deepEqual(anchored?.anchor, { state: 'outdated', line: null })
+  assert.deepEqual(anchored?.anchor, { state: 'outdated', line: null, startLine: null })
   assert.deepEqual(
     anchored?.anchorSnapshot?.lines.map((line) => line.content),
     ['const a = 1', 'const b = 2', 'const c = 3']
@@ -401,7 +439,7 @@ test('commenting on a line outside the diff is kept, and says so', async () => {
   assert.equal(thread.anchorSnapshot, null)
 
   const [anchored] = await commentsService.listAnchored({ reviewId })
-  assert.deepEqual(anchored?.anchor, { state: 'outdated', line: null })
+  assert.deepEqual(anchored?.anchor, { state: 'outdated', line: null, startLine: null })
 })
 
 test('a context line inside the diff is anchorable, not just a changed one', async () => {
@@ -415,7 +453,7 @@ test('a context line inside the diff is anchorable, not just a changed one', asy
   assert.equal(thread.anchorText, 'const a = 1')
 
   const [anchored] = await commentsService.listAnchored({ reviewId })
-  assert.deepEqual(anchored?.anchor, { state: 'anchored', line: 1 })
+  assert.deepEqual(anchored?.anchor, { state: 'anchored', line: 1, startLine: null })
 })
 
 test('review-level threads have no anchor to resolve', async () => {

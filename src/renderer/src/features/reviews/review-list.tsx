@@ -5,6 +5,7 @@
 import { useState } from 'react'
 import { AlertCircle, ArrowRight, GitPullRequestArrow, Plus, RefreshCw } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
+import { Tooltip } from '@/components/ui/tooltip'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -55,16 +56,17 @@ export function ReviewList({ repositoryId }: { repositoryId: number }) {
         </div>
 
         <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => void refresh()}
-            disabled={isLoading}
-            title="Reload reviews"
-            aria-label="Refresh"
-          >
-            <RefreshCw className={isRefreshing ? 'animate-spin' : undefined} />
-          </Button>
+          <Tooltip label="Reload reviews">
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => void refresh()}
+              disabled={isLoading}
+              aria-label="Refresh"
+            >
+              <RefreshCw className={isRefreshing ? 'animate-spin' : undefined} />
+            </Button>
+          </Tooltip>
           <Button onClick={() => setFormOpen(true)}>
             <Plus />
             New review

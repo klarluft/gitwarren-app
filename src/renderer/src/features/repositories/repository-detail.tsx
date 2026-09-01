@@ -9,6 +9,7 @@ import { useState } from 'react'
 import { AlertCircle, ArrowLeft, FolderOpen, Pencil } from 'lucide-react'
 import useSWR from 'swr'
 import { Button } from '@/components/ui/button'
+import { Tooltip } from '@/components/ui/tooltip'
 import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { api, CACHE_KEYS } from '@/lib/api'
@@ -93,25 +94,27 @@ export function RepositoryDetail({ repositoryId }: { repositoryId: number }) {
           </div>
 
           <div className="flex shrink-0 items-center gap-1">
-            <Button
-              variant="ghost"
-              size="icon"
-              title={missing ? 'Folder is missing' : 'Show in file manager'}
-              aria-label="Show in file manager"
-              disabled={missing}
-              onClick={() => void api.system.revealPath(repository.path)}
-            >
-              <FolderOpen />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              title="Edit repository"
-              aria-label="Edit repository"
-              onClick={() => setEditing(true)}
-            >
-              <Pencil />
-            </Button>
+            <Tooltip label={missing ? 'Folder is missing' : 'Show in file manager'}>
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Show in file manager"
+                disabled={missing}
+                onClick={() => void api.system.revealPath(repository.path)}
+              >
+                <FolderOpen />
+              </Button>
+            </Tooltip>
+            <Tooltip label="Edit repository">
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Edit repository"
+                onClick={() => setEditing(true)}
+              >
+                <Pencil />
+              </Button>
+            </Tooltip>
           </div>
         </div>
       </div>

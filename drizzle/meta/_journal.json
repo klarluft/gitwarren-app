@@ -36,6 +36,13 @@
       "when": 1788284177105,
       "tag": "0004_attachments",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1788296212025,
+      "tag": "0005_comment_ranges",
+      "breakpoints": true
     }
   ]
 }

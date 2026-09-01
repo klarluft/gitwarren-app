@@ -38,7 +38,13 @@ export type AnchorState = 'anchored' | 'moved' | 'outdated'
 export interface ThreadAnchor {
   filePath: string
   side: DiffSide
+  /**
+   * The last line of the comment's range, and the one the text anchor is for.
+   * A single-line comment is a range of one.
+   */
   line: number
+  /** First line of the range; null (or equal to `line`) for a single line. */
+  startLine?: number | null
   /** The line's text when the thread was opened; null if it was never captured. */
   anchorText: string | null
 }
@@ -47,9 +53,19 @@ export interface ResolvedAnchor {
   state: AnchorState
   /** Line on `side` to render against now. Null when outdated. */
   line: number | null
+  /**
+   * First line of the range, moved by the same amount as `line`.
+   *
+   * Only the last line is re-found by its text; the rest of the range follows
+   * it by keeping the span the same length. Re-finding both ends independently
+   * would let a range silently grow or invert when one of them matched
+   * somewhere unhelpful, and a comment that claims to cover code it was never
+   * about is worse than one that is a line off.
+   */
+  startLine: number | null
 }
 
-const OUTDATED: ResolvedAnchor = { state: 'outdated', line: null }
+const OUTDATED: ResolvedAnchor = { state: 'outdated', line: null, startLine: null }
 
 /** Line numbers live in a different field per side; every read goes through here. */
 function numberOn(line: DiffLine, side: DiffSide): number | null {
@@ -82,9 +98,17 @@ export function resolveAnchor(file: FileDiff | undefined, anchor: ThreadAnchor):
     }
   }
 
+  /** Keep the range the length it was written at; see `ResolvedAnchor`. */
+  const span = Math.max(anchor.line - (anchor.startLine ?? anchor.line), 0)
+  const withRange = (state: AnchorState, line: number): ResolvedAnchor => ({
+    state,
+    line,
+    startLine: span === 0 ? null : Math.max(line - span, 1)
+  })
+
   const atStoredLine = lines.find((line) => numberOn(line, anchor.side) === anchor.line)
   if (atStoredLine?.content === anchor.anchorText) {
-    return { state: 'anchored', line: anchor.line }
+    return withRange('anchored', anchor.line)
   }
 
   // With several identical lines - a lone `}` is the common case - the one
@@ -104,7 +128,7 @@ export function resolveAnchor(file: FileDiff | undefined, anchor: ThreadAnchor):
   }
 
   if (bestLine === null) return OUTDATED
-  return { state: 'moved', line: bestLine }
+  return withRange('moved', bestLine)
 }
 
 /** True for a thread that is about a line rather than about the review overall. */

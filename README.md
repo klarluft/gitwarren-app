@@ -252,6 +252,15 @@ none of them costing anything until used:
   any other line.
 - **Copy path** and **open in your editor**, per file.
 
+Every icon-only control carries a real tooltip rather than a `title` attribute
+(`components/ui/tooltip.tsx`). The browser decides when to show a `title` —
+usually a second or more after the pointer stops — it cannot be styled, and it
+never appears for keyboard users at all; a button whose whole meaning is its
+label cannot afford any of that. One `TooltipProvider` at the root groups them,
+so the first tooltip waits and moving along a row of buttons then shows each
+immediately. `title` is still used for *supplementary* text: the full path
+behind a truncated one, the meaning of a badge.
+
 The unfolding costs one read of the whole file, taken the first time the
 reviewer asks and reused for every later expansion of the same file. It is
 deliberately not a line-range API: a range per click would be a git process per
@@ -329,7 +338,7 @@ src/
 │   ├── schemas.ts       zod schemas — the source of truth for validation
 │   ├── git.ts           read-only git shapes (types, not schemas — see below)
 │   ├── actors.ts        who wrote a comment; Human vs "<tool> (AI)"
-│   ├── comment-anchors.ts  re-finding a comment's line after the branch moves
+│   ├── comment-anchors.ts  re-finding a comment's lines after the branch moves
 │   ├── diff-gaps.ts     where a diff's hidden lines are, for unfolding them
 │   ├── validation.ts    one zod-error → AppError conversion, used everywhere
 │   ├── errors.ts        AppError + the error-code vocabulary
@@ -591,6 +600,38 @@ already on screen — which matters, because the *include uncommitted* switch
 produces a genuinely different diff with different line numbers — and
 `list_review_comments` anchors against a diff it reads itself, so an agent and
 the screen never disagree about where a comment sits.
+
+### Comments on a block of lines
+
+Press the `+` in the gutter and drag down it, or shift-click a second line, to
+comment on several lines at once. Agents get the same thing by passing
+`startLine` to `add_review_comment`.
+
+A range is stored as `startLine` plus `line`, where **`line` is the last line**
+— and that asymmetry is the design. Only one end carries an anchor text, and the
+rest of the range follows it by keeping the span the same length. Re-finding
+both ends independently would let a range quietly grow, shrink or invert when
+one of them matched somewhere unhelpful, and a comment that claims to cover code
+it was never about is worse than one sitting a line off. A range of one line is
+normalised to no range at all, so nothing downstream has to compare the two
+numbers to find out whether a comment is about a block.
+
+The diff marks every line a range covers with a bar in the gutter, and the
+thread itself renders under the last line — where the eye already is after
+dragging down to it.
+
+### Getting from the conversation back to the code
+
+Clicking a thread's file header in *Conversation* opens *Files changed*
+scrolled to that line, with the line marked for a couple of seconds. The target
+goes in the hash (`#/reviews/3/files/src%2Fapp.ts/head/42`), so it is a location
+like any other: it survives a reload and the back button works.
+
+The line in the URL is the **resolved** one, not the stored one — the
+conversation tab has already anchored the thread against the diff it is
+displaying, so a comment that has moved still lands on the code it is about. A
+thread whose line is gone from the diff falls back to scrolling to the file's
+card, which is where such a thread is listed.
 
 ### Images in comments
 

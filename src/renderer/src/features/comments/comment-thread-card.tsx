@@ -16,6 +16,7 @@ import { useState } from 'react'
 import { Check, CircleDot, MessageSquare, MoreHorizontal, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Tooltip } from '@/components/ui/tooltip'
 import { Markdown } from '@/components/markdown'
 import { errorMessage } from '@/lib/errors'
 import { cn } from '@/lib/utils'
@@ -211,26 +212,30 @@ function CommentRow({
 
           {!editing && (
             <div className="flex shrink-0 items-center gap-0.5">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 px-2 text-muted-foreground"
-                title="Edit this comment"
-                onClick={() => setEditing(true)}
-              >
-                <MoreHorizontal />
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 px-2 text-muted-foreground hover:text-destructive"
-                title={confirmingDelete ? 'Click again to delete' : 'Delete this comment'}
-                onClick={() => (confirmingDelete ? void remove() : setConfirmingDelete(true))}
-                onBlur={() => setConfirmingDelete(false)}
-              >
-                <Trash2 />
-                {confirmingDelete && <span className="text-xs">Sure?</span>}
-              </Button>
+              <Tooltip label="Edit this comment">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 text-muted-foreground"
+                  aria-label="Edit this comment"
+                  onClick={() => setEditing(true)}
+                >
+                  <MoreHorizontal />
+                </Button>
+              </Tooltip>
+              <Tooltip label={confirmingDelete ? 'Click again to delete' : 'Delete this comment'}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 text-muted-foreground hover:text-destructive"
+                  aria-label="Delete this comment"
+                  onClick={() => (confirmingDelete ? void remove() : setConfirmingDelete(true))}
+                  onBlur={() => setConfirmingDelete(false)}
+                >
+                  <Trash2 />
+                  {confirmingDelete && <span className="text-xs">Sure?</span>}
+                </Button>
+              </Tooltip>
             </div>
           )}
         </div>

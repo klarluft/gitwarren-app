@@ -36,7 +36,7 @@ import {
   type AnchorState,
   type DiffSide
 } from '../../shared/comment-anchors.js'
-import { snippetAt } from '../../shared/comment-snippets.js'
+import { contextForRange, snippetAt } from '../../shared/comment-snippets.js'
 import { parseWithSchema as parse } from '../../shared/validation.js'
 import {
   anchorSnapshotSchema,
@@ -145,6 +145,7 @@ function toThread(row: CommentThreadRow, threadComments: Comment[]): CommentThre
     filePath: row.filePath,
     side: row.side,
     line: row.line,
+    startLine: row.startLine,
     anchorText: row.anchorText,
     anchorSha: row.anchorSha,
     anchorSnapshot: toSnapshot(row.anchorSnapshot),
@@ -235,7 +236,8 @@ async function captureAnchor(
   review: ReviewRow,
   filePath: string,
   side: DiffSide,
-  line: number
+  line: number,
+  startLine: number | null
 ): Promise<{ anchorText: string | null; anchorSha: string | null; snapshot: AnchorSnapshot | null }> {
   const diff = await readReviewDiff(repositoryPath, review.baseRef, review.headRef, {
     includeUncommitted: true
@@ -249,7 +251,13 @@ async function captureAnchor(
   return {
     anchorText: found?.content ?? null,
     anchorSha: diff.head.sha,
-    snapshot: found === undefined ? null : snippetAt(file, side, line)
+    // A comment on a block is snapshotted across the whole block, so an
+    // outdated one is still shown against everything it was about rather than
+    // against its last line alone.
+    snapshot:
+      found === undefined
+        ? null
+        : snippetAt(file, side, line, contextForRange(startLine, line))
   }
 }
 
@@ -320,6 +328,7 @@ export const commentsService = {
           filePath: thread.filePath,
           side: thread.side,
           line: thread.line,
+          startLine: thread.startLine,
           anchorText: thread.anchorText
         })
       }
@@ -334,17 +343,32 @@ export const commentsService = {
    * the UI to render as a blank card.
    */
   async createThread(input: unknown, actor: CommentAuthor): Promise<CommentThread> {
-    const { reviewId, body: written, filePath, side, line } = parse(createThreadInputSchema, input)
+    const {
+      reviewId,
+      body: written,
+      filePath,
+      side,
+      line,
+      startLine: requestedStart
+    } = parse(createThreadInputSchema, input)
     const review = requireReview(reviewId)
     const repositoryPath = requireRepository(review.repositoryId).path
 
     const body = await ingestBodyAttachments(written, { repositoryRoot: repositoryPath })
 
+    // A range of one is not a range. Normalising here means every consumer can
+    // read "startLine !== null" as "this comment is about a block", instead of
+    // each of them having to compare the two numbers.
+    const startLine =
+      requestedStart === undefined || line === undefined || requestedStart >= line
+        ? null
+        : requestedStart
+
     let anchorText: string | null = null
     let anchorSha: string | null = null
     let anchorSnapshot: string | null = null
     if (filePath !== undefined && line !== undefined) {
-      const captured = await captureAnchor(repositoryPath, review, filePath, side, line)
+      const captured = await captureAnchor(repositoryPath, review, filePath, side, line, startLine)
       anchorText = captured.anchorText
       anchorSha = captured.anchorSha
       anchorSnapshot = captured.snapshot === null ? null : JSON.stringify(captured.snapshot)
@@ -361,6 +385,7 @@ export const commentsService = {
           filePath: filePath ?? null,
           side: filePath === undefined ? null : side,
           line: line ?? null,
+          startLine,
           anchorText,
           anchorSha,
           anchorSnapshot,

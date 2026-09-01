@@ -357,7 +357,10 @@ export const commentThreadSchema = z.object({
   reviewId: reviewIdSchema,
   filePath: z.string().nullable(),
   side: diffSideSchema.nullable(),
+  /** Last line of the comment's range - a single-line comment is a range of one. */
   line: z.number().int().positive().nullable(),
+  /** First line of the range. Null when the comment is about one line. */
+  startLine: z.number().int().positive().nullable(),
   /** The line's text when the thread was opened; see `shared/comment-anchors.ts`. */
   anchorText: z.string().nullable(),
   /** Head sha at that moment, so the UI can say what was being looked at. */
@@ -395,11 +398,30 @@ export const createThreadInputSchema = z
      * remarking on a line the change deleted.
      */
     side: diffSideSchema.optional().default('head'),
-    line: z.number().int().positive().optional()
+    /**
+     * The line the comment is about; the *last* line of the range when it is
+     * about several. The anchor text is taken from this one, so it is the line
+     * the comment follows if the code moves.
+     */
+    line: z.number().int().positive().optional(),
+    /**
+     * First line of the range, for a comment about a block of code rather than
+     * a single line. Omit for one line. Must be on the same side and no later
+     * than `line`.
+     */
+    startLine: z.number().int().positive().optional()
   })
   .refine((value) => (value.filePath === undefined) === (value.line === undefined), {
     message: 'A line comment needs both a file and a line number.',
     path: ['line']
+  })
+  .refine((value) => value.startLine === undefined || value.line !== undefined, {
+    message: 'A range needs a line to end at.',
+    path: ['startLine']
+  })
+  .refine((value) => value.startLine === undefined || value.startLine <= (value.line ?? 0), {
+    message: 'The range has to start at or before the line it ends on.',
+    path: ['startLine']
   })
 
 export const replyToThreadInputSchema = z.object({

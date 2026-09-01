@@ -24,7 +24,7 @@
  * shown slightly out of place. A file with a collapsed body still shows its
  * comment count, so a discussion is never hidden behind a fold.
  */
-import { Fragment, useCallback, useMemo, useState, type ReactNode } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   Check,
   ChevronDown,
@@ -44,10 +44,12 @@ import {
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
+import { Tooltip } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { CommentComposer } from '../comments/comment-composer'
 import { CommentThreadCard } from '../comments/comment-thread-card'
 import { DiffSnippet } from './diff-snippet'
+import { lineDomId } from './dom-ids'
 import { useReviewFile } from './use-reviews'
 import type { CommentMutations } from '../comments/use-comments'
 import { threadSnippet } from '@shared/comment-snippets'
@@ -100,6 +102,17 @@ export function FileStatusIcon({
 }) {
   const Icon = STATUS_ICONS[status]
   return <Icon className={cn('size-4 shrink-0', STATUS_COLOURS[status], className)} />
+}
+
+/**
+ * A run of lines on one side of the diff: what a comment covers, and what the
+ * reviewer is dragging out before the composer opens. `startLine === line` is
+ * an ordinary single-line comment, which is most of them.
+ */
+export interface LineRange {
+  side: DiffSide
+  startLine: number
+  line: number
 }
 
 /** A thread together with where it lands in the diff being displayed. */
@@ -159,18 +172,35 @@ function isExpandable(file: FileDiff): boolean {
 export function FileDiffCard({
   file,
   comments,
-  source
+  source,
+  focus,
+  marked
 }: {
   file: FileDiff
   comments?: DiffComments
   source?: DiffFileSource
+  /** A line in *this* file someone has navigated to; opens the card if folded. */
+  focus?: { side: DiffSide; line: number }
+  /** The same line while it is still worth pointing at. */
+  marked?: { side: DiffSide; line: number }
 }) {
   const lineCount = file.hunks.reduce((total, hunk) => total + hunk.lines.length, 0)
-  const [expanded, setExpanded] = useState(lineCount <= COLLAPSE_ABOVE_LINES)
-  /** Which line the reviewer is currently writing a new comment on. */
-  const [composingOn, setComposingOn] = useState<{ side: DiffSide; line: number } | null>(null)
+  /** Null until the reviewer opens or closes the card themselves. */
+  const [toggled, setToggled] = useState<boolean | null>(null)
+  /** The lines the reviewer is writing a new comment on. */
+  const [composingOn, setComposingOn] = useState<LineRange | null>(null)
+  /** The range being dragged out right now, before the pointer comes up. */
+  const [dragging, setDragging] = useState<LineRange | null>(null)
   /** Head-side line numbers unfolded out of the gaps between the hunks. */
   const [revealed, setRevealed] = useState<ReadonlySet<number>>(() => new Set())
+
+  /**
+   * Derived rather than stored, so arriving at a line inside a folded file just
+   * opens it - no effect, no second render, and a card the reviewer has closed
+   * by hand stays closed.
+   */
+  const expanded = toggled ?? (focus !== undefined || lineCount <= COLLAPSE_ABOVE_LINES)
+  const setExpanded = setToggled
 
   const canExpand = source !== undefined && isExpandable(file)
   const text = useReviewFile(
@@ -190,6 +220,63 @@ export function FileDiffCard({
     },
     [text]
   )
+
+  /**
+   * Start commenting at a line, or grow the open range to reach it.
+   *
+   * Two gestures, both of which people already know from GitHub: press and
+   * drag the `+` down the gutter, or shift-click a second line. Shift-click
+   * keeps the first line of the existing range as the anchor, so the range
+   * only ever grows away from where the reviewer started.
+   */
+  const startSelection = useCallback(
+    (side: DiffSide, line: number, extend: boolean) => {
+      if (extend && composingOn && composingOn.side === side) {
+        const anchor = composingOn.startLine
+        setComposingOn({ side, startLine: Math.min(anchor, line), line: Math.max(anchor, line) })
+        return
+      }
+      setDragging({ side, startLine: line, line })
+    },
+    [composingOn]
+  )
+
+  const dragOver = useCallback((side: DiffSide, line: number) => {
+    setDragging((current) => {
+      if (!current || current.side !== side || current.line === line) return current
+      // `startLine` stays the line the drag began on; the pointer can be either
+      // side of it, and the range is normalised when the pointer comes up.
+      return { ...current, line }
+    })
+  }, [])
+
+  /**
+   * A drag ends wherever the pointer is released, which is often outside the
+   * button - or outside the card - so the listener goes on the window.
+   */
+  useEffect(() => {
+    if (!dragging) return
+
+    const finish = (): void => {
+      const startLine = Math.min(dragging.startLine, dragging.line)
+      const line = Math.max(dragging.startLine, dragging.line)
+      setDragging(null)
+      setComposingOn((current) =>
+        // Clicking the `+` of a composer that is already open on exactly those
+        // lines closes it again, which is how the button worked before ranges.
+        current && current.side === dragging.side && current.startLine === startLine && current.line === line
+          ? null
+          : { side: dragging.side, startLine, line }
+      )
+    }
+
+    window.addEventListener('pointerup', finish)
+    window.addEventListener('pointercancel', finish)
+    return () => {
+      window.removeEventListener('pointerup', finish)
+      window.removeEventListener('pointercancel', finish)
+    }
+  }, [dragging])
 
   // A shared constant rather than a fresh `[]`, so a file with no comments
   // does not hand the memo below a new array identity on every render.
@@ -218,11 +305,40 @@ export function FileDiffCard({
   const gapByHunk = useMemo(() => new Map(gaps.map((gap) => [gap.beforeHunk, gap])), [gaps])
   const tailGap = gapByHunk.get(file.hunks.length)
 
+  /**
+   * Every line a thread's range covers, so the diff can show how far a comment
+   * about a block reaches. The thread itself still renders under its last line.
+   */
+  const covered = useMemo(() => {
+    const lines = new Set<string>()
+    for (const thread of threads) {
+      const { line, startLine } = thread.anchor
+      if (line === null || startLine === null || thread.side === null) continue
+      for (let current = startLine; current <= line; current += 1) {
+        lines.add(`${thread.side}:${current}`)
+      }
+    }
+    return lines
+  }, [threads])
+
   const rowContext: RowContext = {
     placed,
     comments,
     composingOn,
     onCompose: setComposingOn,
+    onSelectStart: startSelection,
+    onSelectOver: dragOver,
+    // While the pointer is down the drag wins; after it comes up the composer's
+    // own range is what stays lit.
+    selection: dragging
+      ? {
+          side: dragging.side,
+          startLine: Math.min(dragging.startLine, dragging.line),
+          line: Math.max(dragging.startLine, dragging.line)
+        }
+      : composingOn,
+    covered,
+    marked: marked ?? null,
     filePath: file.path
   }
 
@@ -250,7 +366,7 @@ export function FileDiffCard({
       <div className="flex w-full items-center gap-2 pr-2">
         <button
           type="button"
-          onClick={() => setExpanded((current) => !current)}
+          onClick={() => setExpanded(!expanded)}
           disabled={!hasBody}
           aria-expanded={expanded}
           className={cn(
@@ -362,7 +478,10 @@ export function FileDiffCard({
 
       {expanded && hasBody && (
         <div className="border-t border-border">
-          <div className="overflow-x-auto">
+          {/* `@container` makes this element an inline-size container, which is
+              what lets a comment inside it be sized to the *visible* width
+              rather than to the width of the scrolled code. */}
+          <div className={cn('@container overflow-x-auto', dragging && 'select-none')}>
             <div className="min-w-max font-mono text-xs leading-5">
               {file.hunks.map((hunk, index) => {
                 const gap = gapByHunk.get(index)
@@ -479,19 +598,20 @@ function IconAction({
   icon: ReactNode
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={label}
-      aria-label={label}
-      className={cn(
-        'flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors',
-        'hover:bg-muted hover:text-foreground',
-        '[&_svg]:size-3.5 [&_svg]:shrink-0'
-      )}
-    >
-      {icon}
-    </button>
+    <Tooltip label={label}>
+      <button
+        type="button"
+        onClick={onClick}
+        aria-label={label}
+        className={cn(
+          'flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors',
+          'hover:bg-muted hover:text-foreground',
+          '[&_svg]:size-3.5 [&_svg]:shrink-0'
+        )}
+      >
+        {icon}
+      </button>
+    </Tooltip>
   )
 }
 
@@ -670,28 +790,40 @@ function ExpandButton({
   disabled: boolean
 }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      title={label}
-      aria-label={label}
-      className={cn(
-        'flex size-5 items-center justify-center rounded transition-colors',
-        'hover:bg-primary hover:text-primary-foreground disabled:opacity-50',
-        '[&_svg]:size-3 [&_svg]:shrink-0'
-      )}
-    >
-      {icon}
-    </button>
+    <Tooltip label={label}>
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={disabled}
+        aria-label={label}
+        className={cn(
+          'flex size-5 items-center justify-center rounded transition-colors',
+          'hover:bg-primary hover:text-primary-foreground disabled:opacity-50',
+          '[&_svg]:size-3 [&_svg]:shrink-0'
+        )}
+      >
+        {icon}
+      </button>
+    </Tooltip>
   )
 }
 
 interface RowContext {
   placed: Map<string, AnchoredThread[]>
   comments: DiffComments | undefined
-  composingOn: { side: DiffSide; line: number } | null
-  onCompose: (target: { side: DiffSide; line: number } | null) => void
+  /** The range the composer is open on, if any. */
+  composingOn: LineRange | null
+  onCompose: (target: LineRange | null) => void
+  /** Begin a selection at this line, or extend the open one when held. */
+  onSelectStart: (side: DiffSide, line: number, extend: boolean) => void
+  /** Drag the selection over this line. Ignored when nothing is being dragged. */
+  onSelectOver: (side: DiffSide, line: number) => void
+  /** Lines the reviewer is currently selecting or composing on. */
+  selection: LineRange | null
+  /** Lines already covered by an existing thread's range. */
+  covered: ReadonlySet<string>
+  /** The line arrived at from a conversation thread, marked briefly. */
+  marked: { side: DiffSide; line: number } | null
   filePath: string
 }
 
@@ -721,6 +853,11 @@ function LineRow({
   comments,
   composingOn,
   onCompose,
+  onSelectStart,
+  onSelectOver,
+  selection,
+  covered,
+  marked,
   filePath
 }: { line: DiffLine } & RowContext) {
   /**
@@ -732,20 +869,54 @@ function LineRow({
   const number = side === 'head' ? line.newNumber : line.oldNumber
 
   const threads = number === null ? [] : (placed.get(`${side}:${number}`) ?? [])
-  const composing =
-    number !== null && composingOn?.side === side && composingOn.line === number
+  // The composer opens under the *last* line of the range, where the eye is
+  // after dragging down it.
+  const composing = number !== null && composingOn?.side === side && composingOn.line === number
+  const selected =
+    number !== null &&
+    selection?.side === side &&
+    number >= selection.startLine &&
+    number <= selection.line
+  const isMarked = number !== null && marked?.side === side && marked.line === number
+  const inThread = number !== null && covered.has(`${side}:${number}`)
+
+  const rangeLabel =
+    composingOn && composingOn.startLine < composingOn.line
+      ? `lines ${composingOn.startLine}–${composingOn.line}`
+      : `line ${number ?? ''}`
 
   return (
     <>
       <div
+        id={number === null ? undefined : lineDomId(filePath, side, number)}
         className={cn(
           'group grid grid-cols-[3rem_3rem_1fr]',
-          line.type === 'insert' && 'bg-success/10',
-          line.type === 'delete' && 'bg-destructive/10'
+          // Backgrounds are mutually exclusive rather than layered: two
+          // background utilities on one element are resolved by stylesheet
+          // order, not by the order they are written here.
+          isMarked
+            ? 'bg-warning/25'
+            : selected
+              ? 'bg-primary/15'
+              : line.type === 'insert'
+                ? 'bg-success/10'
+                : line.type === 'delete'
+                  ? 'bg-destructive/10'
+                  : undefined,
+          // A box-shadow instead, so the marker for "a comment covers this
+          // line" can sit on top of whichever background won above.
+          inThread && 'shadow-[inset_3px_0_0_0_var(--color-primary)]'
         )}
       >
         <Gutter value={line.oldNumber} />
-        <div className="relative border-r border-border">
+        <div
+          className="relative border-r border-border"
+          // Extending a drag has to be caught on the row, not on the button:
+          // the pointer is held down, so it never enters another button.
+          onPointerEnter={() => {
+            if (number !== null) onSelectOver(side, number)
+          }}
+        >
           <span className="block select-none px-2 text-right tabular-nums text-muted-foreground/70">
             {line.newNumber ?? ''}
           </span>
@@ -754,13 +925,23 @@ function LineRow({
           {comments && number !== null && (
             <button
               type="button"
-              onClick={() => onCompose(composing ? null : { side, line: number })}
-              title={`Comment on ${side === 'head' ? 'line' : 'removed line'} ${number}`}
+              onPointerDown={(event) => {
+                // Stops the browser starting a text selection, which would
+                // otherwise highlight the code as the pointer is dragged.
+                event.preventDefault()
+                onSelectStart(side, number, event.shiftKey)
+              }}
+              onClick={(event) => {
+                // `detail === 0` is a click from the keyboard, which never
+                // produced a pointerdown; the pointer path is handled above.
+                if (event.detail === 0) onSelectStart(side, number, event.shiftKey)
+              }}
+              title={`Comment on ${side === 'head' ? 'line' : 'removed line'} ${number} — drag or shift-click for several`}
               aria-label={`Comment on line ${number} of ${filePath}`}
               className={cn(
                 'absolute left-0.5 top-1/2 hidden -translate-y-1/2 items-center justify-center rounded bg-primary p-0.5 text-primary-foreground shadow-sm',
                 'group-hover:flex focus-visible:flex',
-                composing && 'flex'
+                (composing || selected) && 'flex'
               )}
             >
               <Plus className="size-3" />
@@ -769,6 +950,9 @@ function LineRow({
         </div>
         <span
           data-selectable
+          onPointerEnter={() => {
+            if (number !== null) onSelectOver(side, number)
+          }}
           className={cn(
             'whitespace-pre px-3',
             line.type === 'insert' && 'text-success',
@@ -785,22 +969,31 @@ function LineRow({
       {(threads.length > 0 || composing) && comments && (
         // Breaks out of the monospace diff grid: a discussion is prose, and
         // reading it in a 12px mono column inside a horizontally scrolling
-        // container is miserable.
-        <div className="sticky left-0 flex w-full max-w-3xl flex-col gap-2 border-y border-border bg-muted/20 p-3 font-sans text-sm">
+        // container is miserable. The width is the *visible* width of that
+        // container (`cqi`), not the width of its scrolled contents, so the
+        // discussion stays inside the file card however long the lines are.
+        <div className="sticky left-0 flex w-[min(48rem,100cqi)] flex-col gap-2 border-y border-border bg-muted/20 p-3 font-sans text-sm">
           {threads.map((thread) => (
             <CommentThreadCard
               key={thread.id}
               thread={thread}
               mutations={comments.mutations}
               anchorState={thread.anchor.state}
+              location={
+                thread.anchor.startLine !== null && thread.anchor.line !== null ? (
+                  <span className="font-mono text-xs text-muted-foreground">
+                    lines {thread.anchor.startLine}–{thread.anchor.line}
+                  </span>
+                ) : null
+              }
             />
           ))}
 
-          {composing && number !== null && (
+          {composing && number !== null && composingOn && (
             <div className="rounded-lg border border-border bg-card p-3">
               <CommentComposer
                 autoFocus
-                placeholder={`Comment on line ${number}`}
+                placeholder={`Comment on ${rangeLabel}`}
                 onCancel={() => onCompose(null)}
                 onSubmit={async (body) => {
                   await comments.mutations.createThread({
@@ -808,7 +1001,10 @@ function LineRow({
                     body,
                     filePath,
                     side,
-                    line: number
+                    line: number,
+                    ...(composingOn.startLine < number
+                      ? { startLine: composingOn.startLine }
+                      : {})
                   })
                   onCompose(null)
                 }}

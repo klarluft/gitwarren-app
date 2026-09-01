@@ -5,6 +5,7 @@
  * a wider column than the others, because a diff needs the room and the rest of
  * the app reads better narrow.
  */
+import { TooltipProvider } from './components/ui/tooltip'
 import { UpdateBanner } from './components/update-banner'
 import { AgentAccessPanel } from './features/agent/agent-access-panel'
 import { RepositoryDetail } from './features/repositories/repository-detail'
@@ -17,25 +18,32 @@ export function App() {
   const route = useRoute()
 
   return (
-    <div className="flex h-full flex-col">
-      {/* Draggable strip so the frameless macOS title bar still moves the window. */}
-      <div className="titlebar-drag h-11 shrink-0" />
+    // One provider for the whole app: Base UI groups tooltips through it, so
+    // the first one waits and moving along a row of icon buttons then shows
+    // each immediately - which is the behaviour that makes a toolbar readable.
+    <TooltipProvider>
+      <div className="flex h-full flex-col">
+        {/* Draggable strip so the frameless macOS title bar still moves the window. */}
+        <div className="titlebar-drag h-11 shrink-0" />
 
-      <main
-        className={cn(
-          'mx-auto w-full flex-1 overflow-y-auto px-6 pb-10',
-          route.name === 'review' ? 'max-w-5xl' : 'max-w-3xl'
-        )}
-      >
-        <div className="mb-6">
-          <UpdateBanner />
-        </div>
+        <main
+          className={cn(
+            'mx-auto w-full flex-1 overflow-y-auto px-6 pb-10',
+            route.name === 'review' ? 'max-w-5xl' : 'max-w-3xl'
+          )}
+        >
+          <div className="mb-6">
+            <UpdateBanner />
+          </div>
 
-        {route.name === 'repositories' && <HomeScreen />}
-        {route.name === 'repository' && <RepositoryDetail repositoryId={route.repositoryId} />}
-        {route.name === 'review' && <ReviewDetail reviewId={route.reviewId} tab={route.tab} />}
-      </main>
-    </div>
+          {route.name === 'repositories' && <HomeScreen />}
+          {route.name === 'repository' && <RepositoryDetail repositoryId={route.repositoryId} />}
+          {route.name === 'review' && (
+            <ReviewDetail reviewId={route.reviewId} tab={route.tab} focus={route.focus} />
+          )}
+        </main>
+      </div>
+    </TooltipProvider>
   )
 }
 

@@ -66,6 +66,7 @@ function buildTimeline(threads: CommentThread[], files: FileDiff[] | undefined):
             filePath: thread.filePath,
             side: thread.side,
             line: thread.line,
+            startLine: thread.startLine,
             anchorText: thread.anchorText
           })
 
@@ -126,7 +127,27 @@ export function ReviewConversationTab({ review, onEdit }: ReviewConversationTabP
                 // A resolved thread is settled; its code should not shout as
                 // loudly as code still being argued about.
                 className={thread.resolvedAt !== null ? 'opacity-60' : undefined}
-                onOpen={() => replace({ name: 'review', reviewId: review.id, tab: 'files' })}
+                // Carries the line, so Files changed opens *at the code* rather
+                // than at the top of a page the reader then has to search.
+                // For an outdated thread the line will not be in the diff; the
+                // tab falls back to the file's card, which is where such a
+                // thread is listed.
+                onOpen={() =>
+                  replace({
+                    name: 'review',
+                    reviewId: review.id,
+                    tab: 'files',
+                    ...(snippet.line === null
+                      ? {}
+                      : {
+                          focus: {
+                            filePath: snippet.filePath,
+                            side: snippet.side,
+                            line: snippet.line
+                          }
+                        })
+                  })
+                }
               />
             ))}
           <CommentThreadCard thread={thread} mutations={mutations} />

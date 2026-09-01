@@ -29,6 +29,8 @@ interface DiffSnippetProps {
   side: DiffSide
   /** Line the comment sits on now, or where it used to sit when outdated. */
   line: number | null
+  /** First line of the range, when the comment is about a block of code. */
+  startLine?: number | null
   lines: DiffLine[]
   /** True when the snippet starts mid-hunk, so the lead-in is cut short. */
   clipped?: boolean
@@ -45,6 +47,7 @@ export function DiffSnippet({
   filePath,
   side,
   line,
+  startLine = null,
   lines,
   clipped = false,
   state = 'anchored',
@@ -56,14 +59,17 @@ export function DiffSnippet({
   // "was line" matches how the Files changed tab labels a thread it can no
   // longer place: the number is where the comment used to sit, not where the
   // reader will find it now.
+  const range =
+    startLine !== null && line !== null && startLine < line ? `${startLine}–${line}` : line
+  const noun = startLine !== null && line !== null && startLine < line ? 'lines' : 'line'
   const lineLabel =
     line === null
       ? null
       : state === 'outdated'
-        ? `was line ${line}`
+        ? `was ${noun} ${range}`
         : side === 'base'
-          ? `removed line ${line}`
-          : `line ${line}`
+          ? `removed ${noun} ${range}`
+          : `${noun} ${range}`
 
   return (
     <div className={cn('overflow-hidden rounded-md border border-border bg-muted/20', className)}>
