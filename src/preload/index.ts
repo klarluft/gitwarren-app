@@ -12,11 +12,12 @@ import {
   IPC_CHANNELS,
   type AppInfo,
   type AttachmentIngestInput,
+  type EditorList,
   type GitWarrenApi,
   type IpcResult,
   type UpdateStatus
 } from '../shared/api.js'
-import type { RepositoryRefs, ReviewCommits, ReviewDiff } from '../shared/git.js'
+import type { FileContent, RepositoryRefs, ReviewCommits, ReviewDiff } from '../shared/git.js'
 import type {
   AddRepositoryInput,
   Attachment,
@@ -28,6 +29,7 @@ import type {
   GetReviewInput,
   ListCommentsInput,
   ListReviewsInput,
+  OpenReviewFileInput,
   RemoveCommentInput,
   RemoveRepositoryInput,
   RemoveReviewInput,
@@ -38,6 +40,7 @@ import type {
   Review,
   ReviewCommitsInput,
   ReviewDiffInput,
+  ReviewFileInput,
   ReviewWithRepository,
   SetThreadResolvedInput,
   UpdateCommentInput,
@@ -74,7 +77,10 @@ const api: GitWarrenApi = {
     remove: (input: RemoveReviewInput) => invoke<{ id: number }>(IPC_CHANNELS.reviewsRemove, input),
     commits: (input: ReviewCommitsInput) =>
       invoke<ReviewCommits>(IPC_CHANNELS.reviewsCommits, input),
-    diff: (input: ReviewDiffInput) => invoke<ReviewDiff>(IPC_CHANNELS.reviewsDiff, input)
+    diff: (input: ReviewDiffInput) => invoke<ReviewDiff>(IPC_CHANNELS.reviewsDiff, input),
+    file: (input: ReviewFileInput) => invoke<FileContent>(IPC_CHANNELS.reviewsFile, input),
+    openInEditor: (input: OpenReviewFileInput) =>
+      invoke<void>(IPC_CHANNELS.reviewsOpenInEditor, input)
   },
   comments: {
     list: (input: ListCommentsInput) => invoke<CommentThread[]>(IPC_CHANNELS.commentsList, input),
@@ -95,7 +101,8 @@ const api: GitWarrenApi = {
   system: {
     pickDirectory: () => invoke<string | null>(IPC_CHANNELS.systemPickDirectory),
     revealPath: (path: string) => invoke<void>(IPC_CHANNELS.systemRevealPath, path),
-    appInfo: () => invoke<AppInfo>(IPC_CHANNELS.systemAppInfo)
+    appInfo: () => invoke<AppInfo>(IPC_CHANNELS.systemAppInfo),
+    editors: () => invoke<EditorList>(IPC_CHANNELS.systemEditors)
   },
   updates: {
     getStatus: () => invoke<UpdateStatus>(IPC_CHANNELS.updatesGetStatus),

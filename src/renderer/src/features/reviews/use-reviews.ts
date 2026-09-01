@@ -13,9 +13,10 @@
  * which is honest about when the app looks at the disk.
  */
 import useSWR, { useSWRConfig } from 'swr'
-import { useCallback } from 'react'
+import { useCallback, useState } from 'react'
 import { api, CACHE_KEYS, CACHE_PREFIXES } from '@/lib/api'
-import type { RepositoryRefs, ReviewCommits, ReviewDiff } from '@shared/git'
+import type { EditorList } from '@shared/api'
+import type { FileContent, RepositoryRefs, ReviewCommits, ReviewDiff } from '@shared/git'
 import type {
   CreateReviewInput,
   Review,
@@ -96,6 +97,58 @@ export function useReviewDiff(reviewId: number, includeUncommitted: boolean): Li
       LIVE_READ_OPTIONS
     )
   )
+}
+
+export interface FileContentState {
+  content: FileContent | undefined
+  error: unknown
+  isLoading: boolean
+  /** True once `load` has been called; the read is not started before that. */
+  requested: boolean
+  /** Ask for the file. Idempotent - later calls are no-ops. */
+  load: () => void
+}
+
+/**
+ * One file of the diff, read whole so its hidden lines can be unfolded.
+ *
+ * Nothing is read until the reviewer asks for it. Files-changed renders every
+ * file on screen at once, and reading each one up front would mean a git
+ * process per file for context most reviewers never open.
+ */
+export function useReviewFile(
+  /** Null for a file that cannot be expanded at all - binary, deleted, clipped. */
+  reviewId: number | null,
+  path: string,
+  includeUncommitted: boolean
+): FileContentState {
+  const [requested, setRequested] = useState(false)
+  const result = useSWR<FileContent, unknown>(
+    requested && reviewId !== null
+      ? CACHE_KEYS.reviewFile(reviewId, path, includeUncommitted)
+      : null,
+    () => api.reviews.file({ id: reviewId as number, path, includeUncommitted }),
+    LIVE_READ_OPTIONS
+  )
+
+  return {
+    content: result.data,
+    error: result.error,
+    isLoading: result.isLoading,
+    requested,
+    load: useCallback(() => setRequested(true), [])
+  }
+}
+
+/**
+ * Code editors this machine has. Probed in the main process and cached there
+ * for the run, so this is a single read shared by every file card.
+ */
+export function useEditors(): EditorList | undefined {
+  return useSWR<EditorList, unknown>(CACHE_KEYS.editors, () => api.system.editors(), {
+    ...LIVE_READ_OPTIONS,
+    revalidateOnMount: true
+  }).data
 }
 
 /** Branches, tags and worktrees for the endpoint pickers. */

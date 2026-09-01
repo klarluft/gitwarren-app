@@ -142,6 +142,23 @@ export interface FileDiff {
   hasUncommittedChanges: boolean
 }
 
+/**
+ * One file's head-side text, read whole so the UI can show the context a
+ * three-line unified diff leaves out. See `readReviewFile` for why the whole
+ * file crosses at once rather than a range per expander.
+ */
+export interface FileContent {
+  path: string
+  /** Where the text came from - the worktree on disk, or a committed blob. */
+  source: 'worktree' | 'commit'
+  lines: string[]
+  /** Lines past the ceiling were dropped; the file is longer than `lines`. */
+  truncated: boolean
+  isBinary: boolean
+  /** Set when the file could not be read at all - deleted, or never committed. */
+  error: string | null
+}
+
 /** How the two endpoints of a review resolved against the repository right now. */
 export interface CompareEndpoint {
   ref: string

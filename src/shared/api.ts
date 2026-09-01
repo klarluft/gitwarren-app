@@ -7,7 +7,7 @@
  * this file is transport, not behaviour.
  */
 import type { SerializedAppError } from './errors.js'
-import type { RepositoryRefs, ReviewCommits, ReviewDiff } from './git.js'
+import type { FileContent, RepositoryRefs, ReviewCommits, ReviewDiff } from './git.js'
 import type {
   AddRepositoryInput,
   Attachment,
@@ -19,6 +19,7 @@ import type {
   GetReviewInput,
   ListCommentsInput,
   ListReviewsInput,
+  OpenReviewFileInput,
   RemoveCommentInput,
   RemoveRepositoryInput,
   RemoveReviewInput,
@@ -29,6 +30,7 @@ import type {
   Review,
   ReviewCommitsInput,
   ReviewDiffInput,
+  ReviewFileInput,
   ReviewWithRepository,
   SetThreadResolvedInput,
   UpdateCommentInput,
@@ -50,6 +52,8 @@ export const IPC_CHANNELS = {
   reviewsRemove: 'reviews:remove',
   reviewsCommits: 'reviews:commits',
   reviewsDiff: 'reviews:diff',
+  reviewsFile: 'reviews:file',
+  reviewsOpenInEditor: 'reviews:openInEditor',
   commentsList: 'comments:list',
   commentsCreateThread: 'comments:createThread',
   commentsReply: 'comments:reply',
@@ -59,6 +63,7 @@ export const IPC_CHANNELS = {
   systemPickDirectory: 'system:pickDirectory',
   systemRevealPath: 'system:revealPath',
   systemAppInfo: 'system:appInfo',
+  systemEditors: 'system:editors',
   attachmentsIngest: 'attachments:ingest',
   attachmentsPick: 'attachments:pick',
   updatesGetStatus: 'updates:getStatus',
@@ -122,6 +127,18 @@ export interface McpLaunchInfo {
   note?: string
 }
 
+/** One code editor GitWarren found installed. */
+export interface EditorInfo {
+  id: string
+  label: string
+}
+
+export interface EditorList {
+  editors: EditorInfo[]
+  /** Used when a caller does not name one. Null when nothing was found. */
+  defaultId: string | null
+}
+
 export type UpdateStatus =
   | { state: 'idle' }
   | { state: 'unsupported'; reason: string }
@@ -151,6 +168,14 @@ export interface GitWarrenApi {
     commits(input: ReviewCommitsInput): Promise<ReviewCommits>
     /** The merge-base diff, uncommitted work folded in unless asked otherwise. */
     diff(input: ReviewDiffInput): Promise<ReviewDiff>
+    /**
+     * One file's head-side text, whole. This is what lets the diff show the
+     * lines between its hunks; `includeUncommitted` must match the diff on
+     * screen so the expanded context comes from the same version of the file.
+     */
+    file(input: ReviewFileInput): Promise<FileContent>
+    /** Open a file of this review in the reviewer's editor, at a line. */
+    openInEditor(input: OpenReviewFileInput): Promise<void>
   }
   /**
    * Comments carry no author field in either direction. Anything sent over this
@@ -189,6 +214,12 @@ export interface GitWarrenApi {
     pickDirectory(): Promise<string | null>
     revealPath(path: string): Promise<void>
     appInfo(): Promise<AppInfo>
+    /**
+     * Code editors found on this machine, in the order the UI should offer
+     * them. Empty when none was recognised - opening a file then falls back to
+     * whatever the platform associates with it.
+     */
+    editors(): Promise<EditorList>
   }
   updates: {
     getStatus(): Promise<UpdateStatus>

@@ -204,6 +204,69 @@ test('uncommitted work can be excluded, leaving the committed diff', async () =>
   assert.equal(diff.workingTree?.isDirty, true)
 })
 
+test('a file can be read whole, from the worktree, to expand the diff', async () => {
+  const id = await createReview()
+  const content = await reviewsService.file({ id, path: 'a.txt', includeUncommitted: true })
+
+  assert.equal(content.error, null)
+  assert.equal(content.source, 'worktree')
+  assert.equal(content.isBinary, false)
+  // The uncommitted fourth line is there, because that is the version of the
+  // file the diff on screen was taken from.
+  assert.deepEqual(content.lines, ['one', 'TWO', 'three', 'four (uncommitted)'])
+})
+
+test('excluding uncommitted work reads the committed blob instead', async () => {
+  const id = await createReview()
+  const content = await reviewsService.file({ id, path: 'a.txt', includeUncommitted: false })
+
+  assert.equal(content.error, null)
+  assert.equal(content.source, 'commit')
+  assert.deepEqual(content.lines, ['one', 'TWO', 'three'])
+})
+
+test('a file outside the repository is refused rather than read', async () => {
+  const id = await createReview()
+  const content = await reviewsService.file({ id, path: '../../../etc/hosts' })
+
+  assert.ok(content.error)
+  assert.deepEqual(content.lines, [])
+})
+
+test('a file that is in no commit and on no disk reports why', async () => {
+  const id = await createReview()
+  const content = await reviewsService.file({ id, path: 'nothing-here.txt' })
+
+  assert.ok(content.error, 'a missing file should be reported, not thrown')
+})
+
+test('the absolute path of a file points into the worktree holding the head', async () => {
+  const id = await createReview()
+  const absolute = await reviewsService.absolutePath({ id, path: 'a.txt' })
+
+  // Compared by suffix: git reports the worktree by its canonical path, and on
+  // macOS the temporary directory reaches it through a `/var` symlink.
+  assert.ok(
+    absolute.endsWith(join('feature-worktree', 'a.txt')),
+    `expected a path in the feature worktree, got ${absolute}`
+  )
+  assert.ok(!absolute.includes(join('project', 'a.txt')), 'not the tracked checkout')
+})
+
+test('there is no absolute path for a file that only exists in a commit', async () => {
+  const id = await createReview()
+  await expectError('PATH_NOT_FOUND', () =>
+    reviewsService.absolutePath({ id, path: 'nothing-here.txt' })
+  )
+})
+
+test('a path trying to escape the repository never reaches the filesystem', async () => {
+  const id = await createReview()
+  await expectError('INVALID_INPUT', () =>
+    reviewsService.absolutePath({ id, path: '../outside.txt' })
+  )
+})
+
 test('refs report where a branch is checked out and whether it is dirty', async () => {
   const result = await repositoriesService.refs({ id: repositoryId })
 

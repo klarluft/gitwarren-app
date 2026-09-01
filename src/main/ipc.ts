@@ -15,12 +15,15 @@ import { reviewsService } from '../core/services/reviews.js'
 import { getDataDirectory, getDatabasePath } from '../core/paths.js'
 import { HUMAN_AUTHOR } from '../shared/actors.js'
 import { AppError } from '../shared/errors.js'
+import { parseWithSchema as parse } from '../shared/validation.js'
+import { openReviewFileInputSchema } from '../shared/schemas.js'
 import {
   IPC_CHANNELS,
   type AppInfo,
   type AttachmentIngestInput,
   type IpcResult
 } from '../shared/api.js'
+import { listEditors, openInEditor } from './editors.js'
 import { getMcpLaunchInfo } from './mcp-launch.js'
 import { checkForUpdates, getUpdateStatus, quitAndInstall } from './updater.js'
 
@@ -59,6 +62,17 @@ export function registerIpcHandlers(): void {
   handle(IPC_CHANNELS.reviewsRemove, (input) => reviewsService.remove(input))
   handle(IPC_CHANNELS.reviewsCommits, (input) => reviewsService.commits(input))
   handle(IPC_CHANNELS.reviewsDiff, (input) => reviewsService.diff(input))
+  handle(IPC_CHANNELS.reviewsFile, (input) => reviewsService.file(input))
+
+  // Two steps rather than one service call: *which* file on disk is review
+  // knowledge and belongs in the service, while launching an application is a
+  // main-process capability the service must not have - the MCP server imports
+  // that same service, and an agent must not be able to start processes here.
+  handle(IPC_CHANNELS.reviewsOpenInEditor, async (input) => {
+    const { line, editorId } = parse(openReviewFileInputSchema, input)
+    const absolute = await reviewsService.absolutePath(input)
+    await openInEditor(absolute, line, editorId)
+  })
 
   // Every comment write passes HUMAN_AUTHOR, and there is no way to reach these
   // channels except by typing into the app - the renderer has no other route to
@@ -129,6 +143,8 @@ export function registerIpcHandlers(): void {
     const failure = await shell.openPath(input)
     if (failure) throw new AppError('PATH_NOT_FOUND', failure)
   })
+
+  handle(IPC_CHANNELS.systemEditors, () => listEditors())
 
   handle(IPC_CHANNELS.systemAppInfo, (): AppInfo => ({
     version: app.getVersion(),

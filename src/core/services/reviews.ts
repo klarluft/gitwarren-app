@@ -17,7 +17,13 @@
 import { and, desc, eq } from 'drizzle-orm'
 import { getDatabase } from '../db/client.js'
 import { repositories, reviews, type RepositoryRow, type ReviewRow } from '../db/schema.js'
-import { readReviewCommits, readReviewDiff, resolveCompare } from '../git-compare.js'
+import {
+  readReviewCommits,
+  readReviewDiff,
+  readReviewFile,
+  resolveCompare,
+  resolveReviewFilePath
+} from '../git-compare.js'
 import { AppError } from '../../shared/errors.js'
 import { parseWithSchema as parse } from '../../shared/validation.js'
 import {
@@ -27,11 +33,12 @@ import {
   removeReviewInputSchema,
   reviewCommitsInputSchema,
   reviewDiffInputSchema,
+  reviewFileInputSchema,
   updateReviewInputSchema,
   type Review,
   type ReviewWithRepository
 } from '../../shared/schemas.js'
-import type { ReviewCommits, ReviewDiff } from '../../shared/git.js'
+import type { FileContent, ReviewCommits, ReviewDiff } from '../../shared/git.js'
 
 function toReview(row: ReviewRow): Review {
   return {
@@ -223,6 +230,36 @@ export const reviewsService = {
     const row = requireReview(id)
     const repository = requireRepository(row.repositoryId)
     return readReviewDiff(repository.path, row.baseRef, row.headRef, { includeUncommitted })
+  },
+
+  /**
+   * One file's head-side text, so the UI can expand the lines the diff hid.
+   *
+   * Read against the same version of the file the diff was taken from, which is
+   * what `includeUncommitted` selects - expanded context from the other version
+   * would silently disagree with the hunks it sits between.
+   */
+  async file(input: unknown): Promise<FileContent> {
+    const { id, path, includeUncommitted } = parse(reviewFileInputSchema, input)
+    const row = requireReview(id)
+    const repository = requireRepository(row.repositoryId)
+    return readReviewFile(repository.path, row.baseRef, row.headRef, path, { includeUncommitted })
+  },
+
+  /**
+   * Where a file of this review lives on disk.
+   *
+   * The renderer has no filesystem and no path module, so it cannot join the
+   * two halves itself - and it should not have to guess whether the head is
+   * checked out somewhere other than the repository path.
+   */
+  async absolutePath(input: unknown): Promise<string> {
+    const { id, path, includeUncommitted } = parse(reviewFileInputSchema, input)
+    const row = requireReview(id)
+    const repository = requireRepository(row.repositoryId)
+    return resolveReviewFilePath(repository.path, row.baseRef, row.headRef, path, {
+      includeUncommitted
+    })
   }
 }
 

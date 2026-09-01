@@ -25,6 +25,7 @@ Local AI agents get the same capabilities through an MCP server over stdio.
 - [Stack](#stack)
 - [Architecture](#architecture)
 - [Reviews](#reviews)
+- [Navigating a large diff](#navigating-a-large-diff)
 - [Development setup](#development-setup)
 - [Project layout](#project-layout)
 - [Data storage](#data-storage)
@@ -234,6 +235,60 @@ lines rather than the ambiguous `diff --git a/x b/x` line, and a pure rename
 carries no hunks at all yet still has to name both paths. Very large files are
 clipped for rendering but still report their true add/delete counts.
 
+### Navigating a large diff
+
+Files changed carries three things a long diff needs, all of them optional and
+none of them costing anything until used:
+
+- **A file tree** down the left, folded so a lone directory collapses into its
+  parent (`renderer/src` on one row). Clicking a file scrolls to it, and the row
+  for whatever is nearest the top of the page stays highlighted as you scroll.
+  The toggle beside it is remembered across restarts.
+- **Unfolding the lines between the hunks**, the way GitHub does. `git diff`
+  prints three lines of context, so most of a file is not on screen; the
+  expanders in the gutter reveal twenty lines at a time or the whole run, and
+  **Expand all lines** in the file header opens every gap at once. Unfolded
+  lines are ordinary context rows — a comment can be left on one exactly as on
+  any other line.
+- **Copy path** and **open in your editor**, per file.
+
+The unfolding costs one read of the whole file, taken the first time the
+reviewer asks and reused for every later expansion of the same file. It is
+deliberately not a line-range API: a range per click would be a git process per
+click, and reading the file once is also the only way to know where it *ends*,
+which no hunk header can say. The read follows the "include uncommitted" switch,
+because context taken from the other version of the file would not line up with
+the hunks it sits between. `src/shared/diff-gaps.ts` holds the arithmetic that
+decides where the hidden runs are and which line number each unfolded line gets;
+it is pure, and unit-tested against the shapes that get this wrong — a diff that
+does not start at line 1, and git's off-by-one convention for an empty range.
+
+### Opening a file in an editor
+
+`system.editors()` probes for VS Code, Cursor, Windsurf, Zed, Sublime Text and
+the JetBrains launcher, once per run: the application bundle in the usual
+locations, and the command on `PATH`. Whatever is found is offered in a picker
+next to the diff, and the choice is kept in `localStorage` — a preference of the
+person, not a fact about the review, and this app has no settings screen to put
+it on.
+
+Opening prefers the URL scheme the application registered for itself
+(`vscode://file/…:12`), which carries the line number and works whether or not
+the user ever installed the shell command; the CLI is the fallback, and the
+platform's default handler for the file is the fallback to that.
+
+Set `GITWARREN_EDITOR` to override, either with an id from the list above or
+with a command template:
+
+```sh
+GITWARREN_EDITOR='emacsclient +{line} {file}'
+```
+
+The file is resolved inside the worktree that holds the head branch, not
+necessarily the directory the repository was added from — the same rule the rest
+of the app follows. A file that exists only in a commit has nothing to open, and
+says so.
+
 ---
 
 ## Development setup
@@ -275,6 +330,7 @@ src/
 │   ├── git.ts           read-only git shapes (types, not schemas — see below)
 │   ├── actors.ts        who wrote a comment; Human vs "<tool> (AI)"
 │   ├── comment-anchors.ts  re-finding a comment's line after the branch moves
+│   ├── diff-gaps.ts     where a diff's hidden lines are, for unfolding them
 │   ├── validation.ts    one zod-error → AppError conversion, used everywhere
 │   ├── errors.ts        AppError + the error-code vocabulary
 │   └── api.ts           IPC channel names and the bridge's type
@@ -296,6 +352,7 @@ src/
 │   ├── ipc.ts           thin delegations to core/services
 │   ├── attachment-protocol.ts  serves gitwarren:// attachment images
 │   ├── updater.ts       electron-updater wiring
+│   ├── editors.ts       finds the user's code editor and opens a file in it
 │   └── mcp-launch.ts    computes this install's MCP launch command
 │
 ├── preload/           The only bridge into the renderer

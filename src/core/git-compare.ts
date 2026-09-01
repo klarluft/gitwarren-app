@@ -18,11 +18,13 @@
  * this app promises only to read.
  */
 import { readFile, stat } from 'node:fs/promises'
-import { join } from 'node:path'
+import { join, resolve, sep } from 'node:path'
 import { canonicalise, isDirectory, runGit, runGitRaw } from './git-exec.js'
 import { buildUntrackedFileDiff, parseUnifiedDiff } from './diff-parser.js'
+import { AppError } from '../shared/errors.js'
 import type {
   CompareEndpoint,
+  FileContent,
   FileDiff,
   GitCommit,
   GitRef,
@@ -574,5 +576,143 @@ async function readUntrackedFiles(worktreePath: string): Promise<FileDiff[]> {
         return buildUntrackedFileDiff(path, '', { isBinary: true })
       }
     })
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Whole-file reads, for expanding a diff's hidden context
+// ---------------------------------------------------------------------------
+
+/** Past this a file is not worth shipping across IPC to render as context. */
+const MAX_FILE_LINES = 20_000
+const MAX_FILE_BYTES = 4 * 1024 * 1024
+
+function emptyContent(path: string, error: string): FileContent {
+  return { path, source: 'commit', lines: [], truncated: false, isBinary: false, error }
+}
+
+/** Split file text into lines, dropping the empty tail a final newline leaves. */
+function toLines(text: string): { lines: string[]; truncated: boolean } {
+  const all = text.split('\n')
+  if (all.length > 0 && all[all.length - 1] === '') all.pop()
+  return { lines: all.slice(0, MAX_FILE_LINES), truncated: all.length > MAX_FILE_LINES }
+}
+
+/**
+ * Reject anything that is not a plain repository-relative path. These arrive
+ * from the renderer, and a `<sha>:<path>` lookup would happily follow `../` out
+ * of the repository - which this app has no business doing.
+ */
+export function isSafeRelativePath(path: string): boolean {
+  if (!path || path.startsWith('/') || path.startsWith('\\')) return false
+  if (/^[a-zA-Z]:/.test(path)) return false
+  return !path.split(/[\\/]/).includes('..')
+}
+
+/**
+ * The head-side text of one file in a review, whole.
+ *
+ * Sent in one go rather than a line range per click. A range API would mean a
+ * git process for every expander the reviewer touches, and the file is already
+ * either on disk or in the object database; reading it once makes every later
+ * expansion of that file instant and - the part hunk headers cannot supply -
+ * tells the UI where the file ends.
+ */
+export async function readReviewFile(
+  repositoryPath: string,
+  baseRef: string,
+  headRef: string,
+  filePath: string,
+  options: ReadDiffOptions
+): Promise<FileContent> {
+  if (!isSafeRelativePath(filePath)) {
+    return emptyContent(filePath, 'That is not a path inside this repository.')
+  }
+
+  const compare = await resolveCompare(repositoryPath, baseRef, headRef)
+  if (compare.error) return emptyContent(filePath, compare.error)
+
+  // Same rule as the diff: with uncommitted work folded in, the head side *is*
+  // the worktree, so the file has to be read from disk or the expanded context
+  // would not line up with the hunks around it.
+  const worktree =
+    options.includeUncommitted && compare.workingTree !== null ? compare.headWorktree : null
+
+  if (worktree) {
+    const absolute = join(worktree.path, filePath)
+    try {
+      const info = await stat(absolute)
+      if (!info.isFile()) throw new Error('not a file')
+      if (info.size > MAX_FILE_BYTES) {
+        return emptyContent(filePath, 'This file is too large to expand.')
+      }
+      const buffer = await readFile(absolute)
+      if (buffer.subarray(0, 8000).includes(0)) {
+        return { path: filePath, source: 'worktree', lines: [], truncated: false, isBinary: true, error: null }
+      }
+      const { lines, truncated } = toLines(buffer.toString('utf8'))
+      return { path: filePath, source: 'worktree', lines, truncated, isBinary: false, error: null }
+    } catch {
+      // Not on disk - deleted in the worktree, say. The committed blob below is
+      // still a truthful answer for the parts of the diff that came from it.
+    }
+  }
+
+  if (!compare.head.sha) return emptyContent(filePath, 'The head ref does not resolve to a commit.')
+
+  const result = await runGitRaw(['show', `${compare.head.sha}:${filePath}`], repositoryPath, {
+    maxBuffer: MAX_FILE_BYTES
+  })
+  if (result.code !== 0) {
+    return emptyContent(filePath, result.stderr.trim() || 'Could not read that file from git.')
+  }
+  if (result.stdout.includes('\0')) {
+    return { path: filePath, source: 'commit', lines: [], truncated: false, isBinary: true, error: null }
+  }
+
+  const { lines, truncated } = toLines(result.stdout)
+  return { path: filePath, source: 'commit', lines, truncated, isBinary: false, error: null }
+}
+
+/**
+ * Where a review's file sits on disk, for handing to the user's editor.
+ *
+ * The head worktree is tried before the repository path, because that is the
+ * checkout the review is *about*; the repository path may well have a different
+ * branch out. A file that exists in neither has nothing to open - it lives only
+ * in a commit - and that is reported rather than papered over with a path that
+ * would fail in the editor instead.
+ */
+export async function resolveReviewFilePath(
+  repositoryPath: string,
+  baseRef: string,
+  headRef: string,
+  filePath: string,
+  options: ReadDiffOptions
+): Promise<string> {
+  if (!isSafeRelativePath(filePath)) {
+    throw new AppError('INVALID_INPUT', 'That is not a path inside this repository.')
+  }
+
+  const compare = await resolveCompare(repositoryPath, baseRef, headRef)
+  const worktree = options.includeUncommitted ? compare.headWorktree : null
+  const roots = [...new Set([worktree?.path, compare.headWorktree?.path, repositoryPath])].filter(
+    (root): root is string => typeof root === 'string'
+  )
+
+  for (const root of roots) {
+    const absolute = resolve(root, filePath)
+    // `resolve` collapses any traversal the check above somehow let through.
+    if (!absolute.startsWith(resolve(root) + sep)) continue
+    try {
+      if ((await stat(absolute)).isFile()) return absolute
+    } catch {
+      // Not here; try the next checkout.
+    }
+  }
+
+  throw new AppError(
+    'PATH_NOT_FOUND',
+    `\`${filePath}\` is not in the working tree. It exists only in a commit, so there is no file to open.`
   )
 }

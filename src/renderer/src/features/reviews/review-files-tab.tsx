@@ -10,20 +10,30 @@
  * would arrive if pushed is a question you ask per visit, and each answer is
  * cached under its own SWR key so flipping back is instant.
  */
-import { useMemo, useState } from 'react'
-import { AlertCircle, FileDiff, RefreshCw } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { AlertCircle, FileDiff, PanelLeft, PanelLeftClose, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
+import { api } from '@/lib/api'
 import { errorMessage } from '@/lib/errors'
 import { plural } from '@/lib/format'
+import { useStoredFlag, useStoredPreference } from '@/lib/preferences'
 import { CommentThreadCard } from '../comments/comment-thread-card'
 import { useCommentMutations, useReviewComments } from '../comments/use-comments'
+import { ChangedFilesTree, fileDomId } from './changed-files-tree'
 import { CompareErrorCard, NoWorktreeNotice, WorkingTreeBanner } from './compare-notices'
 import { DiffSnippet } from './diff-snippet'
 import { DiffStat, FileDiffCard, type AnchoredThread } from './diff-view'
-import { useReviewDiff } from './use-reviews'
+import { useEditors, useReviewDiff } from './use-reviews'
 import { findAnchorFile, isInlineAnchor, resolveAnchor } from '@shared/comment-anchors'
 import { threadSnippet } from '@shared/comment-snippets'
 import type { FileDiff as FileDiffData } from '@shared/git'
@@ -71,14 +81,57 @@ function anchorByFile(
   return byFile
 }
 
+/**
+ * Which file is nearest the top of the page, so the tree can point at it.
+ *
+ * An observer rather than a scroll handler: the browser answers "is this on
+ * screen" without a layout read per frame, and the top band is narrowed with a
+ * negative bottom margin so "current" means the file you are reading rather
+ * than the last one that happens to be visible.
+ */
+function useActiveFile(paths: string[]): string | null {
+  const [active, setActive] = useState<string | null>(null)
+  const key = paths.join('\n')
+
+  useEffect(() => {
+    const order = key === '' ? [] : key.split('\n')
+    const visible = new Set<string>()
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const path = entry.target.getAttribute('data-file-path')
+          if (path === null) continue
+          if (entry.isIntersecting) visible.add(path)
+          else visible.delete(path)
+        }
+        setActive(order.find((path) => visible.has(path)) ?? null)
+      },
+      { rootMargin: '0px 0px -70% 0px' }
+    )
+
+    for (const path of order) {
+      const element = document.getElementById(fileDomId(path))
+      if (element) observer.observe(element)
+    }
+    return () => observer.disconnect()
+  }, [key])
+
+  return active
+}
+
 export function ReviewFilesTab({ review }: { review: Review }) {
   const [includeUncommitted, setIncludeUncommitted] = useState(true)
+  const [treeOpen, setTreeOpen] = useStoredFlag('files-tree', true)
+  const [editorId, setEditorId] = useStoredPreference('editor', null)
+  const [openError, setOpenError] = useState<unknown>(null)
   const { data, error, isLoading, isRefreshing, refresh } = useReviewDiff(
     review.id,
     includeUncommitted
   )
   const { threads } = useReviewComments(review.id)
   const mutations = useCommentMutations(review.id)
+  const editors = useEditors()
 
   const threadsByFile = useMemo(
     () => anchorByFile(data?.files ?? [], threads),
@@ -90,6 +143,35 @@ export function ReviewFilesTab({ review }: { review: Review }) {
     const present = new Set((data?.files ?? []).map((file) => file.path))
     return [...threadsByFile].filter(([path]) => !present.has(path))
   }, [data?.files, threadsByFile])
+
+  const paths = useMemo(() => (data?.files ?? []).map((file) => file.path), [data?.files])
+  const activePath = useActiveFile(paths)
+
+  /** What the tree shows next to a file: comments still waiting on someone. */
+  const unresolvedByFile = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const [path, fileThreads] of threadsByFile) {
+      const unresolved = fileThreads.filter((thread) => thread.resolvedAt === null).length
+      if (unresolved > 0) counts.set(path, unresolved)
+    }
+    return counts
+  }, [threadsByFile])
+
+  const openInEditor = useCallback(
+    (path: string, line: number) => {
+      setOpenError(null)
+      api.reviews
+        .openInEditor({
+          id: review.id,
+          path,
+          includeUncommitted,
+          line,
+          ...(editorId === null ? {} : { editorId })
+        })
+        .catch(setOpenError)
+    },
+    [review.id, includeUncommitted, editorId]
+  )
 
   if (isLoading) return <LoadingState />
 
@@ -126,6 +208,45 @@ export function ReviewFilesTab({ review }: { review: Review }) {
         </div>
 
         <div className="flex items-center gap-3">
+          {data.files.length > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setTreeOpen(!treeOpen)}
+              title={treeOpen ? 'Hide the file list' : 'Show the file list'}
+              aria-pressed={treeOpen}
+            >
+              {treeOpen ? <PanelLeftClose /> : <PanelLeft />}
+              Files
+            </Button>
+          )}
+
+          {/* Only worth asking when the machine actually has a choice. */}
+          {editors !== undefined && editors.editors.length > 1 && (
+            <Select
+              items={editors.editors.map((editor) => ({
+                value: editor.id,
+                label: editor.label
+              }))}
+              value={editorId ?? editors.defaultId ?? ''}
+              onValueChange={(next) => setEditorId(typeof next === 'string' ? next : null)}
+            >
+              <SelectTrigger
+                className="h-8 w-auto min-w-32 max-w-48 text-xs"
+                title="Which editor the open-file buttons use"
+              >
+                <SelectValue className="truncate" />
+              </SelectTrigger>
+              <SelectContent>
+                {editors.editors.map((editor) => (
+                  <SelectItem key={editor.id} value={editor.id}>
+                    {editor.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+
           <label
             className="flex items-center gap-2 text-xs text-muted-foreground"
             title={
@@ -217,19 +338,64 @@ export function ReviewFilesTab({ review }: { review: Review }) {
           </p>
         </Card>
       ) : (
-        <div className="flex flex-col gap-2">
-          {data.files.map((file) => (
-            <FileDiffCard
-              key={`${file.oldPath ?? ''}:${file.path}`}
-              file={file}
-              comments={{
-                reviewId: review.id,
-                threads: threadsByFile.get(file.path) ?? [],
-                mutations
-              }}
-            />
-          ))}
+        // `items-start` so the tree can stick to the top of the viewport while
+        // the diff beside it scrolls; a stretched column would never stick.
+        <div className="flex items-start gap-4">
+          {treeOpen && (
+            <aside className="sticky top-2 max-h-[calc(100vh-6rem)] w-56 shrink-0 overflow-y-auto rounded-lg border border-border bg-card/50 px-1">
+              <ChangedFilesTree
+                files={data.files}
+                activePath={activePath}
+                unresolvedByFile={unresolvedByFile}
+                onSelect={(path) => {
+                  document
+                    .getElementById(fileDomId(path))
+                    ?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+                }}
+              />
+            </aside>
+          )}
+
+          <div className="flex min-w-0 flex-1 flex-col gap-2">
+            {data.files.map((file) => (
+              <div
+                key={`${file.oldPath ?? ''}:${file.path}`}
+                id={fileDomId(file.path)}
+                data-file-path={file.path}
+                className="scroll-mt-2"
+              >
+                <FileDiffCard
+                  // Remounted when the switch flips: that is a different diff
+                  // with different line numbers, so anything unfolded against
+                  // the old one has to go.
+                  key={includeUncommitted ? 'with-uncommitted' : 'committed-only'}
+                  file={file}
+                  comments={{
+                    reviewId: review.id,
+                    threads: threadsByFile.get(file.path) ?? [],
+                    mutations
+                  }}
+                  source={{
+                    reviewId: review.id,
+                    includeUncommitted,
+                    editorId,
+                    editorLabel:
+                      editors?.editors.find(
+                        (editor) => editor.id === (editorId ?? editors.defaultId)
+                      )?.label ?? null,
+                    onOpenInEditor: openInEditor
+                  }}
+                />
+              </div>
+            ))}
+          </div>
         </div>
+      )}
+
+      {openError !== null && (
+        <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {errorMessage(openError)}
+        </p>
       )}
     </div>
   )

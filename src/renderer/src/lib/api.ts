@@ -34,6 +34,14 @@ export const CACHE_KEYS = {
   reviewDiff: (reviewId: number, includeUncommitted: boolean) =>
     `review-diff:${reviewId}:${includeUncommitted ? 'with-uncommitted' : 'committed-only'}`,
   /**
+   * Keyed by the same switch as the diff: expanded context read from the other
+   * version of the file would not line up with the hunks it sits between.
+   */
+  reviewFile: (reviewId: number, path: string, includeUncommitted: boolean) =>
+    `review-file:${reviewId}:${includeUncommitted ? 'with-uncommitted' : 'committed-only'}:${path}`,
+  /** Installed code editors. Probed once per run; see `main/editors.ts`. */
+  editors: 'editors',
+  /**
    * Comments are keyed per review and *not* per diff view. They are a plain
    * database read, so the same list serves the conversation tab and both
    * settings of the files tab's "include uncommitted" switch; only the anchor
@@ -49,5 +57,6 @@ export const CACHE_PREFIXES = {
   review: 'review:',
   reviewCommits: 'review-commits:',
   reviewDiff: 'review-diff:',
+  reviewFile: 'review-file:',
   reviewComments: 'review-comments:'
 } as const

@@ -185,6 +185,27 @@ export const reviewDiffInputSchema = z.object({
   includeUncommitted: z.boolean().optional().default(true)
 })
 
+/**
+ * One file of a review, read whole so the diff can be expanded past its hunks.
+ * `includeUncommitted` has to match the diff on screen, or the expanded context
+ * would come from a different version of the file than the hunks around it.
+ */
+export const reviewFileInputSchema = z.object({
+  id: reviewIdSchema,
+  path: z.string().min(1).max(4096),
+  includeUncommitted: z.boolean().optional().default(true)
+})
+
+/**
+ * The same file, on its way to the user's editor. `editorId` comes from
+ * `system.editors()`; an unknown one falls back to the first editor found
+ * rather than failing, because the alternative is a dead button.
+ */
+export const openReviewFileInputSchema = reviewFileInputSchema.extend({
+  line: z.number().int().min(1).optional().default(1),
+  editorId: z.string().max(64).optional()
+})
+
 export const repositoryRefsInputSchema = z.object({ id: repositoryIdSchema })
 
 export type Review = z.infer<typeof reviewSchema>
@@ -197,6 +218,8 @@ export type GetReviewInput = z.input<typeof getReviewInputSchema>
 export type RemoveReviewInput = z.input<typeof removeReviewInputSchema>
 export type ReviewCommitsInput = z.input<typeof reviewCommitsInputSchema>
 export type ReviewDiffInput = z.input<typeof reviewDiffInputSchema>
+export type ReviewFileInput = z.input<typeof reviewFileInputSchema>
+export type OpenReviewFileInput = z.input<typeof openReviewFileInputSchema>
 export type RepositoryRefsInput = z.input<typeof repositoryRefsInputSchema>
 
 /* -------------------------------------------------------------------------- */
