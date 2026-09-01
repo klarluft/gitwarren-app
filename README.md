@@ -266,6 +266,13 @@ where it is the only thing saying two lines are not adjacent.
 `continuesFromAbove` in `shared/diff-gaps.ts` decides this, using the same
 off-by-one convention for empty ranges as the gap arithmetic beside it.
 - **Copy path** and **open in your editor**, per file.
+- **Back to top**, once you are a screen or so down. It is app-wide rather than
+  a diff feature, but the diff is where the scrollbar gets small enough to
+  matter. Two details: the whole app scrolls inside `<main>` rather than the
+  window, so the button acts on that element (`window.scrollTo` would do
+  nothing at all here); and the trip is animated only when it is short enough
+  to follow — smooth-scrolling the length of a large diff takes seconds and
+  reads as the app hanging, so past five thousand pixels it simply jumps.
 
 Every icon-only control carries a real tooltip rather than a `title` attribute
 (`components/ui/tooltip.tsx`). The browser decides when to show a `title` —

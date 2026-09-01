@@ -116,6 +116,18 @@
   }
 }
 
+/*
+ * The one keyframe the app defines. Everything else that animates does so
+ * through Base UI's `data-[starting-style]`, which needs a primitive to hang
+ * off; the back-to-top button is a plain conditional render and has none.
+ */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.25rem) scale(0.96);
+  }
+}
+
 /* The draggable strip behind the macOS traffic lights. */
 .titlebar-drag {
   -webkit-app-region: drag;
