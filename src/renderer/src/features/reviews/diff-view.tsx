@@ -54,7 +54,13 @@ import { useReviewFile } from './use-reviews'
 import type { CommentMutations } from '../comments/use-comments'
 import { threadSnippet } from '@shared/comment-snippets'
 import type { DiffSide, ResolvedAnchor } from '@shared/comment-anchors'
-import { fileGaps, segmentGap, type DiffGap, type GapSegment } from '@shared/diff-gaps'
+import {
+  continuesFromAbove,
+  fileGaps,
+  segmentGap,
+  type DiffGap,
+  type GapSegment
+} from '@shared/diff-gaps'
 import { errorMessage } from '@/lib/errors'
 import type { DiffHunk, DiffLine, FileChangeStatus, FileDiff } from '@shared/git'
 import type { CommentThread } from '@shared/schemas'
@@ -491,14 +497,19 @@ export function FileDiffCard({
                  * A `@@` header announces a break in the file, so it is printed
                  * only when there is still a break to announce.
                  *
-                 * With a gap above the hunk there are two cases and neither
-                 * wants a header here: while the gap is folded its last
-                 * expander carries the header itself, the way GitHub puts the
-                 * unfold controls on that row; once it has been unfolded the
-                 * code runs continuously into the hunk, and a divider drawn
-                 * across continuous code is simply a lie about the file.
+                 * Three ways there is nothing to announce. The hunk carries
+                 * straight on from what is above it - the previous hunk, or the
+                 * start of the file, which covers every new and deleted file.
+                 * Or there is a gap and it is still folded, in which case its
+                 * last expander carries the header itself, the way GitHub puts
+                 * the unfold controls on that row. Or that gap has been
+                 * unfolded, and the code now runs continuously into the hunk.
+                 *
+                 * What is left - a real break with no expander to mark it -
+                 * happens in files the diff cannot unfold at all, and there the
+                 * header is the only thing saying the lines are not adjacent.
                  */
-                const showHeader = gap === undefined
+                const showHeader = gap === undefined && !continuesFromAbove(file.hunks, index)
 
                 return (
                   <Fragment key={`${hunk.header}-${index}`}>

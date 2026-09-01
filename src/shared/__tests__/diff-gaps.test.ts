@@ -8,7 +8,7 @@
  */
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { fileGaps, gapLength, segmentGap } from '../diff-gaps.js'
+import { continuesFromAbove, fileGaps, gapLength, segmentGap } from '../diff-gaps.js'
 import type { DiffHunk } from '../git.js'
 
 function hunk(oldStart: number, oldLines: number, newStart: number, newLines: number): DiffHunk {
@@ -97,4 +97,54 @@ test('revealing past the end of the file is clamped to the last line', () => {
   const revealed = new Set(Array.from({ length: 100 }, (_value, index) => index + 4))
 
   assert.deepEqual(segmentGap(tail, revealed, 6), [{ kind: 'revealed', start: 4, end: 6 }])
+})
+
+/* -------------------------------------------------------------------------- */
+/* Whether a hunk has a break above it to announce                            */
+/* -------------------------------------------------------------------------- */
+
+test('a hunk starting at line 1 has nothing above it', () => {
+  assert.equal(continuesFromAbove([hunk(1, 3, 1, 4)], 0), true)
+})
+
+test('a whole new file continues from the start of the file', () => {
+  // `@@ -0,0 +1,120 @@` - what git prints for a file that did not exist.
+  assert.equal(continuesFromAbove([hunk(0, 0, 1, 120)], 0), true)
+})
+
+test('a whole deleted file continues from the start of the file', () => {
+  // `@@ -1,120 +0,0 @@` - the head side is empty, and begins where it ends.
+  assert.equal(continuesFromAbove([hunk(1, 120, 0, 0)], 0), true)
+})
+
+test('a hunk starting further down has a break above it', () => {
+  assert.equal(continuesFromAbove([hunk(10, 6, 10, 7)], 0), false)
+})
+
+test('two hunks that touch are one continuous run', () => {
+  const hunks = [hunk(1, 5, 1, 5), hunk(6, 4, 6, 4)]
+
+  assert.equal(continuesFromAbove(hunks, 1), true)
+  assert.deepEqual(fileGaps(hunks, { includeTail: false }), [])
+})
+
+test('two hunks with lines between them are not', () => {
+  const hunks = [hunk(1, 5, 1, 5), hunk(20, 4, 20, 4)]
+
+  assert.equal(continuesFromAbove(hunks, 1), false)
+  assert.equal(fileGaps(hunks, { includeTail: false }).length, 1)
+})
+
+test('every discontinuity that is not a continuation produces a gap', () => {
+  // The property the `@@` header rule leans on: when gaps are being tracked,
+  // a hunk either continues from above or has a gap of its own, never neither.
+  const hunks = [hunk(0, 0, 1, 4), hunk(12, 3, 12, 5), hunk(17, 2, 19, 2)]
+  const gaps = new Set(fileGaps(hunks, { includeTail: false }).map((gap) => gap.beforeHunk))
+
+  for (const index of hunks.keys()) {
+    assert.ok(
+      continuesFromAbove(hunks, index) !== gaps.has(index),
+      `hunk ${index} should either continue from above or have a gap, exactly one`
+    )
+  }
 })

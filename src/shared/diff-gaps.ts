@@ -44,6 +44,44 @@ export interface GapSegment {
  * diff shows in full - a new file, an untracked one - has nothing after its
  * last hunk, and offering to unfold nothing is worse than not offering.
  */
+/**
+ * The first line a hunk actually shows on a side.
+ *
+ * An empty range is written `@@ -a,0 ...`, where `a` is the line the missing
+ * content *followed* rather than the line it starts at - so a pure-deletion
+ * hunk claims one line more than it should unless the start is nudged past it.
+ * Getting this wrong shifts every unfolded line in the file by one, which is
+ * the sort of wrong that looks right.
+ */
+function effectiveStart(start: number, lines: number): number {
+  return lines === 0 ? start + 1 : start
+}
+
+/** The last line a hunk shows, or the line before it when it shows none. */
+function effectiveEnd(start: number, lines: number): number {
+  return effectiveStart(start, lines) + lines - 1
+}
+
+/**
+ * True when a hunk carries straight on from what is printed above it - the
+ * previous hunk, or the beginning of the file for the first one.
+ *
+ * This is what decides whether a `@@` header has anything to announce. A hunk
+ * that starts at line 1, which is every new file and every deleted one, has no
+ * break above it, and a divider drawn there is describing a discontinuity that
+ * does not exist.
+ */
+export function continuesFromAbove(hunks: DiffHunk[], index: number): boolean {
+  const hunk = hunks[index]
+  if (hunk === undefined) return false
+
+  const previous = index === 0 ? undefined : hunks[index - 1]
+  const previousEnd =
+    previous === undefined ? 0 : effectiveEnd(previous.newStart, previous.newLines)
+
+  return effectiveStart(hunk.newStart, hunk.newLines) <= previousEnd + 1
+}
+
 export function fileGaps(hunks: DiffHunk[], options: { includeTail: boolean }): DiffGap[] {
   const gaps: DiffGap[] = []
   /** First head-side line no hunk or gap has accounted for yet. */
@@ -51,13 +89,8 @@ export function fileGaps(hunks: DiffHunk[], options: { includeTail: boolean }): 
   let trailingDelta = 0
 
   for (const [index, hunk] of hunks.entries()) {
-    // An empty range is written `@@ -a,0 ...`, where `a` is the line the
-    // missing content *followed* rather than the line it starts at - so a
-    // pure-deletion hunk claims one line more than it should unless the start
-    // is nudged past it. Getting this wrong shifts every unfolded line in the
-    // file by one, which is the sort of wrong that looks right.
-    const oldStart = hunk.oldLines === 0 ? hunk.oldStart + 1 : hunk.oldStart
-    const newStart = hunk.newLines === 0 ? hunk.newStart + 1 : hunk.newStart
+    const oldStart = effectiveStart(hunk.oldStart, hunk.oldLines)
+    const newStart = effectiveStart(hunk.newStart, hunk.newLines)
 
     if (newStart - 1 >= next) {
       // Both ends of a gap are unchanged context, so the offset the following

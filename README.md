@@ -257,6 +257,14 @@ row, the way GitHub puts the unfold controls there; unfold that gap and the
 header goes with it, because the code now runs continuously into the hunk and a
 divider across continuous code is a false statement about the file. Expand
 everything and the file reads top to bottom with no markers in it at all.
+
+The same rule removes the header from the top of a hunk that starts at line 1,
+which is every new file and every deleted one: there is nothing above it to be
+separated from. What keeps a header is a real break with no expander to mark it
+— which happens in the files the diff cannot unfold at all (binary, clipped),
+where it is the only thing saying two lines are not adjacent.
+`continuesFromAbove` in `shared/diff-gaps.ts` decides this, using the same
+off-by-one convention for empty ranges as the gap arithmetic beside it.
 - **Copy path** and **open in your editor**, per file.
 
 Every icon-only control carries a real tooltip rather than a `title` attribute
