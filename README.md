@@ -3,10 +3,18 @@
 A cross-platform desktop app for doing local code reviews of your own git
 repositories. Single user, single machine, no server, no account.
 
-The first feature is repository management: tell GitWarren which local git
-repositories you care about, and it keeps that list — while reading the *live*
-git state (does the folder still exist, which branch is checked out) fresh every
-time it shows it to you.
+Tell GitWarren which local git repositories you care about, then open **reviews**
+against them — a review is a comparison of two refs, presented the way a pull
+request is, with *conversation*, *commits* and *files changed* tabs.
+
+The part that makes it worth having: a review can include work that has not been
+committed. If the branch you are reviewing is checked out in a worktree,
+GitWarren finds that worktree — wherever it is — and folds its staged, unstaged
+and untracked changes into the diff. You can review a change before it is a
+commit, which is exactly when review is most useful.
+
+Nothing is cached: every branch name, commit and diff on screen is read from git
+at the moment it is shown.
 
 Local AI agents get the same capabilities through an MCP server over stdio.
 
@@ -16,6 +24,7 @@ Local AI agents get the same capabilities through an MCP server over stdio.
 
 - [Stack](#stack)
 - [Architecture](#architecture)
+- [Reviews](#reviews)
 - [Development setup](#development-setup)
 - [Project layout](#project-layout)
 - [Data storage](#data-storage)
@@ -57,14 +66,14 @@ Local AI agents get the same capabilities through an MCP server over stdio.
 The single most important rule in this codebase:
 
 > **The UI and the MCP server both call one shared service layer. Neither one
-> contains any repository logic of its own.**
+> contains any repository or review logic of its own.**
 
 ```
    ┌────────────────────────────┐         ┌───────────────────────────────┐
    │  Renderer (Chromium)       │         │  MCP server (its own process) │
    │  React + SWR               │         │  stdio JSON-RPC               │
    │                            │         │                               │
-   │  window.gitwarren.repos…   │         │  list/get/add/update/remove   │
+   │  window.gitwarren.*        │         │  repository + review tools    │
    └────────────┬───────────────┘         └───────────────┬───────────────┘
                 │ contextBridge                           │
                 │ ipcRenderer.invoke                       │ direct import
@@ -77,7 +86,8 @@ The single most important rule in this codebase:
                 └──────────────┬───────────────────────────┘
                                ▼
               ┌──────────────────────────────────────┐
-              │  src/core/services/repositories.ts   │
+              │  src/core/services/                  │
+              │  repositories.ts · reviews.ts        │
               │  validation · path resolution ·      │
               │  duplicate rules · error semantics   │
               └───────┬───────────────────┬──────────┘
@@ -87,6 +97,11 @@ The single most important rule in this codebase:
             │ durable facts    │  │ live state only  │
             └──────────────────┘  └──────────────────┘
 ```
+
+The two surfaces are not identical in *reach*: the review service's
+`commits` and `diff` reads are wired to the UI only, because an agent can read
+the repository with git directly. The rule is that neither surface implements
+logic of its own, not that every function must be exposed to both.
 
 Three properties fall out of this shape:
 
@@ -137,6 +152,80 @@ agent actor. Nothing is built for it now.
 
 ---
 
+## Reviews
+
+A review is two refs and a title. Everything else on the screen is computed from
+git when you look at it.
+
+```
+  reviews table                    read live, never stored
+  ┌──────────────────┐             ┌───────────────────────────────┐
+  │ repository_id    │             │ merge base of the two refs    │
+  │ base_ref  "main" │  ──────►    │ commits in base..head         │
+  │ head_ref  "feat" │             │ diff from the merge base      │
+  │ title            │             │ which worktree holds head     │
+  │ description      │             │ that worktree's dirty state   │
+  │ status           │             └───────────────────────────────┘
+  └──────────────────┘
+```
+
+### Why the refs are stored and the commits are not
+
+Pinning the resolved shas at creation time would be the obvious thing to do, and
+it would defeat the feature. A review is meant to *follow* its branch: you open
+one, keep working, and the review shows the work as it stands. That includes work
+that is not committed at all, which no sha could ever refer to.
+
+The cost is that a review can stop resolving — someone deletes the branch. That
+is treated as a state to render, not an error: the review row survives, the tab
+says which ref went missing, and you can repoint it.
+
+### Merge-base, like a pull request
+
+The *files changed* tab shows `base...head` — what head added since the two
+diverged — rather than the literal difference between the endpoints. So commits
+that landed on `main` after you branched do not show up as reversals in your
+review. The *commits* tab lists the same range, `base..head`.
+
+### Finding uncommitted work
+
+This is the part that needs care, because **the repository row points at one
+directory and the work under review is often in another**. A branch checked out
+in a linked worktree has its uncommitted state there, not in the main checkout.
+
+So every read starts with `git worktree list --porcelain`, which enumerates the
+main checkout and every linked worktree from *any* of them — it does not matter
+which one was added to GitWarren. The worktree whose branch matches the review's
+head ref is the one whose `git status` and working-tree diff get read. If no
+worktree has that branch checked out, the review quietly falls back to committed
+work only and says so.
+
+Given the head's worktree, the diff is `git diff <merge-base>` run **inside it**,
+with no second endpoint — which compares the merge base against the working tree,
+so committed, staged and unstaged changes all arrive in one patch.
+
+Untracked files are handled separately: they are listed with
+`git ls-files --others --exclude-standard` (so `.gitignore` still applies) and
+rendered as whole-file additions. The tempting alternative — staging them into a
+scratch index with `GIT_INDEX_FILE` — would write blobs into the user's object
+database just to draw a screen, and this app only ever reads.
+
+The switch at the top of the tab turns all of that off, leaving the committed
+diff. It is view state, not part of the review: whether you want to read the
+branch as it sits on disk or as it would arrive if pushed is a per-visit
+question.
+
+### Reading the diff
+
+`git diff` output is parsed once, in `src/core/diff-parser.ts`, into files,
+hunks and numbered lines. Two details that a naive line-splitter gets wrong and
+this one does not: paths are taken from the `---`/`+++` and `rename from`/`to`
+lines rather than the ambiguous `diff --git a/x b/x` line, and a pure rename
+carries no hunks at all yet still has to name both paths. Very large files are
+clipped for rendering but still report their true add/delete counts.
+
+---
+
 ## Development setup
 
 Requirements: **Node 22+**, **npm 10+**, and **git on your PATH** (GitWarren
@@ -173,15 +262,19 @@ real database.
 src/
 ├── shared/            Imported by every process. No Node-only APIs.
 │   ├── schemas.ts       zod schemas — the source of truth for validation
+│   ├── git.ts           read-only git shapes (types, not schemas — see below)
 │   ├── validation.ts    one zod-error → AppError conversion, used everywhere
 │   ├── errors.ts        AppError + the error-code vocabulary
 │   └── api.ts           IPC channel names and the bridge's type
 │
 ├── core/              The shared service layer. Never imports electron.
 │   ├── paths.ts         per-platform data directory (+ env override)
-│   ├── git.ts           live git state; root resolution
+│   ├── git-exec.ts      the one place `git` is spawned
+│   ├── git.ts           live repository state; root resolution
+│   ├── git-compare.ts   worktrees, refs, commits, diffs, dirty state
+│   ├── diff-parser.ts   unified diff → files/hunks/lines
 │   ├── db/              drizzle schema, client (WAL), migration resolution
-│   └── services/        repositories.ts — the one implementation
+│   └── services/        repositories.ts, reviews.ts — the one implementation
 │
 ├── main/              Electron main process
 │   ├── index.ts         window lifecycle
@@ -194,9 +287,15 @@ src/
 └── renderer/          React app (no Node access)
     └── src/
         ├── components/ui/   shadcn-style components on Base UI
-        ├── features/        repositories/, agent/
-        └── lib/             api access, error helpers
+        ├── features/        repositories/, reviews/, agent/
+        └── lib/             api access, error helpers, hash router
 ```
+
+`shared/schemas.ts` holds zod schemas; `shared/git.ts` holds plain types. The
+rule dividing them: **zod is for values that cross a trust boundary** — anything
+a caller supplies that the service must not believe. Git output is produced by
+reading the disk and flows one way out to the UI, so a runtime schema for it
+would be ceremony with no payoff.
 
 ---
 
@@ -222,12 +321,20 @@ Connection settings, all in `src/core/db/client.ts`:
 
 ### What is and is not stored
 
-Stored: `id`, `path` (canonical repository root, UNIQUE), `name`, `createdAt`,
-`updatedAt`. That is the whole table.
+Two tables.
 
-**Not** stored: branch, existence, or anything else git owns. Those are read on
-demand every time the list is fetched. Caching them would mean showing a branch
-name that stopped being true the moment you switched branches in a terminal.
+**`repositories`** — `id`, `path` (canonical repository root, UNIQUE), `name`,
+`createdAt`, `updatedAt`.
+
+**`reviews`** — `id`, `repositoryId`, `title`, `description`, `baseRef`,
+`headRef`, `status`, `createdAt`, `updatedAt`, `closedAt`. Deleting a repository
+cascades to its reviews; they are meaningless without it.
+
+**Not** stored: branch, existence, resolved commits, diffs, or anything else git
+owns. Those are read on demand every time they are displayed. Caching them would
+mean showing a branch name that stopped being true the moment you switched
+branches in a terminal — and for reviews it would break the feature outright,
+since a review is supposed to track uncommitted work that no sha can name.
 
 ### The duplicate rule
 
@@ -269,7 +376,7 @@ no source tree anywhere above it.
 
 ## Agent access (MCP)
 
-The MCP server exposes five tools, all backed by the same service the UI uses:
+The MCP server exposes ten tools, all backed by the same services the UI uses:
 
 | Tool | Notes |
 | --- | --- |
@@ -278,6 +385,19 @@ The MCP server exposes five tools, all backed by the same service the UI uses:
 | `add_repository` | `path` may be any directory inside the working tree. `name` defaults to the folder name. |
 | `update_repository` | Rename, and/or repoint at a moved working copy. |
 | `remove_repository` | Stops tracking only — never touches the working copy. |
+| `list_reviews` | Filterable by `repositoryId` and `status`. Read-only. |
+| `get_review` | By id, with its repository attached. Read-only. |
+| `create_review` | Both refs must exist and share history. `title` defaults to `"<head> into <base>"`. |
+| `update_review` | Title, description, endpoints, or open/closed. |
+| `remove_review` | Deletes the review record only. |
+
+**There is deliberately no `get_review_diff` or `list_review_commits`**, even
+though the service layer produces both for the UI. An agent pointed at these
+repositories can run `git log` and `git diff` itself, against the real working
+tree, with whatever options the task needs — a tool returning a second-hand copy
+would be a lossier version of data the agent already has. What GitWarren will
+uniquely hold is the *discussion* around the code, and that is what the tools
+will carry once the conversation tab is built.
 
 Failures come back as tool errors prefixed with the code
 (`NOT_A_GIT_REPOSITORY`, `DUPLICATE_REPOSITORY`, `PATH_NOT_FOUND`, `NOT_FOUND`,
@@ -485,7 +605,23 @@ a signature.
   `git` subprocess calls. They run in parallel across repositories, but a list of
   many hundreds on a slow or networked filesystem will feel it.
 - **No file watching.** Git state refreshes when the window regains focus or you
-  press refresh, not the instant you switch branches elsewhere.
+  press refresh, not the instant you switch branches elsewhere. The commit and
+  diff reads go further and do *not* refresh on focus — re-running a diff every
+  time you alt-tab would spawn git processes behind your back — so those tabs
+  have an explicit refresh button.
+- **The conversation tab is a placeholder.** It shows the review's description
+  and nothing else. Comments are the next piece of work, and the point at which
+  `"Person"` vs `"<name> (AI)"` attribution becomes worth building.
+- **Diffs are unified, not side-by-side**, and have no syntax highlighting or
+  word-level intra-line highlighting.
+- **Large diffs are clipped.** A file's patch stops rendering past 4,000 lines
+  and untracked files over 512 KB are listed without content, though the
+  add/delete counts stay honest. Commit lists stop at 500.
+- **Uncommitted work is read from one worktree** — the one whose branch matches
+  the review's head ref. If the same branch is somehow checked out in two places,
+  the first one `git worktree list` reports wins.
+- **Submodules are not descended into.** A dirty submodule shows as a changed
+  entry, not as the changes inside it.
 - **macOS auto-update requires signing** (see above). Unsigned builds install
   and run, but will not self-update.
 - **The renderer bundle is ~1 MB** unminified-by-dependency-count (React, Base

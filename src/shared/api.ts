@@ -7,13 +7,24 @@
  * this file is transport, not behaviour.
  */
 import type { SerializedAppError } from './errors.js'
+import type { RepositoryRefs, ReviewCommits, ReviewDiff } from './git.js'
 import type {
   AddRepositoryInput,
+  CreateReviewInput,
   GetRepositoryInput,
+  GetReviewInput,
+  ListReviewsInput,
   RemoveRepositoryInput,
+  RemoveReviewInput,
   Repository,
+  RepositoryRefsInput,
   RepositoryWithGitState,
-  UpdateRepositoryInput
+  Review,
+  ReviewCommitsInput,
+  ReviewDiffInput,
+  ReviewWithRepository,
+  UpdateRepositoryInput,
+  UpdateReviewInput
 } from './schemas.js'
 
 export const IPC_CHANNELS = {
@@ -22,6 +33,14 @@ export const IPC_CHANNELS = {
   repositoriesAdd: 'repositories:add',
   repositoriesUpdate: 'repositories:update',
   repositoriesRemove: 'repositories:remove',
+  repositoriesRefs: 'repositories:refs',
+  reviewsList: 'reviews:list',
+  reviewsGet: 'reviews:get',
+  reviewsCreate: 'reviews:create',
+  reviewsUpdate: 'reviews:update',
+  reviewsRemove: 'reviews:remove',
+  reviewsCommits: 'reviews:commits',
+  reviewsDiff: 'reviews:diff',
   systemPickDirectory: 'system:pickDirectory',
   systemRevealPath: 'system:revealPath',
   systemAppInfo: 'system:appInfo',
@@ -88,6 +107,19 @@ export interface GitWarrenApi {
     add(input: AddRepositoryInput): Promise<Repository>
     update(input: UpdateRepositoryInput): Promise<Repository>
     remove(input: RemoveRepositoryInput): Promise<{ id: number }>
+    /** Branches, tags and worktrees, for the review endpoint pickers. */
+    refs(input: RepositoryRefsInput): Promise<RepositoryRefs>
+  }
+  reviews: {
+    list(input: ListReviewsInput): Promise<Review[]>
+    get(input: GetReviewInput): Promise<ReviewWithRepository>
+    create(input: CreateReviewInput): Promise<Review>
+    update(input: UpdateReviewInput): Promise<Review>
+    remove(input: RemoveReviewInput): Promise<{ id: number }>
+    /** Commits on head that base lacks, plus the head worktree's dirty state. */
+    commits(input: ReviewCommitsInput): Promise<ReviewCommits>
+    /** The merge-base diff, uncommitted work folded in unless asked otherwise. */
+    diff(input: ReviewDiffInput): Promise<ReviewDiff>
   }
   system: {
     /** Opens the native folder picker. Resolves to null if cancelled. */

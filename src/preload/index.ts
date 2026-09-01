@@ -15,13 +15,24 @@ import {
   type IpcResult,
   type UpdateStatus
 } from '../shared/api.js'
+import type { RepositoryRefs, ReviewCommits, ReviewDiff } from '../shared/git.js'
 import type {
   AddRepositoryInput,
+  CreateReviewInput,
   GetRepositoryInput,
+  GetReviewInput,
+  ListReviewsInput,
   RemoveRepositoryInput,
+  RemoveReviewInput,
   Repository,
+  RepositoryRefsInput,
   RepositoryWithGitState,
-  UpdateRepositoryInput
+  Review,
+  ReviewCommitsInput,
+  ReviewDiffInput,
+  ReviewWithRepository,
+  UpdateRepositoryInput,
+  UpdateReviewInput
 } from '../shared/schemas.js'
 
 async function invoke<T>(channel: string, payload?: unknown): Promise<T> {
@@ -41,7 +52,19 @@ const api: GitWarrenApi = {
     update: (input: UpdateRepositoryInput) =>
       invoke<Repository>(IPC_CHANNELS.repositoriesUpdate, input),
     remove: (input: RemoveRepositoryInput) =>
-      invoke<{ id: number }>(IPC_CHANNELS.repositoriesRemove, input)
+      invoke<{ id: number }>(IPC_CHANNELS.repositoriesRemove, input),
+    refs: (input: RepositoryRefsInput) =>
+      invoke<RepositoryRefs>(IPC_CHANNELS.repositoriesRefs, input)
+  },
+  reviews: {
+    list: (input: ListReviewsInput) => invoke<Review[]>(IPC_CHANNELS.reviewsList, input),
+    get: (input: GetReviewInput) => invoke<ReviewWithRepository>(IPC_CHANNELS.reviewsGet, input),
+    create: (input: CreateReviewInput) => invoke<Review>(IPC_CHANNELS.reviewsCreate, input),
+    update: (input: UpdateReviewInput) => invoke<Review>(IPC_CHANNELS.reviewsUpdate, input),
+    remove: (input: RemoveReviewInput) => invoke<{ id: number }>(IPC_CHANNELS.reviewsRemove, input),
+    commits: (input: ReviewCommitsInput) =>
+      invoke<ReviewCommits>(IPC_CHANNELS.reviewsCommits, input),
+    diff: (input: ReviewDiffInput) => invoke<ReviewDiff>(IPC_CHANNELS.reviewsDiff, input)
   },
   system: {
     pickDirectory: () => invoke<string | null>(IPC_CHANNELS.systemPickDirectory),

@@ -12,16 +12,19 @@ import { asc, eq } from 'drizzle-orm'
 import { getDatabase } from '../db/client.js'
 import { repositories, type RepositoryRow } from '../db/schema.js'
 import { defaultNameForPath, readGitState, resolveRepositoryRoot } from '../git.js'
+import { readRepositoryRefs } from '../git-compare.js'
 import { AppError } from '../../shared/errors.js'
 import { parseWithSchema as parse } from '../../shared/validation.js'
 import {
   addRepositoryInputSchema,
   getRepositoryInputSchema,
   removeRepositoryInputSchema,
+  repositoryRefsInputSchema,
   updateRepositoryInputSchema,
   type Repository,
   type RepositoryWithGitState
 } from '../../shared/schemas.js'
+import type { RepositoryRefs } from '../../shared/git.js'
 
 function toRepository(row: RepositoryRow): Repository {
   return {
@@ -73,6 +76,18 @@ export const repositoriesService = {
   async get(input: unknown): Promise<RepositoryWithGitState> {
     const { id } = parse(getRepositoryInputSchema, input)
     return withGitState(requireRow(id))
+  },
+
+  /**
+   * Branches, tags and worktrees, for the review endpoint pickers.
+   *
+   * Each local branch carries where it is checked out and whether that worktree
+   * is dirty, so the user can see there is uncommitted work to review before
+   * they even create the review.
+   */
+  async refs(input: unknown): Promise<RepositoryRefs> {
+    const { id } = parse(repositoryRefsInputSchema, input)
+    return readRepositoryRefs(requireRow(id).path)
   },
 
   /**

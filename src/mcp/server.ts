@@ -6,10 +6,17 @@
  * runs as a separate OS process from the GUI and reaches the same SQLite file,
  * which is why WAL mode and a busy timeout are set in `core/db/client.ts`.
  *
- * Every tool here is a thin wrapper over `repositoriesService` using the same
- * zod schemas the UI forms use. There is deliberately no validation in this
- * file - an agent and a human get identical rules because they run identical
- * code.
+ * Every tool here is a thin wrapper over a core service using the same zod
+ * schemas the UI forms use. There is deliberately no validation in this file -
+ * an agent and a human get identical rules because they run identical code.
+ *
+ * Reviews are exposed as CRUD only. There is no `get_review_diff` and no
+ * `list_review_commits`, even though the service can produce both: an agent
+ * pointed at these repositories can run `git log` and `git diff` itself, and a
+ * tool call returning a second-hand copy would be a lossier version of data it
+ * already has. What GitWarren will uniquely hold is the discussion attached to
+ * those changes, and that is what the conversation tools will carry once the
+ * conversation tab exists.
  *
  * No authentication: this is a local, single-user app, the transport is a pipe
  * owned by the agent the user launched, and there is no network surface.
@@ -22,12 +29,18 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { closeDatabase } from '../core/db/client.js'
 import { getDatabasePath } from '../core/paths.js'
 import { repositoriesService } from '../core/services/repositories.js'
+import { reviewsService } from '../core/services/reviews.js'
 import { AppError } from '../shared/errors.js'
 import {
   addRepositoryInputSchema,
+  createReviewInputSchema,
   getRepositoryInputSchema,
+  getReviewInputSchema,
+  listReviewsInputSchema,
   removeRepositoryInputSchema,
-  updateRepositoryInputSchema
+  removeReviewInputSchema,
+  updateRepositoryInputSchema,
+  updateReviewInputSchema
 } from '../shared/schemas.js'
 
 const VERSION = '0.1.0'
@@ -124,6 +137,79 @@ server.registerTool(
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true }
   },
   (input) => run(() => repositoriesService.remove(input))
+)
+
+server.registerTool(
+  'list_reviews',
+  {
+    title: 'List reviews',
+    description:
+      'List reviews, newest activity first. Filter with `repositoryId` and/or `status` ' +
+      '("open" or "closed"); omit both to list every review across all tracked repositories. ' +
+      'A review records the two refs being compared, not the commits they resolved to - ' +
+      'read the repository with git to see the actual changes.',
+    inputSchema: listReviewsInputSchema.shape,
+    annotations: { readOnlyHint: true, openWorldHint: false }
+  },
+  (input) => run(() => reviewsService.list(input))
+)
+
+server.registerTool(
+  'get_review',
+  {
+    title: 'Get review',
+    description:
+      'Fetch one review by id, with the repository it belongs to attached (including the ' +
+      'repository path, so the changes can be inspected with git directly).',
+    inputSchema: getReviewInputSchema.shape,
+    annotations: { readOnlyHint: true, openWorldHint: false }
+  },
+  (input) => run(() => reviewsService.get(input))
+)
+
+server.registerTool(
+  'create_review',
+  {
+    title: 'Create review',
+    description:
+      'Open a review comparing two refs in a tracked repository. `baseRef` is what the changes ' +
+      'are measured against (usually the trunk) and `headRef` is the branch under review; the ' +
+      'diff is taken from their merge base, like a pull request. Both refs must exist and share ' +
+      'history, or the call fails with INVALID_INPUT. `title` defaults to "<head> into <base>". ' +
+      'If the head branch is checked out in a worktree, its uncommitted changes are part of the ' +
+      'review as well - a review can be opened on work that has never been committed.',
+    inputSchema: createReviewInputSchema.shape,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false }
+  },
+  (input) => run(() => reviewsService.create(input))
+)
+
+server.registerTool(
+  'update_review',
+  {
+    title: 'Update review',
+    description:
+      'Change a review\'s title, description or endpoints, or set its `status` to "closed" or ' +
+      '"open" again. Provide at least one field. New refs are validated exactly as they are on ' +
+      'creation.',
+    inputSchema: updateReviewInputSchema.shape,
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true }
+  },
+  (input) => run(() => reviewsService.update(input))
+)
+
+server.registerTool(
+  'remove_review',
+  {
+    title: 'Remove review',
+    description:
+      'Delete a review. This removes only the review record - no branch, commit or file in the ' +
+      'repository is touched. To file a finished review away without deleting it, set its status ' +
+      'to "closed" instead.',
+    inputSchema: removeReviewInputSchema.shape,
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true }
+  },
+  (input) => run(() => reviewsService.remove(input))
 )
 
 async function main(): Promise<void> {

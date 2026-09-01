@@ -9,6 +9,7 @@
  */
 import { BrowserWindow, dialog, ipcMain, shell, app } from 'electron'
 import { repositoriesService } from '../core/services/repositories.js'
+import { reviewsService } from '../core/services/reviews.js'
 import { getDataDirectory, getDatabasePath } from '../core/paths.js'
 import { AppError } from '../shared/errors.js'
 import { IPC_CHANNELS, type AppInfo, type IpcResult } from '../shared/api.js'
@@ -41,6 +42,15 @@ export function registerIpcHandlers(): void {
   handle(IPC_CHANNELS.repositoriesAdd, (input) => repositoriesService.add(input))
   handle(IPC_CHANNELS.repositoriesUpdate, (input) => repositoriesService.update(input))
   handle(IPC_CHANNELS.repositoriesRemove, (input) => repositoriesService.remove(input))
+  handle(IPC_CHANNELS.repositoriesRefs, (input) => repositoriesService.refs(input))
+
+  handle(IPC_CHANNELS.reviewsList, (input) => reviewsService.list(input))
+  handle(IPC_CHANNELS.reviewsGet, (input) => reviewsService.get(input))
+  handle(IPC_CHANNELS.reviewsCreate, (input) => reviewsService.create(input))
+  handle(IPC_CHANNELS.reviewsUpdate, (input) => reviewsService.update(input))
+  handle(IPC_CHANNELS.reviewsRemove, (input) => reviewsService.remove(input))
+  handle(IPC_CHANNELS.reviewsCommits, (input) => reviewsService.commits(input))
+  handle(IPC_CHANNELS.reviewsDiff, (input) => reviewsService.diff(input))
 
   handle(IPC_CHANNELS.systemPickDirectory, async () => {
     const window = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]

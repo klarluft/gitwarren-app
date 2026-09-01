@@ -15,7 +15,30 @@ if (typeof window.gitwarren === 'undefined') {
 
 export const api: GitWarrenApi = window.gitwarren
 
+/**
+ * SWR cache keys.
+ *
+ * The review keys are prefixed strings rather than tuples so that a mutation
+ * can invalidate a whole family at once - `mutate(key => key.startsWith('reviews:'))`
+ * refreshes every list regardless of which repository or status filter it was
+ * built with, which is what you want after creating or closing a review.
+ */
 export const CACHE_KEYS = {
   repositories: 'repositories',
-  appInfo: 'app-info'
+  appInfo: 'app-info',
+  repositoryRefs: (repositoryId: number) => `repository-refs:${repositoryId}`,
+  reviews: (repositoryId?: number, status?: string) =>
+    `reviews:${repositoryId ?? 'all'}:${status ?? 'any'}`,
+  review: (reviewId: number) => `review:${reviewId}`,
+  reviewCommits: (reviewId: number) => `review-commits:${reviewId}`,
+  reviewDiff: (reviewId: number, includeUncommitted: boolean) =>
+    `review-diff:${reviewId}:${includeUncommitted ? 'with-uncommitted' : 'committed-only'}`
+} as const
+
+/** Prefixes used by the family-wide invalidation above. */
+export const CACHE_PREFIXES = {
+  reviews: 'reviews:',
+  review: 'review:',
+  reviewCommits: 'review-commits:',
+  reviewDiff: 'review-diff:'
 } as const
