@@ -16,7 +16,7 @@
  */
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, beforeEach, test } from 'node:test'
@@ -431,4 +431,114 @@ test('counts report open discussions separately from total', async () => {
   await commentsService.setResolved({ threadId: first.id, resolved: true }, HUMAN_AUTHOR)
 
   assert.deepEqual(await commentsService.counts(reviewId), { threads: 2, unresolved: 1 })
+})
+
+/* -------------------------------------------------------------------------- */
+/* Attachments                                                                */
+/* -------------------------------------------------------------------------- */
+
+/** A tiny but real PNG, 10x10, so the header parses. */
+function pngBytes(filler = 0): Buffer {
+  const header = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+  const ihdr = Buffer.alloc(25)
+  ihdr.writeUInt32BE(13, 0)
+  ihdr.write('IHDR', 4)
+  ihdr.writeUInt32BE(10, 8)
+  ihdr.writeUInt32BE(10, 12)
+  return Buffer.concat([header, ihdr, Buffer.from([filler])])
+}
+
+function writeImage(name: string, filler = 0): string {
+  const path = join(workDir, name)
+  writeFileSync(path, pngBytes(filler))
+  return path
+}
+
+test('a body naming a local image comes back with a token and a resolved attachment', async () => {
+  // The agent write path end to end: an agent writes a screenshot to disk and
+  // references it, and what is stored is a token pointing at the app's own copy
+  // - so the comment still renders after the original file is gone.
+  const path = writeImage('agent-screenshot.png', 1)
+
+  const thread = await commentsService.createThread(
+    { reviewId, body: `The dropdown renders behind the modal:\n\n![dropdown behind modal](${path})` },
+    claude
+  )
+
+  const comment = thread.comments[0]
+  assert.ok(comment)
+  assert.match(comment.body, /gitwarren:\/\/attachment\/[a-f0-9]{64}\.png/)
+  assert.doesNotMatch(comment.body, /agent-screenshot\.png/)
+
+  assert.equal(comment.attachments.length, 1)
+  const [attachment] = comment.attachments
+  assert.ok(attachment)
+  // The alt text is what an agent without vision has to go on.
+  assert.equal(attachment.alt, 'dropdown behind modal')
+  assert.equal(attachment.mimeType, 'image/png')
+  assert.deepEqual([attachment.width, attachment.height], [10, 10])
+  assert.ok(comment.body.includes(attachment.url))
+  // `path` is the whole reason there is no `get_attachment` tool: an agent
+  // reads the file with the tools it already has.
+  assert.ok(existsSync(attachment.path))
+})
+
+test('the resolved attachments survive a re-read', async () => {
+  const path = writeImage('persisted.png', 2)
+  await commentsService.createThread({ reviewId, body: `![a bug](${path})` }, claude)
+
+  const [thread] = await commentsService.list({ reviewId })
+  const attachment = thread?.comments[0]?.attachments[0]
+
+  assert.ok(attachment)
+  assert.equal(attachment.alt, 'a bug')
+  assert.ok(existsSync(attachment.path))
+})
+
+test('a reply and an edit ingest their images too', async () => {
+  const thread = await commentsService.createThread({ reviewId, body: 'Opening.' }, HUMAN_AUTHOR)
+
+  const reply = await commentsService.reply(
+    { threadId: thread.id, body: `Here it is: ![reply shot](${writeImage('reply.png', 3)})` },
+    claude
+  )
+  assert.equal(reply.attachments.length, 1)
+  assert.match(reply.body, /gitwarren:\/\/attachment\//)
+
+  const edited = await commentsService.update(
+    { id: reply.id, body: `Corrected: ![edited shot](${writeImage('edited.png', 4)})` },
+    claude
+  )
+  assert.equal(edited.attachments.length, 1)
+  assert.equal(edited.attachments[0]?.alt, 'edited shot')
+})
+
+test('a comment with no images carries an empty attachments array, not undefined', async () => {
+  const thread = await commentsService.createThread({ reviewId, body: 'Just prose.' }, claude)
+
+  assert.deepEqual(thread.comments[0]?.attachments, [])
+})
+
+test('an unresolvable path leaves the body as written and still saves the comment', async () => {
+  // Failing the call would throw away a body an agent spent real tokens on,
+  // over a detail it cannot see or usefully retry.
+  const missing = join(workDir, 'this-was-never-written.png')
+
+  const thread = await commentsService.createThread(
+    { reviewId, body: `I meant to attach this: ![missing](${missing})` },
+    claude
+  )
+
+  assert.equal(thread.comments[0]?.body, `I meant to attach this: ![missing](${missing})`)
+  assert.deepEqual(thread.comments[0]?.attachments, [])
+})
+
+test('an image in a fenced code block is neither ingested nor listed', async () => {
+  const path = writeImage('documented.png', 5)
+  const body = ['How to attach:', '', '```', `![alt](${path})`, '```'].join('\n')
+
+  const thread = await commentsService.createThread({ reviewId, body }, claude)
+
+  assert.equal(thread.comments[0]?.body, body)
+  assert.deepEqual(thread.comments[0]?.attachments, [])
 })
