@@ -265,6 +265,34 @@ test('a bare path with percent-encoded spaces resolves too', () => {
   assert.equal(localPathFor(path.replace(/ /g, '%20')), path)
 })
 
+test('an angle-bracketed path with raw spaces is ingested', async () => {
+  // The spelling markdown provides for destinations containing spaces, and the
+  // one the MCP tool description tells agents to use for macOS screenshots.
+  const path = image('Screen Shot 2026-09-01 at 10.32.14.png', 7)
+
+  const rewritten = await ingestBodyAttachments(`![login screen](<${path}>)`)
+
+  assert.match(rewritten, TOKEN)
+  // The brackets go with the path they were escaping - a token has no spaces,
+  // so keeping them would leave `(<gitwarren://…>)` in the body.
+  assert.doesNotMatch(rewritten, /[<>]/)
+  assert.match(rewritten, /^!\[login screen\]\(gitwarren:\/\/attachment\/[a-f0-9]{64}\.png\)$/)
+})
+
+test('a bare path with raw spaces is left alone - markdown does not see an image', async () => {
+  // Not a defect in the rewrite: an unescaped space ends a link destination, so
+  // CommonMark produces no image node here and there is nothing to ingest. It
+  // is pinned because it is the case agents hit most (macOS screenshot names),
+  // and because the tempting "fix" - matching paths with a regex instead of
+  // parsing - is exactly what would start ingesting images out of fenced code
+  // blocks. The instruction to bracket such paths lives in the tool
+  // description; see ATTACHMENT_GUIDANCE in `mcp/server.ts`.
+  const path = image('Screen Shot with spaces.png', 8)
+  const body = `![login screen](${path})`
+
+  assert.equal(await ingestBodyAttachments(body), body)
+})
+
 test('non-local URLs resolve to null', () => {
   assert.equal(localPathFor('https://example.com/a.png'), null)
   assert.equal(localPathFor('data:image/png;base64,iVBORw0KGgo='), null)

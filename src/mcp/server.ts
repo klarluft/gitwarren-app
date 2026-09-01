@@ -81,7 +81,11 @@ const ATTACHMENT_GUIDANCE =
   '    The dropdown renders behind the modal:\n\n' +
   '    ![dropdown behind modal](/tmp/dropdown-bug.png)\n\n' +
   'The file is copied into GitWarren and the path rewritten, so the image survives\n' +
-  '/tmp being cleaned. Always write alt text - it is what agents without vision see.\n' +
+  '/tmp being cleaned. Always write alt text - it is what agents without vision see.\n\n' +
+  'If the path contains a space - "Screen Shot 2026-09-01 at 10.32.14.png", as macOS\n' +
+  'names screenshots - wrap it in angle brackets, or markdown does not read it as an\n' +
+  'image at all and it is left as plain text:\n\n' +
+  '    ![login screen](</tmp/Screen Shot 2026-09-01 at 10.32.14.png>)\n\n' +
   'PNG, JPEG, GIF and WebP are accepted, up to 10 MB. A path that does not resolve is\n' +
   'left in the text as written rather than failing the call, so check the returned\n' +
   'body if it matters.'
