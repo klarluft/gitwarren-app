@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["node"],
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
+    "paths": {"@core/*": ["./src/core/*"], "@shared/*": ["./src/shared/*"]}
+  },
+  "include": [
+    "src/main/**/*",
+    "src/preload/**/*",
+    "src/core/**/*",
+    "src/mcp/**/*",
+    "src/shared/**/*",
+    "electron.vite.config.ts",
+    "vite.mcp.config.ts",
+    "drizzle.config.ts"
+  ]
+}

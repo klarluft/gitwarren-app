@@ -1,0 +1,31 @@
+# Dependencies
+/node_modules
+
+# Build output
+#   out/     - electron-vite bundles (main, preload, renderer) + the MCP server
+#   release/ - electron-builder installers and update manifests (hundreds of MB)
+# Note: build/ is NOT ignored. It is electron-builder's buildResources folder
+# and holds source assets - the app icon and the macOS entitlements plist.
+/out
+/release
+
+# TypeScript incremental build info
+*.tsbuildinfo
+/node_modules/.tmp
+
+# Local SQLite. The real database lives in the OS application-data directory;
+# these only turn up if you point GITWARREN_DATA_DIR at the working tree.
+*.db
+*.db-wal
+*.db-shm
+
+# Environment overrides
+.env*
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# macOS
+.DS_Store

@@ -1,0 +1,127 @@
+@import 'tailwindcss';
+
+/*
+ * Theme tokens. The palette is defined once here in both schemes; the `.dark`
+ * class is applied to <html> from main.tsx following the OS setting, so the app
+ * matches the rest of the desktop without the user configuring anything.
+ */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --background: oklch(0.99 0.002 265);
+  --foreground: oklch(0.21 0.01 265);
+  --muted: oklch(0.96 0.004 265);
+  --muted-foreground: oklch(0.53 0.014 265);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.21 0.01 265);
+  --border: oklch(0.92 0.005 265);
+  --input: oklch(0.92 0.005 265);
+  --primary: oklch(0.53 0.19 264);
+  --primary-foreground: oklch(0.99 0.002 265);
+  --secondary: oklch(0.96 0.004 265);
+  --secondary-foreground: oklch(0.28 0.012 265);
+  --accent: oklch(0.95 0.012 264);
+  --accent-foreground: oklch(0.32 0.05 264);
+  --destructive: oklch(0.58 0.21 27);
+  --destructive-foreground: oklch(0.99 0.002 265);
+  --success: oklch(0.6 0.13 155);
+  --warning: oklch(0.68 0.14 70);
+  --ring: oklch(0.53 0.19 264);
+  --radius: 0.65rem;
+}
+
+.dark {
+  --background: oklch(0.17 0.008 265);
+  --foreground: oklch(0.95 0.004 265);
+  --muted: oklch(0.24 0.01 265);
+  --muted-foreground: oklch(0.68 0.012 265);
+  --card: oklch(0.21 0.009 265);
+  --card-foreground: oklch(0.95 0.004 265);
+  --border: oklch(0.29 0.011 265);
+  --input: oklch(0.31 0.011 265);
+  --primary: oklch(0.68 0.16 264);
+  --primary-foreground: oklch(0.17 0.008 265);
+  --secondary: oklch(0.26 0.011 265);
+  --secondary-foreground: oklch(0.93 0.005 265);
+  --accent: oklch(0.3 0.03 264);
+  --accent-foreground: oklch(0.9 0.03 264);
+  --destructive: oklch(0.63 0.2 25);
+  --destructive-foreground: oklch(0.98 0.002 265);
+  --success: oklch(0.72 0.15 155);
+  --warning: oklch(0.78 0.14 70);
+  --ring: oklch(0.68 0.16 264);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-ring: var(--ring);
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 0.25rem);
+  --radius-sm: calc(var(--radius) - 0.35rem);
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    /* A desktop window is not a document; nothing here should rubber-band. */
+    overscroll-behavior: none;
+  }
+
+  /* The whole chrome is app UI, so only deliberate text selection is useful. */
+  body {
+    user-select: none;
+  }
+
+  input,
+  textarea,
+  [data-selectable] {
+    user-select: text;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+  }
+}
+
+/* The draggable strip behind the macOS traffic lights. */
+.titlebar-drag {
+  -webkit-app-region: drag;
+}
+
+.titlebar-drag button,
+.titlebar-drag a {
+  -webkit-app-region: no-drag;
+}

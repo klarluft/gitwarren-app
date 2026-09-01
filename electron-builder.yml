@@ -1,0 +1,82 @@
+appId: com.gitwarren.app
+productName: GitWarren
+copyright: Copyright © 2026 Michal Wrzosek
+
+directories:
+  buildResources: build
+  output: release/${version}
+
+files:
+  - out/**
+  - package.json
+  - '!**/*.map'
+
+# Kept outside the asar archive:
+#  - the MCP server, because an agent spawns it as a real file on disk
+#  - better-sqlite3, because a native .node addon cannot be loaded from an archive
+asarUnpack:
+  - out/mcp/**
+  - node_modules/better-sqlite3/**
+
+# Migrations must exist as real .sql files at runtime; the migrator reads the
+# folder rather than importing it, so it cannot live inside the bundle.
+extraResources:
+  - from: drizzle
+    to: drizzle
+    filter: ['**/*']
+
+win:
+  target:
+    - target: nsis
+      arch: [x64, arm64]
+  artifactName: ${productName}-${version}-${arch}.${ext}
+
+nsis:
+  # Per-user install: no UAC prompt on install *or* on update, which is what
+  # makes a silent background update possible on Windows at all.
+  oneClick: true
+  perMachine: false
+  allowElevation: false
+  allowToChangeInstallationDirectory: false
+  # Emits the .blockmap used for delta downloads.
+  differentialPackage: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  # Losing the user's repository list on uninstall would be rude.
+  deleteAppDataOnUninstall: false
+
+mac:
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    # electron-updater reads the zip, not the dmg. Dropping this target breaks
+    # auto-update on macOS even though the app still installs fine.
+    - target: zip
+      arch: [arm64, x64]
+  category: public.app-category.developer-tools
+  artifactName: ${productName}-${version}-${arch}.${ext}
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  # Signing and notarisation are opt-in; see the README. Unsigned local builds
+  # are expected during development.
+  notarize: false
+
+dmg:
+  artifactName: ${productName}-${version}-${arch}.${ext}
+
+linux:
+  # AppImage only. deb/rpm cannot self-update without a package manager and a
+  # sudo prompt, which would defeat silent updates.
+  target:
+    - target: AppImage
+      arch: [x64, arm64]
+  category: Development
+  synopsis: Local code review for your git repositories
+  artifactName: ${productName}-${version}-${arch}.${ext}
+
+publish:
+  provider: github
+  owner: michal-wrzosek
+  repo: gitwarren-app
