@@ -47,7 +47,7 @@ import { cn } from '@/lib/utils'
  * behaviour that keeps `javascript:` out of an href - so the default is kept
  * for every other URL and only `gitwarren:` is added. The scheme resolves to a
  * file this app copied into its own store and serves itself; see
- * `registerAttachmentProtocol` in `main/index.ts`.
+ * `main/attachment-protocol.ts`.
  */
 function urlTransform(url: string): string {
   return url.startsWith('gitwarren://attachment/') ? url : defaultUrlTransform(url)
@@ -60,37 +60,43 @@ function urlTransform(url: string): string {
  * brings its own scale, colours and spacing, and this text sits inside cards
  * that already have one. Writing the overrides out keeps comment bodies looking
  * like part of the app rather than like an article pasted into it.
+ *
+ * Every override destructures `node` away before spreading the rest. That is
+ * not decoration: react-markdown sets `passNode: true` unconditionally, so each
+ * component is handed the mdast node alongside its real props, and spreading it
+ * onto a DOM element makes React warn about an unrecognised attribute - once
+ * per element, on every comment rendered.
  */
 const components: Components = {
-  h1: ({ className, ...props }) => (
+  h1: ({ node: _node, className, ...props }) => (
     <h1 className={cn('mt-4 mb-2 text-base font-semibold first:mt-0', className)} {...props} />
   ),
-  h2: ({ className, ...props }) => (
+  h2: ({ node: _node, className, ...props }) => (
     <h2 className={cn('mt-4 mb-2 text-base font-semibold first:mt-0', className)} {...props} />
   ),
-  h3: ({ className, ...props }) => (
+  h3: ({ node: _node, className, ...props }) => (
     <h3 className={cn('mt-3 mb-1.5 text-sm font-semibold first:mt-0', className)} {...props} />
   ),
-  h4: ({ className, ...props }) => (
+  h4: ({ node: _node, className, ...props }) => (
     <h4 className={cn('mt-3 mb-1.5 text-sm font-semibold first:mt-0', className)} {...props} />
   ),
-  h5: ({ className, ...props }) => (
+  h5: ({ node: _node, className, ...props }) => (
     <h5 className={cn('mt-3 mb-1.5 text-sm font-semibold first:mt-0', className)} {...props} />
   ),
-  h6: ({ className, ...props }) => (
+  h6: ({ node: _node, className, ...props }) => (
     <h6
       className={cn('mt-3 mb-1.5 text-sm font-semibold text-muted-foreground first:mt-0', className)}
       {...props}
     />
   ),
 
-  p: ({ className, ...props }) => (
+  p: ({ node: _node, className, ...props }) => (
     <p className={cn('my-2 leading-relaxed first:mt-0 last:mb-0', className)} {...props} />
   ),
 
   // `li:has(> input)` is the task-list case: GFM renders a checkbox as the
   // item's first child, and a bullet next to a checkbox reads as noise.
-  ul: ({ className, ...props }) => (
+  ul: ({ node: _node, className, ...props }) => (
     <ul
       className={cn(
         'my-2 ml-5 list-disc space-y-1 first:mt-0 last:mb-0',
@@ -100,15 +106,15 @@ const components: Components = {
       {...props}
     />
   ),
-  ol: ({ className, ...props }) => (
+  ol: ({ node: _node, className, ...props }) => (
     <ol className={cn('my-2 ml-5 list-decimal space-y-1 first:mt-0 last:mb-0', className)} {...props} />
   ),
-  li: ({ className, ...props }) => <li className={cn('leading-relaxed', className)} {...props} />,
+  li: ({ node: _node, className, ...props }) => <li className={cn('leading-relaxed', className)} {...props} />,
 
   // Task-list checkboxes stay disabled. Ticking one here would have to write
   // back to the body to mean anything, and a click that silently does nothing
   // is worse than a control that is visibly not offered.
-  input: ({ className, ...props }) =>
+  input: ({ node: _node, className, ...props }) =>
     props.type === 'checkbox' ? (
       <input
         className={cn('mr-1.5 translate-y-[1px] align-baseline accent-primary', className)}
@@ -117,7 +123,7 @@ const components: Components = {
       />
     ) : null,
 
-  blockquote: ({ className, ...props }) => (
+  blockquote: ({ node: _node, className, ...props }) => (
     <blockquote
       className={cn(
         'my-2 border-l-2 border-border pl-3 text-muted-foreground first:mt-0 last:mb-0',
@@ -131,13 +137,13 @@ const components: Components = {
   // back off again for fenced blocks. react-markdown stopped passing an
   // `inline` flag in v9, and "reset it inside pre" is more robust than
   // reconstructing that flag from the node's parent.
-  code: ({ className, ...props }) => (
+  code: ({ node: _node, className, ...props }) => (
     <code
       className={cn('rounded bg-muted px-1 py-0.5 font-mono text-[0.85em]', className)}
       {...props}
     />
   ),
-  pre: ({ className, ...props }) => (
+  pre: ({ node: _node, className, ...props }) => (
     <pre
       className={cn(
         'my-2 overflow-x-auto rounded-md border border-border bg-muted/50 p-3 first:mt-0 last:mb-0',
@@ -152,7 +158,7 @@ const components: Components = {
   // `target="_blank"` is what routes the click to the real browser: the main
   // process answers it in `setWindowOpenHandler` with `shell.openExternal`.
   // Without it the link would navigate the app window away from the app.
-  a: ({ className, ...props }) => (
+  a: ({ node: _node, className, ...props }) => (
     <a
       target="_blank"
       rel="noreferrer noopener"
@@ -161,7 +167,7 @@ const components: Components = {
     />
   ),
 
-  img: ({ src, alt, title, className, ...props }) => {
+  img: ({ node: _node, src, alt, title, className, ...props }) => {
     const url = typeof src === 'string' ? src : ''
     if (!url.startsWith('gitwarren://')) {
       return (
@@ -187,24 +193,24 @@ const components: Components = {
     )
   },
 
-  hr: ({ className, ...props }) => (
+  hr: ({ node: _node, className, ...props }) => (
     <hr className={cn('my-3 border-t border-border', className)} {...props} />
   ),
 
   // A wide table has to scroll inside itself; letting it widen the card would
   // push the whole conversation column sideways.
-  table: ({ className, ...props }) => (
+  table: ({ node: _node, className, ...props }) => (
     <div className="my-2 overflow-x-auto first:mt-0 last:mb-0">
       <table className={cn('w-full border-collapse text-left', className)} {...props} />
     </div>
   ),
-  th: ({ className, ...props }) => (
+  th: ({ node: _node, className, ...props }) => (
     <th
       className={cn('border border-border bg-muted/50 px-2 py-1 font-semibold', className)}
       {...props}
     />
   ),
-  td: ({ className, ...props }) => (
+  td: ({ node: _node, className, ...props }) => (
     <td className={cn('border border-border px-2 py-1 align-top', className)} {...props} />
   )
 }

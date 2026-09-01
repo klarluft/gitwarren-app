@@ -1,55 +1,20 @@
 /**
  * Main process entry: one window, the IPC surface, and the updater.
  */
-import { app, BrowserWindow, dialog, net, protocol, shell } from 'electron'
+import { app, BrowserWindow, dialog, shell } from 'electron'
 import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
 import { getDatabase, closeDatabase } from '../core/db/client.js'
 import { getDatabasePath, getDataDirectory } from '../core/paths.js'
-import { ATTACHMENT_FILE_NAME, attachmentsService } from '../core/services/attachments.js'
+import { attachmentsService } from '../core/services/attachments.js'
+import { registerAttachmentProtocol, registerAttachmentScheme } from './attachment-protocol.js'
 import { registerIpcHandlers } from './ipc.js'
 import { disposeUpdater, initialiseUpdater } from './updater.js'
 
 const isDev = !app.isPackaged
 
-/**
- * The `gitwarren:` scheme, registered before the app is ready because that is
- * the only point at which a scheme can be given privileges.
- *
- * `standard` gives it an origin, which is what makes it usable as an `<img>`
- * source; `secure` keeps it out of the mixed-content rules; `stream` lets a
- * large image arrive in pieces rather than being buffered whole.
- */
-protocol.registerSchemesAsPrivileged([
-  { scheme: 'gitwarren', privileges: { standard: true, secure: true, stream: true } }
-])
-
-/**
- * Serve attachment images to the renderer.
- *
- * A plain `file://` src cannot do this job. Chromium refuses `file://`
- * subresources from a page on another origin, and the renderer's own origin
- * differs between environments - `http://localhost` under `electron-vite dev`,
- * `file://` in a packaged build. A custom scheme is identical in both, so the
- * markdown that renders an image in development renders it in production.
- */
-function registerAttachmentProtocol(): void {
-  protocol.handle('gitwarren', (request) => {
-    const { host, pathname } = new URL(request.url)
-    if (host !== 'attachment') return new Response(null, { status: 404 })
-
-    const name = pathname.slice(1)
-    // Comment bodies are agent-writable, so this URL is reachable by anything
-    // an agent can put in a body. The test is the security boundary that stops
-    // gitwarren://attachment/../../../../etc/passwd from being served: a sha
-    // and a short extension is the whole vocabulary of a legitimate name, so
-    // anything else is refused outright rather than resolved and then checked.
-    if (!ATTACHMENT_FILE_NAME.test(name)) return new Response(null, { status: 400 })
-
-    const file = join(getDataDirectory(), 'attachments', name.slice(0, 2), name)
-    return net.fetch(pathToFileURL(file).toString())
-  })
-}
+// Before `app.whenReady()`: privileged scheme registration is only accepted
+// this early. See `attachment-protocol.ts` for why the scheme exists at all.
+registerAttachmentScheme()
 
 /**
  * Opens the database, reporting failure to the user instead of crashing.
