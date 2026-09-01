@@ -295,7 +295,9 @@ server.registerTool(
       'saying where they land in the diff as it stands right now - "anchored" (the line is ' +
       'unchanged), "moved" (the code shifted and `anchor.line` is its current line) or "outdated" ' +
       '(the line is no longer in the diff, so the comment may be about code that has since been ' +
-      'rewritten). Check the anchor before acting on a line comment.',
+      'rewritten). Check the anchor before acting on a line comment. An outdated one still ' +
+      'carries `anchorSnapshot`, the code as it read when the comment was written, which is how ' +
+      'to tell what was being objected to before it was rewritten.',
     inputSchema: listCommentsInputSchema.shape,
     annotations: { readOnlyHint: true, openWorldHint: false }
   },

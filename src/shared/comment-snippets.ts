@@ -6,12 +6,18 @@
  * without the line it points at. GitHub prints a small hunk above each review
  * comment for exactly this reason, and this is the piece that picks the lines.
  *
+ * The module also decides *which* code that is: the current diff while the
+ * comment still anchors to a line in it, and the snapshot stored when the
+ * comment was written once it does not. See `threadSnippet` at the bottom.
+ *
  * Pure and dependency-free like its sibling `comment-anchors`, and for the same
  * reason: the renderer runs it against the diff it has already fetched, and the
  * MCP server can run it against one it reads itself.
  */
-import type { DiffSide } from './comment-anchors.js'
+import { isInlineAnchor, type DiffSide, type ResolvedAnchor } from './comment-anchors.js'
+import type { AnchorState } from './comment-anchors.js'
 import type { DiffLine, FileDiff } from './git.js'
+import type { CommentThread } from './schemas.js'
 
 /** How many lines of lead-in a snippet carries by default. */
 export const SNIPPET_CONTEXT_LINES = 3
@@ -54,4 +60,95 @@ export function snippetAt(
   }
 
   return null
+}
+
+/**
+ * Choosing which code to show above a line comment.
+ *
+ * There are two candidates and the order between them is the whole point:
+ *
+ *  1. The current diff, when the comment still anchors to a line in it. This is
+ *     what the reviewer would see in Files changed, so a comment that is still
+ *     live is discussed against code that is still live.
+ *  2. The snapshot taken when the comment was written, when it does not. The
+ *     code it was about has been rewritten or has left the diff; the snapshot is
+ *     the only remaining record of what the commenter was looking at, and
+ *     showing it is what keeps an outdated discussion readable instead of
+ *     leaving it stranded next to nothing.
+ *
+ * Falling back is always marked `historical`, because a snapshot presented as
+ * current code would be a straightforwardly false statement about the branch.
+ *
+ * The last resort is `anchorText` alone - one line, no context. Threads created
+ * before snapshots existed have only that, and one line beats none.
+ */
+export interface ThreadSnippet {
+  filePath: string
+  side: DiffSide
+  line: number | null
+  lines: DiffLine[]
+  clipped: boolean
+  state: AnchorState
+  historical: boolean
+  capturedSha: string | null
+}
+
+/** The single stored line, for threads that predate snapshots. */
+function fromAnchorText(thread: CommentThread, side: DiffSide): DiffLine[] {
+  if (thread.anchorText === null) return []
+  return [
+    {
+      type: 'context',
+      content: thread.anchorText,
+      oldNumber: side === 'base' ? thread.line : null,
+      newNumber: side === 'head' ? thread.line : null
+    }
+  ]
+}
+
+/**
+ * What to draw above `thread`, or null if it is a review-level thread.
+ *
+ * `anchor` is null while the diff is still being read. That is not the same as
+ * "outdated": the app does not yet know where the comment lands, so the
+ * snapshot is shown without any claim about the branch, and the badges appear
+ * once the diff arrives.
+ */
+export function threadSnippet(
+  thread: CommentThread,
+  anchor: ResolvedAnchor | null,
+  file: FileDiff | undefined
+): ThreadSnippet | null {
+  if (!isInlineAnchor(thread)) return null
+
+  const live =
+    anchor === null || anchor.line === null ? null : snippetAt(file, thread.side, anchor.line)
+
+  if (live !== null && anchor !== null) {
+    return {
+      // Under the file's current name, so a comment left before a rename is
+      // filed against the file the reviewer is looking at now.
+      filePath: file?.path ?? thread.filePath,
+      side: thread.side,
+      line: anchor.line,
+      lines: live.lines,
+      clipped: live.clipped,
+      state: anchor.state,
+      historical: false,
+      capturedSha: thread.anchorSha
+    }
+  }
+
+  const snapshot = thread.anchorSnapshot
+
+  return {
+    filePath: file?.path ?? thread.filePath,
+    side: thread.side,
+    line: thread.line,
+    lines: snapshot?.lines ?? fromAnchorText(thread, thread.side),
+    clipped: snapshot?.clipped ?? false,
+    state: anchor === null ? 'anchored' : anchor.state,
+    historical: anchor !== null,
+    capturedSha: thread.anchorSha
+  }
 }

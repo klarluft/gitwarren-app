@@ -34,14 +34,17 @@ import {
   type AnchorState,
   type DiffSide
 } from '../../shared/comment-anchors.js'
+import { snippetAt } from '../../shared/comment-snippets.js'
 import { parseWithSchema as parse } from '../../shared/validation.js'
 import {
+  anchorSnapshotSchema,
   createThreadInputSchema,
   listCommentsInputSchema,
   removeCommentInputSchema,
   replyToThreadInputSchema,
   setThreadResolvedInputSchema,
   updateCommentInputSchema,
+  type AnchorSnapshot,
   type Comment,
   type CommentThread
 } from '../../shared/schemas.js'
@@ -72,6 +75,24 @@ function toComment(row: CommentRow): Comment {
   }
 }
 
+/**
+ * Decode a stored hunk snapshot.
+ *
+ * Anything unreadable is treated as absent rather than thrown: a snapshot is a
+ * nicety for display, and refusing to load a whole discussion because one JSON
+ * blob went bad would be the wrong trade by a wide margin.
+ */
+function toSnapshot(stored: string | null): AnchorSnapshot | null {
+  if (stored === null) return null
+  try {
+    const parsed: unknown = JSON.parse(stored)
+    const result = anchorSnapshotSchema.safeParse(parsed)
+    return result.success ? result.data : null
+  } catch {
+    return null
+  }
+}
+
 function toThread(row: CommentThreadRow, threadComments: Comment[]): CommentThread {
   return {
     id: row.id,
@@ -81,6 +102,7 @@ function toThread(row: CommentThreadRow, threadComments: Comment[]): CommentThre
     line: row.line,
     anchorText: row.anchorText,
     anchorSha: row.anchorSha,
+    anchorSnapshot: toSnapshot(row.anchorSnapshot),
     resolvedAt: row.resolvedAt,
     resolvedBy: row.resolvedBy,
     createdAt: row.createdAt,
@@ -149,12 +171,19 @@ function readThreads(reviewId: number): CommentThread[] {
 }
 
 /**
- * The text of one line of the diff, captured when a thread is opened.
+ * What the diff said at the moment a thread was opened.
  *
- * Null when the line is not in the diff - an agent commenting on an unchanged
- * part of a file, or on a stale line number. That is not an error: the comment
- * is still worth keeping, it simply cannot be pinned to a line the reader can
- * see, and `resolveAnchor` reports it as outdated from the start.
+ * Two things are kept, and they do different jobs. `anchorText` is the one line,
+ * and it is what `resolveAnchor` re-finds the comment by later. `snapshot` is
+ * that line with the few above it - GitHub's `diff_hunk` - and it exists purely
+ * so the comment is still readable after the code it was about has been
+ * rewritten. Neither is ever updated afterwards; a snapshot that follows the
+ * branch is not a snapshot.
+ *
+ * Both are null when the line is not in the diff - an agent commenting on an
+ * unchanged part of a file, or on a stale line number. That is not an error:
+ * the comment is still worth keeping, it simply cannot be pinned to a line the
+ * reader can see, and `resolveAnchor` reports it as outdated from the start.
  */
 async function captureAnchor(
   repositoryPath: string,
@@ -162,7 +191,7 @@ async function captureAnchor(
   filePath: string,
   side: DiffSide,
   line: number
-): Promise<{ anchorText: string | null; anchorSha: string | null }> {
+): Promise<{ anchorText: string | null; anchorSha: string | null; snapshot: AnchorSnapshot | null }> {
   const diff = await readReviewDiff(repositoryPath, review.baseRef, review.headRef, {
     includeUncommitted: true
   })
@@ -172,7 +201,11 @@ async function captureAnchor(
     .flatMap((hunk) => hunk.lines)
     .find((candidate) => (side === 'base' ? candidate.oldNumber : candidate.newNumber) === line)
 
-  return { anchorText: found?.content ?? null, anchorSha: diff.head.sha }
+  return {
+    anchorText: found?.content ?? null,
+    anchorSha: diff.head.sha,
+    snapshot: found === undefined ? null : snippetAt(file, side, line)
+  }
 }
 
 /**
@@ -261,11 +294,13 @@ export const commentsService = {
 
     let anchorText: string | null = null
     let anchorSha: string | null = null
+    let anchorSnapshot: string | null = null
     if (filePath !== undefined && line !== undefined) {
       const repository = requireRepository(review.repositoryId)
       const captured = await captureAnchor(repository.path, review, filePath, side, line)
       anchorText = captured.anchorText
       anchorSha = captured.anchorSha
+      anchorSnapshot = captured.snapshot === null ? null : JSON.stringify(captured.snapshot)
     }
 
     const timestamp = nowIso()
@@ -281,6 +316,7 @@ export const commentsService = {
           line: line ?? null,
           anchorText,
           anchorSha,
+          anchorSnapshot,
           resolvedAt: null,
           resolvedBy: null,
           createdAt: timestamp,

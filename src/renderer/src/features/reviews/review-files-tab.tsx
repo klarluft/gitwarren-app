@@ -21,9 +21,11 @@ import { plural } from '@/lib/format'
 import { CommentThreadCard } from '../comments/comment-thread-card'
 import { useCommentMutations, useReviewComments } from '../comments/use-comments'
 import { CompareErrorCard, NoWorktreeNotice, WorkingTreeBanner } from './compare-notices'
+import { DiffSnippet } from './diff-snippet'
 import { DiffStat, FileDiffCard, type AnchoredThread } from './diff-view'
 import { useReviewDiff } from './use-reviews'
 import { findAnchorFile, isInlineAnchor, resolveAnchor } from '@shared/comment-anchors'
+import { threadSnippet } from '@shared/comment-snippets'
 import type { FileDiff as FileDiffData } from '@shared/git'
 import type { CommentThread, Review } from '@shared/schemas'
 
@@ -169,23 +171,35 @@ export function ReviewFilesTab({ review }: { review: Review }) {
             {orphanedFiles.length === 1 ? 'is' : 'are'} no longer in this diff.
           </p>
           {orphanedFiles.map(([path, fileThreads]) => (
-            <div key={path} className="flex flex-col gap-2">
-              <p className="font-mono text-xs text-muted-foreground">{path}</p>
-              {fileThreads.map((thread) => (
-                <CommentThreadCard
-                  key={thread.id}
-                  thread={thread}
-                  mutations={mutations}
-                  anchorState={thread.anchor.state}
-                  location={
-                    thread.line !== null ? (
-                      <span className="font-mono text-xs text-muted-foreground">
-                        was line {thread.line}
-                      </span>
-                    ) : null
-                  }
-                />
-              ))}
+            <div key={path} className="flex flex-col gap-3">
+              {fileThreads.map((thread) => {
+                // No file to read the code from, so this is the stored snapshot
+                // or nothing at all.
+                const snippet = threadSnippet(thread, thread.anchor, undefined)
+                const hasSnippet = snippet !== null && snippet.lines.length > 0
+
+                return (
+                  <div key={thread.id} className="flex flex-col gap-2">
+                    {hasSnippet ? (
+                      <DiffSnippet {...snippet} />
+                    ) : (
+                      <p className="font-mono text-xs text-muted-foreground">{path}</p>
+                    )}
+                    <CommentThreadCard
+                      thread={thread}
+                      mutations={mutations}
+                      anchorState={thread.anchor.state}
+                      location={
+                        !hasSnippet && thread.line !== null ? (
+                          <span className="font-mono text-xs text-muted-foreground">
+                            was line {thread.line}
+                          </span>
+                        ) : null
+                      }
+                    />
+                  </div>
+                )
+              })}
             </div>
           ))}
         </Card>

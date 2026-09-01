@@ -328,6 +328,63 @@ test('a comment on rewritten code is reported as outdated rather than moved', as
   git(checkout, 'reset', '--hard', 'HEAD~1')
 })
 
+test('a line comment keeps a snapshot of the code it was written against', async () => {
+  const thread = await commentsService.createThread(
+    { reviewId, body: 'Why 3?', filePath: 'app.ts', line: 3 },
+    claude
+  )
+
+  // The commented line, with what led up to it - GitHub's `diff_hunk`.
+  assert.deepEqual(
+    thread.anchorSnapshot?.lines.map((line) => line.content),
+    ['const a = 1', 'const b = 2', 'const c = 3']
+  )
+  assert.equal(thread.anchorSnapshot?.clipped, false)
+})
+
+test('the snapshot survives the code being rewritten under it', async () => {
+  await commentsService.createThread({ reviewId, body: 'Why 3?', filePath: 'app.ts', line: 3 }, claude)
+
+  write(checkout, 'app.ts', 'const a = 1\nconst b = 2\nconst c = 99\n')
+  git(checkout, 'add', '.')
+  git(checkout, 'commit', '-m', 'change c')
+
+  const [anchored] = await commentsService.listAnchored({ reviewId })
+
+  // The anchor is gone, so there is nowhere in the current diff to draw this
+  // comment. Without the snapshot the discussion would be stranded next to
+  // nothing; with it, a reader can still see what was being objected to.
+  assert.deepEqual(anchored?.anchor, { state: 'outdated', line: null })
+  assert.deepEqual(
+    anchored?.anchorSnapshot?.lines.map((line) => line.content),
+    ['const a = 1', 'const b = 2', 'const c = 3']
+  )
+
+  git(checkout, 'reset', '--hard', 'HEAD~1')
+})
+
+test('the snapshot is never rewritten by later activity on the thread', async () => {
+  const thread = await commentsService.createThread(
+    { reviewId, body: 'Why 3?', filePath: 'app.ts', line: 3 },
+    claude
+  )
+
+  write(checkout, 'app.ts', 'const a = 1\nconst b = 2\nconst c = 99\n')
+  git(checkout, 'add', '.')
+  git(checkout, 'commit', '-m', 'change c')
+
+  await commentsService.reply({ threadId: thread.id, body: 'Still wondering.' }, HUMAN_AUTHOR)
+  await commentsService.setResolved({ threadId: thread.id, resolved: true }, HUMAN_AUTHOR)
+
+  const [reloaded] = await commentsService.list({ reviewId })
+  assert.deepEqual(
+    reloaded?.anchorSnapshot?.lines.map((line) => line.content),
+    ['const a = 1', 'const b = 2', 'const c = 3']
+  )
+
+  git(checkout, 'reset', '--hard', 'HEAD~1')
+})
+
 test('commenting on a line outside the diff is kept, and says so', async () => {
   // Line 1 of `long.ts` is far above the only hunk, so the reviewer never sees
   // it in this diff. An agent reading the file with git can still have
@@ -340,6 +397,8 @@ test('commenting on a line outside the diff is kept, and says so', async () => {
   )
 
   assert.equal(thread.anchorText, null)
+  // Nothing was on screen to snapshot either; the comment stands on its own.
+  assert.equal(thread.anchorSnapshot, null)
 
   const [anchored] = await commentsService.listAnchored({ reviewId })
   assert.deepEqual(anchored?.anchor, { state: 'outdated', line: null })

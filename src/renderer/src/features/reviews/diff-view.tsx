@@ -35,7 +35,9 @@ import { Card } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 import { CommentComposer } from '../comments/comment-composer'
 import { CommentThreadCard } from '../comments/comment-thread-card'
+import { DiffSnippet } from './diff-snippet'
 import type { CommentMutations } from '../comments/use-comments'
+import { threadSnippet } from '@shared/comment-snippets'
 import type { DiffSide, ResolvedAnchor } from '@shared/comment-anchors'
 import type { DiffHunk, DiffLine, FileDiff } from '@shared/git'
 import type { CommentThread } from '@shared/schemas'
@@ -178,26 +180,39 @@ export function FileDiffCard({ file, comments }: { file: FileDiff; comments?: Di
       </button>
 
       {expanded && orphans.length > 0 && comments && (
-        <div className="flex flex-col gap-2 border-t border-border bg-muted/20 p-3">
+        <div className="flex flex-col gap-3 border-t border-border bg-muted/20 p-3">
           <p className="text-xs text-muted-foreground">
             {orphans.length === 1 ? 'This comment is' : 'These comments are'} on code that is not in
             the diff any more.
           </p>
-          {orphans.map((thread) => (
-            <CommentThreadCard
-              key={thread.id}
-              thread={thread}
-              mutations={comments.mutations}
-              anchorState={thread.anchor.state}
-              location={
-                thread.line !== null ? (
-                  <span className="font-mono text-xs text-muted-foreground">
-                    was line {thread.line}
-                  </span>
-                ) : null
-              }
-            />
-          ))}
+          {/* The snapshot taken when the comment was written is all that is
+              left of the code it was about, so it is printed rather than a bare
+              "was line 12" - a discussion nobody can follow is barely better
+              than a lost one. */}
+          {orphans.map((thread) => {
+            const snippet = threadSnippet(thread, thread.anchor, file)
+            const hasSnippet = snippet !== null && snippet.lines.length > 0
+
+            return (
+              <div key={thread.id} className="flex flex-col gap-2">
+                {hasSnippet && <DiffSnippet {...snippet} />}
+                <CommentThreadCard
+                  thread={thread}
+                  mutations={comments.mutations}
+                  anchorState={thread.anchor.state}
+                  // The snippet header already names the line it was on; this
+                  // is only for a thread too old to have a snapshot.
+                  location={
+                    !hasSnippet && thread.line !== null ? (
+                      <span className="font-mono text-xs text-muted-foreground">
+                        was line {thread.line}
+                      </span>
+                    ) : null
+                  }
+                />
+              </div>
+            )
+          })}
         </div>
       )}
 

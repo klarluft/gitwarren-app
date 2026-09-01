@@ -11,6 +11,7 @@
  * UI and the agent surface from drifting apart.
  */
 import { z } from 'zod'
+import type { DiffLine } from './git.js'
 
 export const MAX_NAME_LENGTH = 120
 
@@ -237,6 +238,35 @@ export const commentSchema = z.object({
 })
 
 /**
+ * The code a line comment was written against, frozen at the moment it was
+ * written.
+ *
+ * This is GitHub's `diff_hunk` under a different name, and it is here for
+ * GitHub's reason. A review in GitWarren follows two ref *names*, so the code
+ * under a comment keeps changing; `anchorText` is enough to *detect* that the
+ * line has been rewritten, but not enough to show a reader what the comment was
+ * ever about. Once the line is gone, this snapshot is the only remaining record
+ * of it - so an outdated comment can still be read, rather than sitting alone
+ * next to nothing.
+ *
+ * It is a snapshot and is never rewritten. A thread with a live anchor is drawn
+ * against the current diff instead; this is what is left when that fails.
+ */
+export const diffLineSchema = z.object({
+  type: z.enum(['context', 'insert', 'delete']),
+  content: z.string(),
+  oldNumber: z.number().int().nullable(),
+  newNumber: z.number().int().nullable()
+}) satisfies z.ZodType<DiffLine>
+
+export const anchorSnapshotSchema = z.object({
+  /** The commented line last, with the lines that led up to it before it. */
+  lines: z.array(diffLineSchema),
+  /** True when the hunk started further up than the snapshot reaches. */
+  clipped: z.boolean()
+})
+
+/**
  * A thread and every message in it.
  *
  * `filePath`/`side`/`line` are null together for a review-level thread - the
@@ -252,6 +282,8 @@ export const commentThreadSchema = z.object({
   anchorText: z.string().nullable(),
   /** Head sha at that moment, so the UI can say what was being looked at. */
   anchorSha: z.string().nullable(),
+  /** The code as it looked when the comment was written; see above. */
+  anchorSnapshot: anchorSnapshotSchema.nullable(),
   resolvedAt: z.iso.datetime().nullable(),
   resolvedBy: z.string().nullable(),
   createdAt: z.iso.datetime(),
@@ -318,6 +350,7 @@ export const agentLabelSchema = z
   .min(1, 'A label cannot be empty.')
   .max(MAX_AGENT_LABEL_LENGTH, 'That label is too long.')
 
+export type AnchorSnapshot = z.infer<typeof anchorSnapshotSchema>
 export type CommentAuthorData = z.infer<typeof commentAuthorSchema>
 export type Comment = z.infer<typeof commentSchema>
 export type CommentThread = z.infer<typeof commentThreadSchema>

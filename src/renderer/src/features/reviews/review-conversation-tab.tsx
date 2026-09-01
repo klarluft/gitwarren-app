@@ -10,14 +10,11 @@
  * review conversation stops being readable.
  *
  * That snippet means this tab reads the diff, which is the one git-backed read
- * the app makes without being asked. It is deliberate: the snippet has to come
- * from the diff that is actually on the branch now, since a comment's line moves
- * as the branch does - the alternative, storing the surrounding lines when the
- * comment was written, would show code that has since been rewritten. The read
- * shares its cache key with the Files changed tab, so visiting both costs one
- * diff. When it is slow, or the line has left the diff entirely, the thread
- * still renders - against the single line captured when the comment was
- * written, or against nothing at all.
+ * the app makes without being asked. It is deliberate: while a comment still
+ * points at live code, the reader should see that code as it is now, not as it
+ * was. It shares its cache key with the Files changed tab, so visiting both
+ * costs one diff. When the code has moved on past the comment, the snapshot
+ * stored when the comment was written is shown instead - see `comment-snippets`.
  */
 import { useMemo } from 'react'
 import { MessageSquare, Pencil } from 'lucide-react'
@@ -32,15 +29,9 @@ import { CommentThreadCard } from '../comments/comment-thread-card'
 import { useCommentMutations, useReviewComments } from '../comments/use-comments'
 import { DiffSnippet } from './diff-snippet'
 import { useReviewDiff } from './use-reviews'
-import {
-  findAnchorFile,
-  isInlineAnchor,
-  resolveAnchor,
-  type AnchorState,
-  type DiffSide
-} from '@shared/comment-anchors'
-import { snippetAt, type AnchorSnippet } from '@shared/comment-snippets'
-import type { DiffLine, FileDiff } from '@shared/git'
+import { findAnchorFile, isInlineAnchor, resolveAnchor } from '@shared/comment-anchors'
+import { threadSnippet, type ThreadSnippet } from '@shared/comment-snippets'
+import type { FileDiff } from '@shared/git'
 import type { CommentThread, Review } from '@shared/schemas'
 
 interface ReviewConversationTabProps {
@@ -48,38 +39,10 @@ interface ReviewConversationTabProps {
   onEdit: () => void
 }
 
-/** What to print above a line thread. Null for a review-level thread. */
-interface ThreadSnippet {
-  filePath: string
-  side: DiffSide
-  line: number | null
-  state: AnchorState
-  lines: DiffLine[]
-  clipped: boolean
-}
-
 interface TimelineEntry {
   thread: CommentThread
+  /** What to print above it. Null for a review-level thread. */
   snippet: ThreadSnippet | null
-}
-
-/**
- * The line captured when the comment was written - all that is left to show
- * once the diff has moved on past it.
- */
-function storedLine(thread: CommentThread, side: DiffSide): AnchorSnippet | null {
-  if (thread.anchorText === null) return null
-  return {
-    lines: [
-      {
-        type: 'context',
-        content: thread.anchorText,
-        oldNumber: side === 'base' ? thread.line : null,
-        newNumber: side === 'head' ? thread.line : null
-      }
-    ],
-    clipped: false
-  }
 }
 
 /**
@@ -88,39 +51,24 @@ function storedLine(thread: CommentThread, side: DiffSide): AnchorSnippet | null
  * Line threads are re-anchored against the diff on screen rather than trusted
  * to their stored line number - the same `resolveAnchor` the Files changed tab
  * and the MCP server run, so no two surfaces disagree about where a comment
- * sits.
+ * sits. `files` is undefined while that diff is still being read.
  */
 function buildTimeline(threads: CommentThread[], files: FileDiff[] | undefined): TimelineEntry[] {
   const entries = threads.map<TimelineEntry>((thread) => {
     if (!isInlineAnchor(thread)) return { thread, snippet: null }
 
     const file = files === undefined ? undefined : findAnchorFile(files, thread.filePath)
-    const anchor = resolveAnchor(file, {
-      filePath: thread.filePath,
-      side: thread.side,
-      line: thread.line,
-      anchorText: thread.anchorText
-    })
+    const anchor =
+      files === undefined
+        ? null
+        : resolveAnchor(file, {
+            filePath: thread.filePath,
+            side: thread.side,
+            line: thread.line,
+            anchorText: thread.anchorText
+          })
 
-    const snippet =
-      (anchor.line === null ? null : snippetAt(file, thread.side, anchor.line)) ??
-      storedLine(thread, thread.side)
-
-    return {
-      thread,
-      snippet: {
-        // Under its current name, so a comment left before a rename is filed
-        // against the file the reviewer is looking at now.
-        filePath: file?.path ?? thread.filePath,
-        side: thread.side,
-        line: anchor.line ?? thread.line,
-        // While the diff is still loading there is nothing to anchor against,
-        // and calling that "outdated" would be a claim the app cannot support.
-        state: files === undefined ? 'anchored' : anchor.state,
-        lines: snippet?.lines ?? [],
-        clipped: snippet?.clipped ?? false
-      }
-    }
+    return { thread, snippet: threadSnippet(thread, anchor, file) }
   })
 
   return entries.sort((a, b) => a.thread.createdAt.localeCompare(b.thread.createdAt))
@@ -169,6 +117,8 @@ export function ReviewConversationTab({ review, onEdit }: ReviewConversationTabP
       {timeline.map(({ thread, snippet }) => (
         <div key={thread.id} className="flex flex-col gap-2">
           {snippet !== null &&
+            // A thread with neither a snapshot nor a live anchor has nothing to
+            // show until the diff arrives; anything else renders immediately.
             (snippet.lines.length === 0 && diffLoading ? (
               <Skeleton className="h-20 w-full" />
             ) : (

@@ -10,8 +10,9 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { snippetAt } from '../comment-snippets.js'
+import { snippetAt, threadSnippet } from '../comment-snippets.js'
 import type { DiffHunk, DiffLine, FileDiff } from '../git.js'
+import type { AnchorSnapshot, CommentThread } from '../schemas.js'
 
 /** `[type, content, oldNumber, newNumber]`, so the tests read as diffs. */
 type Row = [DiffLine['type'], string, number | null, number | null]
@@ -121,4 +122,124 @@ test('the context width is adjustable', () => {
     ['three', 'four']
   )
   assert.equal(snippet?.clipped, true)
+})
+
+/* -------------------------------------------------------------------------- */
+/* Choosing between the live diff and the stored snapshot                     */
+/* -------------------------------------------------------------------------- */
+
+function threadOn(line: number | null, overrides: Partial<CommentThread> = {}): CommentThread {
+  return {
+    id: 1,
+    reviewId: 1,
+    filePath: line === null ? null : 'src/app.ts',
+    side: line === null ? null : 'head',
+    line,
+    anchorText: line === null ? null : 'four',
+    anchorSha: 'abc1234def',
+    anchorSnapshot: null,
+    resolvedAt: null,
+    resolvedBy: null,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    comments: [],
+    ...overrides
+  }
+}
+
+const snapshot: AnchorSnapshot = {
+  lines: [
+    { type: 'context', content: 'three (as written)', oldNumber: 3, newNumber: 3 },
+    { type: 'context', content: 'four (as written)', oldNumber: 4, newNumber: 4 }
+  ],
+  clipped: true
+}
+
+test('a live comment is shown against the code as it is now', () => {
+  const shown = threadSnippet(threadOn(4), { state: 'anchored', line: 4 }, file)
+
+  assert.deepEqual(
+    shown?.lines.map((line) => line.content),
+    ['one', 'two', 'three', 'four']
+  )
+  assert.equal(shown?.historical, false)
+  assert.equal(shown?.state, 'anchored')
+})
+
+test('the live diff wins over the snapshot while the comment still anchors', () => {
+  const shown = threadSnippet(
+    threadOn(4, { anchorSnapshot: snapshot }),
+    { state: 'anchored', line: 4 },
+    file
+  )
+
+  assert.deepEqual(
+    shown?.lines.map((line) => line.content),
+    ['one', 'two', 'three', 'four']
+  )
+  assert.equal(shown?.historical, false)
+})
+
+test('once the code is gone the snapshot is shown, and marked as history', () => {
+  const shown = threadSnippet(
+    threadOn(4, { anchorSnapshot: snapshot }),
+    { state: 'outdated', line: null },
+    file
+  )
+
+  assert.deepEqual(
+    shown?.lines.map((line) => line.content),
+    ['three (as written)', 'four (as written)']
+  )
+  assert.equal(shown?.historical, true)
+  assert.equal(shown?.state, 'outdated')
+  // The stored line, since there is no current one to report.
+  assert.equal(shown?.line, 4)
+  assert.equal(shown?.clipped, true)
+})
+
+test('a thread older than snapshots falls back to its one stored line', () => {
+  const shown = threadSnippet(threadOn(4), { state: 'outdated', line: null }, undefined)
+
+  assert.deepEqual(
+    shown?.lines.map((line) => line.content),
+    ['four']
+  )
+  assert.equal(shown?.historical, true)
+})
+
+test('a thread with nothing stored has nothing to show', () => {
+  const shown = threadSnippet(
+    threadOn(4, { anchorText: null }),
+    { state: 'outdated', line: null },
+    undefined
+  )
+
+  assert.deepEqual(shown?.lines, [])
+})
+
+test('while the diff is still loading the snapshot makes no claim about the branch', () => {
+  // `anchor` is null: the app does not know yet where this comment lands, so
+  // calling the snapshot outdated - or calling it current - would both be
+  // guesses.
+  const shown = threadSnippet(threadOn(4, { anchorSnapshot: snapshot }), null, undefined)
+
+  assert.deepEqual(
+    shown?.lines.map((line) => line.content),
+    ['three (as written)', 'four (as written)']
+  )
+  assert.equal(shown?.historical, false)
+  assert.equal(shown?.state, 'anchored')
+})
+
+test('a comment that moved is shown at the line it moved to', () => {
+  const shown = threadSnippet(threadOn(2), { state: 'moved', line: 4 }, file)
+
+  assert.equal(shown?.line, 4)
+  assert.equal(shown?.state, 'moved')
+  assert.equal(shown?.historical, false)
+})
+
+test('a review-level thread has no code to show', () => {
+  assert.equal(threadSnippet(threadOn(null), null, undefined), null)
 })

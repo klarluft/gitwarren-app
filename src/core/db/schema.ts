@@ -94,6 +94,8 @@ export type NewReviewRow = typeof reviews.$inferInsert
  * new code. `anchorText` is the snapshot that makes the drift detectable: at
  * read time the line is re-found by its text, and a thread whose text is gone
  * is shown as outdated rather than pinned to a line it no longer describes.
+ * `anchorSnapshot` is what is shown when that happens - the code as it read at
+ * the time, so an outdated comment is still legible.
  */
 export const commentThreads = sqliteTable(
   'comment_threads',
@@ -120,6 +122,19 @@ export const commentThreads = sqliteTable(
     anchorText: text('anchor_text'),
     /** Head sha at the time, so the UI can say what the comment was written against. */
     anchorSha: text('anchor_sha'),
+    /**
+     * The commented line and the few above it, as JSON, exactly as they read
+     * when the thread was opened - GitHub's `diff_hunk` by another name.
+     *
+     * `anchorText` is enough to notice that the code has been rewritten; it is
+     * not enough to show anyone what the comment was about once it has. This
+     * column is what an outdated comment is drawn against, so a discussion
+     * survives the code it was about. Written once and never updated: the
+     * moment it tracks the current diff it stops being a record of anything.
+     * NULL for review-level threads, for a line that was not in the diff, and
+     * for threads created before this column existed.
+     */
+    anchorSnapshot: text('anchor_snapshot'),
     resolvedAt: text('resolved_at'),
     /** Display name of whoever resolved it; NULL while the thread is open. */
     resolvedBy: text('resolved_by'),

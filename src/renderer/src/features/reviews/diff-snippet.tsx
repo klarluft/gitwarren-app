@@ -6,13 +6,17 @@
  * points at. GitHub solves it by printing a small hunk above each review
  * comment, and the same shape works here.
  *
+ * The lines come from one of two places, and the difference is worth showing.
+ * While a comment still points at live code, they are the current diff - what
+ * the reviewer would see in Files changed right now. Once the code has been
+ * rewritten out from under it, they are the snapshot stored when the comment
+ * was written, and the snippet says so: it is history at that point, not a
+ * description of the branch, and a reader must not mistake one for the other.
+ *
  * It renders the diff's own visual language deliberately: same mono column,
  * same gutter, same add/delete colouring, so a snippet reads as a piece of the
  * Files changed tab rather than as a quotation of it. The commented line is the
  * last one and is marked, because that is where the eye should stop.
- *
- * The header is a button: the snippet is a pointer into the diff, and a
- * reviewer who wants the surrounding code should be one click from it.
  */
 import { ChevronRight, FileCode } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -23,12 +27,16 @@ import type { DiffLine } from '@shared/git'
 interface DiffSnippetProps {
   filePath: string
   side: DiffSide
-  /** Line the comment sits on now, or null when it cannot be placed. */
+  /** Line the comment sits on now, or where it used to sit when outdated. */
   line: number | null
   lines: DiffLine[]
   /** True when the snippet starts mid-hunk, so the lead-in is cut short. */
   clipped?: boolean
   state?: AnchorState
+  /** True when these lines are the stored snapshot rather than the live diff. */
+  historical?: boolean
+  /** Head sha the snapshot was taken against, shown with the note. */
+  capturedSha?: string | null
   onOpen?: () => void
   className?: string
 }
@@ -40,6 +48,8 @@ export function DiffSnippet({
   lines,
   clipped = false,
   state = 'anchored',
+  historical = false,
+  capturedSha = null,
   onOpen,
   className
 }: DiffSnippetProps) {
@@ -141,6 +151,15 @@ export function DiffSnippet({
             })}
           </div>
         </div>
+      )}
+
+      {/* Said plainly, because the alternative is a reader taking a snapshot of
+          deleted code for the state of the branch. */}
+      {historical && lines.length > 0 && (
+        <p className="border-t border-border px-3 py-1.5 text-xs text-muted-foreground">
+          The code as it was when this comment was written
+          {capturedSha ? `, at ${capturedSha.slice(0, 7)}` : ''}. It has changed since.
+        </p>
       )}
     </div>
   )
