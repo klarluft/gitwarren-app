@@ -10,12 +10,18 @@ import type { SerializedAppError } from './errors.js'
 import type { RepositoryRefs, ReviewCommits, ReviewDiff } from './git.js'
 import type {
   AddRepositoryInput,
+  Comment,
+  CommentThread,
   CreateReviewInput,
+  CreateThreadInput,
   GetRepositoryInput,
   GetReviewInput,
+  ListCommentsInput,
   ListReviewsInput,
+  RemoveCommentInput,
   RemoveRepositoryInput,
   RemoveReviewInput,
+  ReplyToThreadInput,
   Repository,
   RepositoryRefsInput,
   RepositoryWithGitState,
@@ -23,6 +29,8 @@ import type {
   ReviewCommitsInput,
   ReviewDiffInput,
   ReviewWithRepository,
+  SetThreadResolvedInput,
+  UpdateCommentInput,
   UpdateRepositoryInput,
   UpdateReviewInput
 } from './schemas.js'
@@ -41,6 +49,12 @@ export const IPC_CHANNELS = {
   reviewsRemove: 'reviews:remove',
   reviewsCommits: 'reviews:commits',
   reviewsDiff: 'reviews:diff',
+  commentsList: 'comments:list',
+  commentsCreateThread: 'comments:createThread',
+  commentsReply: 'comments:reply',
+  commentsUpdate: 'comments:update',
+  commentsRemove: 'comments:remove',
+  commentsSetResolved: 'comments:setResolved',
   systemPickDirectory: 'system:pickDirectory',
   systemRevealPath: 'system:revealPath',
   systemAppInfo: 'system:appInfo',
@@ -120,6 +134,24 @@ export interface GitWarrenApi {
     commits(input: ReviewCommitsInput): Promise<ReviewCommits>
     /** The merge-base diff, uncommitted work folded in unless asked otherwise. */
     diff(input: ReviewDiffInput): Promise<ReviewDiff>
+  }
+  /**
+   * Comments carry no author field in either direction. Anything sent over this
+   * bridge is a human by construction - typing it into the app is the only way
+   * to get here - and the main process stamps it as such. See `shared/actors.ts`.
+   */
+  comments: {
+    /**
+     * Threads as stored, without anchor resolution. The renderer runs
+     * `resolveAnchor` itself against the diff already on screen, so a comment
+     * is never placed against a diff the reader cannot see.
+     */
+    list(input: ListCommentsInput): Promise<CommentThread[]>
+    createThread(input: CreateThreadInput): Promise<CommentThread>
+    reply(input: ReplyToThreadInput): Promise<Comment>
+    update(input: UpdateCommentInput): Promise<Comment>
+    remove(input: RemoveCommentInput): Promise<{ id: number; threadRemoved: boolean }>
+    setResolved(input: SetThreadResolvedInput): Promise<CommentThread>
   }
   system: {
     /** Opens the native folder picker. Resolves to null if cancelled. */

@@ -10,7 +10,7 @@
  * would arrive if pushed is a question you ask per visit, and each answer is
  * cached under its own SWR key so flipping back is instant.
  */
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { AlertCircle, FileDiff, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -18,10 +18,56 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { errorMessage } from '@/lib/errors'
 import { plural } from '@/lib/format'
+import { CommentThreadCard } from '../comments/comment-thread-card'
+import { useCommentMutations, useReviewComments } from '../comments/use-comments'
 import { CompareErrorCard, NoWorktreeNotice, WorkingTreeBanner } from './compare-notices'
-import { DiffStat, FileDiffCard } from './diff-view'
+import { DiffStat, FileDiffCard, type AnchoredThread } from './diff-view'
 import { useReviewDiff } from './use-reviews'
-import type { Review } from '@shared/schemas'
+import { findAnchorFile, isInlineAnchor, resolveAnchor } from '@shared/comment-anchors'
+import type { FileDiff as FileDiffData } from '@shared/git'
+import type { CommentThread, Review } from '@shared/schemas'
+
+/**
+ * Place every line comment against the diff that is actually on screen.
+ *
+ * This runs here rather than in the main process on purpose. The reviewer can
+ * flip "include uncommitted" at any moment, which produces a genuinely
+ * different diff with different line numbers, and a comment resolved against
+ * the other one would be pinned to a line the reader is not looking at. Doing
+ * it against the rendered diff makes that impossible by construction - and it
+ * reuses the same `resolveAnchor` the MCP server runs, so an agent and the
+ * screen never disagree about where a comment sits.
+ */
+function anchorByFile(
+  files: FileDiffData[],
+  threads: CommentThread[]
+): Map<string, AnchoredThread[]> {
+  const byFile = new Map<string, AnchoredThread[]>()
+
+  for (const thread of threads) {
+    if (!isInlineAnchor(thread)) continue
+
+    const file = findAnchorFile(files, thread.filePath)
+    const anchored: AnchoredThread = {
+      ...thread,
+      anchor: resolveAnchor(file, {
+        filePath: thread.filePath,
+        side: thread.side,
+        line: thread.line,
+        anchorText: thread.anchorText
+      })
+    }
+
+    // Keyed by the file's current path so a thread left before a rename still
+    // shows up on the card the reviewer is looking at.
+    const key = file?.path ?? thread.filePath
+    const existing = byFile.get(key)
+    if (existing) existing.push(anchored)
+    else byFile.set(key, [anchored])
+  }
+
+  return byFile
+}
 
 export function ReviewFilesTab({ review }: { review: Review }) {
   const [includeUncommitted, setIncludeUncommitted] = useState(true)
@@ -29,6 +75,19 @@ export function ReviewFilesTab({ review }: { review: Review }) {
     review.id,
     includeUncommitted
   )
+  const { threads } = useReviewComments(review.id)
+  const mutations = useCommentMutations(review.id)
+
+  const threadsByFile = useMemo(
+    () => anchorByFile(data?.files ?? [], threads),
+    [data?.files, threads]
+  )
+
+  /** Threads keyed under a path that no file in the current diff carries. */
+  const orphanedFiles = useMemo(() => {
+    const present = new Set((data?.files ?? []).map((file) => file.path))
+    return [...threadsByFile].filter(([path]) => !present.has(path))
+  }, [data?.files, threadsByFile])
 
   if (isLoading) return <LoadingState />
 
@@ -99,6 +158,39 @@ export function ReviewFilesTab({ review }: { review: Review }) {
         </p>
       )}
 
+      {/* Threads whose file has left the diff entirely - it was reverted, or
+          the base ref moved on and absorbed the change. Nothing below would
+          render them, and a discussion that silently disappears because the
+          code moved is exactly the failure this app should not have. */}
+      {orphanedFiles.length > 0 && (
+        <Card className="flex flex-col gap-2 border-warning/40 p-3">
+          <p className="text-xs text-muted-foreground">
+            {plural(orphanedFiles.length, 'file')} with comments{' '}
+            {orphanedFiles.length === 1 ? 'is' : 'are'} no longer in this diff.
+          </p>
+          {orphanedFiles.map(([path, fileThreads]) => (
+            <div key={path} className="flex flex-col gap-2">
+              <p className="font-mono text-xs text-muted-foreground">{path}</p>
+              {fileThreads.map((thread) => (
+                <CommentThreadCard
+                  key={thread.id}
+                  thread={thread}
+                  mutations={mutations}
+                  anchorState={thread.anchor.state}
+                  location={
+                    thread.line !== null ? (
+                      <span className="font-mono text-xs text-muted-foreground">
+                        was line {thread.line}
+                      </span>
+                    ) : null
+                  }
+                />
+              ))}
+            </div>
+          ))}
+        </Card>
+      )}
+
       {data.files.length === 0 ? (
         <Card className="flex flex-col items-center gap-2 border-dashed px-6 py-12 text-center">
           <div className="rounded-full bg-muted p-3 text-muted-foreground">
@@ -113,7 +205,15 @@ export function ReviewFilesTab({ review }: { review: Review }) {
       ) : (
         <div className="flex flex-col gap-2">
           {data.files.map((file) => (
-            <FileDiffCard key={`${file.oldPath ?? ''}:${file.path}`} file={file} />
+            <FileDiffCard
+              key={`${file.oldPath ?? ''}:${file.path}`}
+              file={file}
+              comments={{
+                reviewId: review.id,
+                threads: threadsByFile.get(file.path) ?? [],
+                mutations
+              }}
+            />
           ))}
         </div>
       )}

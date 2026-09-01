@@ -143,12 +143,21 @@ lets a form show *"This folder is not inside a git repository"* underneath the
 path input rather than a generic banner. The MCP tools map the same errors to
 `CODE: message` tool errors so agents can branch on the code.
 
-### Attribution, later
+### Attribution
 
-The service layer is the single place every write passes through, so adding
-`"Person"` vs `"<name> (AI)"` attribution later means threading an actor argument
-through one module — the IPC handlers would pass a UI actor, the MCP tools an
-agent actor. Nothing is built for it now.
+Comments carry an author; nothing else does. The rule that makes it trustworthy
+is that **the author is an argument to the service, never a field in the
+payload**:
+
+```ts
+commentsService.createThread(input, actor)   // actor supplied by the surface
+```
+
+`main/ipc.ts` passes `HUMAN_AUTHOR` and nothing else can, because typing into the
+app is the only way to reach an IPC channel. `mcp/server.ts` passes an agent
+author built from the connection. No caller can name itself by putting an author
+in the request body — there is nowhere in the input schemas to put one. See
+[Who wrote what](#who-wrote-what).
 
 ---
 
@@ -263,6 +272,8 @@ src/
 ├── shared/            Imported by every process. No Node-only APIs.
 │   ├── schemas.ts       zod schemas — the source of truth for validation
 │   ├── git.ts           read-only git shapes (types, not schemas — see below)
+│   ├── actors.ts        who wrote a comment; Human vs "<tool> (AI)"
+│   ├── comment-anchors.ts  re-finding a comment's line after the branch moves
 │   ├── validation.ts    one zod-error → AppError conversion, used everywhere
 │   ├── errors.ts        AppError + the error-code vocabulary
 │   └── api.ts           IPC channel names and the bridge's type
@@ -274,7 +285,8 @@ src/
 │   ├── git-compare.ts   worktrees, refs, commits, diffs, dirty state
 │   ├── diff-parser.ts   unified diff → files/hunks/lines
 │   ├── db/              drizzle schema, client (WAL), migration resolution
-│   └── services/        repositories.ts, reviews.ts — the one implementation
+│   └── services/        repositories.ts, reviews.ts, comments.ts — the one
+│                        implementation of each operation
 │
 ├── main/              Electron main process
 │   ├── index.ts         window lifecycle
@@ -283,11 +295,13 @@ src/
 │   └── mcp-launch.ts    computes this install's MCP launch command
 │
 ├── preload/           The only bridge into the renderer
-├── mcp/               server.ts — stdio MCP server
+├── mcp/               stdio MCP server
+│   ├── server.ts        tool definitions
+│   └── identity.ts      naming an agent from its MCP handshake
 └── renderer/          React app (no Node access)
     └── src/
         ├── components/ui/   shadcn-style components on Base UI
-        ├── features/        repositories/, reviews/, agent/
+        ├── features/        repositories/, reviews/, comments/, agent/
         └── lib/             api access, error helpers, hash router
 ```
 
@@ -321,7 +335,7 @@ Connection settings, all in `src/core/db/client.ts`:
 
 ### What is and is not stored
 
-Two tables.
+Four tables.
 
 **`repositories`** — `id`, `path` (canonical repository root, UNIQUE), `name`,
 `createdAt`, `updatedAt`.
@@ -329,6 +343,22 @@ Two tables.
 **`reviews`** — `id`, `repositoryId`, `title`, `description`, `baseRef`,
 `headRef`, `status`, `createdAt`, `updatedAt`, `closedAt`. Deleting a repository
 cascades to its reviews; they are meaningless without it.
+
+**`comment_threads`** — `id`, `reviewId`, then the anchor: `filePath`, `side`,
+`line`, `anchorText`, `anchorSha`. All five are null together for a review-level
+thread and set together for a line comment. Plus `resolvedAt`, `resolvedBy`,
+`createdAt`, `updatedAt`. Cascades from `reviews`.
+
+**`comments`** — `id`, `threadId`, `authorKind`, `authorName`, `authorLabel`,
+`authorSession`, `body`, `createdAt`, `updatedAt`. Cascades from
+`comment_threads`.
+
+Authorship is denormalised onto every comment row rather than pointing at a
+users table, and there will not be a users table. An author here is not an
+account but a description of where a message came from — the person at the
+keyboard, or a named agent process that has since exited. Copying the label onto
+the row keeps that description true forever, which a foreign key to a mutable
+identity would not.
 
 **Not** stored: branch, existence, resolved commits, diffs, or anything else git
 owns. Those are read on demand every time they are displayed. Caching them would
@@ -376,7 +406,8 @@ no source tree anywhere above it.
 
 ## Agent access (MCP)
 
-The MCP server exposes ten tools, all backed by the same services the UI uses:
+The MCP server exposes seventeen tools, all backed by the same services the UI
+uses:
 
 | Tool | Notes |
 | --- | --- |
@@ -390,19 +421,103 @@ The MCP server exposes ten tools, all backed by the same services the UI uses:
 | `create_review` | Both refs must exist and share history. `title` defaults to `"<head> into <base>"`. |
 | `update_review` | Title, description, endpoints, or open/closed. |
 | `remove_review` | Deletes the review record only. |
+| `agent_identity` | How this session's comments will be attributed. Optionally sets a session `label`. |
+| `list_review_comments` | Every thread, with messages, authors, and where each one lands in the current diff. Read-only. |
+| `add_review_comment` | Opens a thread. Omit `filePath`/`line` for a review-level comment. |
+| `reply_to_review_comment` | Adds a message to an existing thread. |
+| `resolve_review_comment` | Marks a thread settled, or reopens it. |
+| `update_review_comment` | Edits one message. Own comments only. |
+| `delete_review_comment` | Deletes one message; the thread goes too if it was the last. |
 
 **There is deliberately no `get_review_diff` or `list_review_commits`**, even
 though the service layer produces both for the UI. An agent pointed at these
 repositories can run `git log` and `git diff` itself, against the real working
 tree, with whatever options the task needs — a tool returning a second-hand copy
-would be a lossier version of data the agent already has. What GitWarren will
-uniquely hold is the *discussion* around the code, and that is what the tools
-will carry once the conversation tab is built.
+would be a lossier version of data the agent already has. What GitWarren
+uniquely holds is the *discussion* around the code, which is what the comment
+tools carry.
 
 Failures come back as tool errors prefixed with the code
 (`NOT_A_GIT_REPOSITORY`, `DUPLICATE_REPOSITORY`, `PATH_NOT_FOUND`, `NOT_FOUND`,
-`INVALID_INPUT`, `GIT_UNAVAILABLE`), so an agent can react to the kind of
-failure rather than parsing prose.
+`INVALID_INPUT`, `FORBIDDEN`, `GIT_UNAVAILABLE`), so an agent can react to the
+kind of failure rather than parsing prose.
+
+### Who wrote what
+
+Comments from the UI are `Human`. Comments over MCP are `<tool> (AI)`. The
+question that shapes the design is where `<tool>` comes from — and the answer is
+**not** "the agent tells us".
+
+Asking an agent to name itself does not survive contact with reality: the same
+Claude Code install would introduce itself as *Claude*, *claude-code*, *Claude
+Code* and *Claude Opus* across four sessions, and a thread with four names for
+one participant is worse than a thread with none.
+
+So the name is taken from the MCP handshake instead. Every client sends
+`clientInfo: { name, version }` in `initialize`, before any tool runs, and the
+SDK keeps it (`Server.getClientVersion()`). That value is chosen by the *tool*
+rather than by the model driving it, which is exactly the property needed:
+
+```
+initialize { clientInfo: { name: "claude-code" } }   →   "Claude Code (AI)"
+initialize { clientInfo: { name: "codex-cli"   } }   →   "Codex (AI)"
+initialize { clientInfo: { name: "opencode"    } }   →   "opencode (AI)"
+```
+
+`mcp/identity.ts` maps the known clients to names their users would recognise.
+An unknown client is not lumped in with the rest — it is title-cased and used as
+is (`some-new-agent` → `Some New Agent`), which still identifies that tool
+consistently across all of its own sessions. A client that sends no `clientInfo`
+at all becomes plain `AI`, so the one guarantee the UI makes — a machine-written
+comment is always marked as one — holds even there.
+
+**Telling two sessions of the same tool apart.** stdio gives one server *process*
+per client session, so the process is the session: an 8-character id is minted at
+startup and stamped on everything that session writes. That keeps two concurrent
+Claude Code sessions distinct in the database with no cooperation from either.
+A session id is not a *name*, though, so an agent may also set a short label for
+itself — `auth-refactor`, `perf-pass` — which is remembered for the rest of the
+session and renders as `Claude Code · auth-refactor (AI)`. This is the one
+self-reported piece, and it is fine that it is: it is a nickname for a session,
+not a claim about identity, and the tool name underneath it is still the
+handshake's. It can also be pinned per-project in the server config with
+`GITWARREN_AGENT_LABEL`.
+
+**Editing.** The person at the keyboard may edit or delete anything — it is their
+app. An agent is held to its own tool's messages. That asymmetry is not security
+(there is no attacker in this model); it is the difference between an agent
+fixing its own typo and an agent quietly rewriting someone else's review.
+
+### Comments on code that keeps moving
+
+A review follows its refs rather than pinning a sha, so the diff a comment was
+written against is not the diff the next visitor sees. GitHub avoids this by
+pinning each comment to a commit; GitWarren cannot, because following the branch
+is the point of the app.
+
+Instead, each line comment stores the **text** of the line as well as its number,
+and the anchor is re-derived on every read (`shared/comment-anchors.ts`). The
+rule is to trust the text over the number — a line number is a position in a
+document that keeps being rewritten:
+
+| State | Meaning | Where it shows |
+| --- | --- | --- |
+| `anchored` | The stored line still holds the text it was commented on. | Inline, at that line. |
+| `moved` | The text is now at a different line. | Inline, at its new line, badged *moved*. |
+| `outdated` | The text is not in this diff at all. | Listed above the file, badged *outdated*. |
+
+`outdated` covers both "the code was rewritten under it" and "the comment was
+left on a line the diff never showed" — an agent commenting on an unchanged part
+of a file, say. Both mean the same thing to a reader, so both are kept and shown
+out of line rather than dropped. Where several identical lines match (a lone `}`),
+the nearest to the original position wins; a near miss inside the right file
+beats losing the comment.
+
+The same function runs in both surfaces. The renderer anchors against the diff
+already on screen — which matters, because the *include uncommitted* switch
+produces a genuinely different diff with different line numbers — and
+`list_review_comments` anchors against a diff it reads itself, so an agent and
+the screen never disagree about where a comment sits.
 
 ### Pointing an agent at it
 
@@ -609,9 +724,18 @@ a signature.
   diff reads go further and do *not* refresh on focus — re-running a diff every
   time you alt-tab would spawn git processes behind your back — so those tabs
   have an explicit refresh button.
-- **The conversation tab is a placeholder.** It shows the review's description
-  and nothing else. Comments are the next piece of work, and the point at which
-  `"Person"` vs `"<name> (AI)"` attribution becomes worth building.
+- **Comment threads have no unread state.** The tab shows how many are
+  unresolved, not how many are new since you last looked, so a reply an agent
+  left overnight is not distinguishable from one you have already read.
+- **Comment anchors are matched on exact line text.** Reindenting a line or
+  changing its whitespace moves it out of `anchored` even though the code is
+  unchanged. A trimmed comparison would handle that, at the cost of matching
+  lines that differ only in indentation — which in a diff is a real difference.
+- **Agent names are only as consistent as the client's `clientInfo`.** A client
+  that changes the name it sends between versions will appear as two
+  participants, and there is no way to merge them after the fact.
+- **Nothing is pushed to the UI.** An agent's comment appears when the window
+  polls (every 15s) or regains focus, not the moment it is written.
 - **Diffs are unified, not side-by-side**, and have no syntax highlighting or
   word-level intra-line highlighting.
 - **Large diffs are clipped.** A file's patch stops rendering past 4,000 lines

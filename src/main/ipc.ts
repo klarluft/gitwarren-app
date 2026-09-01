@@ -8,9 +8,11 @@
  * certainly belongs in the service instead.
  */
 import { BrowserWindow, dialog, ipcMain, shell, app } from 'electron'
+import { commentsService } from '../core/services/comments.js'
 import { repositoriesService } from '../core/services/repositories.js'
 import { reviewsService } from '../core/services/reviews.js'
 import { getDataDirectory, getDatabasePath } from '../core/paths.js'
+import { HUMAN_AUTHOR } from '../shared/actors.js'
 import { AppError } from '../shared/errors.js'
 import { IPC_CHANNELS, type AppInfo, type IpcResult } from '../shared/api.js'
 import { getMcpLaunchInfo } from './mcp-launch.js'
@@ -51,6 +53,23 @@ export function registerIpcHandlers(): void {
   handle(IPC_CHANNELS.reviewsRemove, (input) => reviewsService.remove(input))
   handle(IPC_CHANNELS.reviewsCommits, (input) => reviewsService.commits(input))
   handle(IPC_CHANNELS.reviewsDiff, (input) => reviewsService.diff(input))
+
+  // Every comment write passes HUMAN_AUTHOR, and there is no way to reach these
+  // channels except by typing into the app - the renderer has no other route to
+  // the main process. That is the whole enforcement mechanism for "comments
+  // from the UI are the person's, comments over MCP are the agent's", and it
+  // works because the actor is a property of the channel rather than a field
+  // any caller could set.
+  handle(IPC_CHANNELS.commentsList, (input) => commentsService.list(input))
+  handle(IPC_CHANNELS.commentsCreateThread, (input) =>
+    commentsService.createThread(input, HUMAN_AUTHOR)
+  )
+  handle(IPC_CHANNELS.commentsReply, (input) => commentsService.reply(input, HUMAN_AUTHOR))
+  handle(IPC_CHANNELS.commentsUpdate, (input) => commentsService.update(input, HUMAN_AUTHOR))
+  handle(IPC_CHANNELS.commentsRemove, (input) => commentsService.remove(input, HUMAN_AUTHOR))
+  handle(IPC_CHANNELS.commentsSetResolved, (input) =>
+    commentsService.setResolved(input, HUMAN_AUTHOR)
+  )
 
   handle(IPC_CHANNELS.systemPickDirectory, async () => {
     const window = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]

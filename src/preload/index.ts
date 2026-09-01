@@ -18,12 +18,18 @@ import {
 import type { RepositoryRefs, ReviewCommits, ReviewDiff } from '../shared/git.js'
 import type {
   AddRepositoryInput,
+  Comment,
+  CommentThread,
   CreateReviewInput,
+  CreateThreadInput,
   GetRepositoryInput,
   GetReviewInput,
+  ListCommentsInput,
   ListReviewsInput,
+  RemoveCommentInput,
   RemoveRepositoryInput,
   RemoveReviewInput,
+  ReplyToThreadInput,
   Repository,
   RepositoryRefsInput,
   RepositoryWithGitState,
@@ -31,6 +37,8 @@ import type {
   ReviewCommitsInput,
   ReviewDiffInput,
   ReviewWithRepository,
+  SetThreadResolvedInput,
+  UpdateCommentInput,
   UpdateRepositoryInput,
   UpdateReviewInput
 } from '../shared/schemas.js'
@@ -65,6 +73,17 @@ const api: GitWarrenApi = {
     commits: (input: ReviewCommitsInput) =>
       invoke<ReviewCommits>(IPC_CHANNELS.reviewsCommits, input),
     diff: (input: ReviewDiffInput) => invoke<ReviewDiff>(IPC_CHANNELS.reviewsDiff, input)
+  },
+  comments: {
+    list: (input: ListCommentsInput) => invoke<CommentThread[]>(IPC_CHANNELS.commentsList, input),
+    createThread: (input: CreateThreadInput) =>
+      invoke<CommentThread>(IPC_CHANNELS.commentsCreateThread, input),
+    reply: (input: ReplyToThreadInput) => invoke<Comment>(IPC_CHANNELS.commentsReply, input),
+    update: (input: UpdateCommentInput) => invoke<Comment>(IPC_CHANNELS.commentsUpdate, input),
+    remove: (input: RemoveCommentInput) =>
+      invoke<{ id: number; threadRemoved: boolean }>(IPC_CHANNELS.commentsRemove, input),
+    setResolved: (input: SetThreadResolvedInput) =>
+      invoke<CommentThread>(IPC_CHANNELS.commentsSetResolved, input)
   },
   system: {
     pickDirectory: () => invoke<string | null>(IPC_CHANNELS.systemPickDirectory),

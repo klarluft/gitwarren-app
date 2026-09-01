@@ -12,6 +12,12 @@ export const APP_ERROR_CODES = [
   'PATH_NOT_FOUND',
   'NOT_A_GIT_REPOSITORY',
   'DUPLICATE_REPOSITORY',
+  /**
+   * The caller may not touch this record. Not an authentication failure - there
+   * is nothing to authenticate against here - but the one rule the app does
+   * enforce: an agent can edit and delete its own comments and no one else's.
+   */
+  'FORBIDDEN',
   'GIT_UNAVAILABLE',
   'INTERNAL'
 ] as const

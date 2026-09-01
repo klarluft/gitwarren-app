@@ -32,7 +32,15 @@ export const CACHE_KEYS = {
   review: (reviewId: number) => `review:${reviewId}`,
   reviewCommits: (reviewId: number) => `review-commits:${reviewId}`,
   reviewDiff: (reviewId: number, includeUncommitted: boolean) =>
-    `review-diff:${reviewId}:${includeUncommitted ? 'with-uncommitted' : 'committed-only'}`
+    `review-diff:${reviewId}:${includeUncommitted ? 'with-uncommitted' : 'committed-only'}`,
+  /**
+   * Comments are keyed per review and *not* per diff view. They are a plain
+   * database read, so the same list serves the conversation tab and both
+   * settings of the files tab's "include uncommitted" switch; only the anchor
+   * resolution differs between them, and that is computed in the component
+   * from whichever diff it is showing.
+   */
+  reviewComments: (reviewId: number) => `review-comments:${reviewId}`
 } as const
 
 /** Prefixes used by the family-wide invalidation above. */
@@ -40,5 +48,6 @@ export const CACHE_PREFIXES = {
   reviews: 'reviews:',
   review: 'review:',
   reviewCommits: 'review-commits:',
-  reviewDiff: 'review-diff:'
+  reviewDiff: 'review-diff:',
+  reviewComments: 'review-comments:'
 } as const

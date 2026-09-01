@@ -1,0 +1,459 @@
+/**
+ * The comment service: threads, replies and resolution.
+ *
+ * Same contract as the other services - every function re-parses its own input
+ * with the shared zod schema, so the UI and the MCP tools cannot disagree about
+ * what a valid comment is.
+ *
+ * The one shape that differs from `repositories.ts` and `reviews.ts`: every
+ * write takes a second argument, the `CommentAuthor`. It is not part of the
+ * parsed input and cannot be, because the whole value of attribution here rests
+ * on the caller being unable to choose it. The IPC layer passes `HUMAN_AUTHOR`
+ * because typing into the app is the only way to reach it; the MCP server
+ * passes an author derived from the connection handshake. See `shared/actors.ts`.
+ */
+import { asc, eq, inArray } from 'drizzle-orm'
+import { getDatabase } from '../db/client.js'
+import {
+  commentThreads,
+  comments,
+  repositories,
+  reviews,
+  type CommentRow,
+  type CommentThreadRow,
+  type RepositoryRow,
+  type ReviewRow
+} from '../db/schema.js'
+import { readReviewDiff } from '../git-compare.js'
+import { AppError } from '../../shared/errors.js'
+import { authorDisplayName, type CommentAuthor } from '../../shared/actors.js'
+import {
+  findAnchorFile,
+  isInlineAnchor,
+  resolveAnchor,
+  type AnchorState,
+  type DiffSide
+} from '../../shared/comment-anchors.js'
+import { parseWithSchema as parse } from '../../shared/validation.js'
+import {
+  createThreadInputSchema,
+  listCommentsInputSchema,
+  removeCommentInputSchema,
+  replyToThreadInputSchema,
+  setThreadResolvedInputSchema,
+  updateCommentInputSchema,
+  type Comment,
+  type CommentThread
+} from '../../shared/schemas.js'
+
+/** A thread plus where it lands in the diff as it stands right now. */
+export interface AnchoredCommentThread extends CommentThread {
+  /** Null for a review-level thread, which has no line to drift away from. */
+  anchor: { state: AnchorState; line: number | null } | null
+}
+
+function nowIso(): string {
+  return new Date().toISOString()
+}
+
+function toComment(row: CommentRow): Comment {
+  return {
+    id: row.id,
+    threadId: row.threadId,
+    author: {
+      kind: row.authorKind,
+      name: row.authorName,
+      label: row.authorLabel,
+      session: row.authorSession
+    },
+    body: row.body,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt
+  }
+}
+
+function toThread(row: CommentThreadRow, threadComments: Comment[]): CommentThread {
+  return {
+    id: row.id,
+    reviewId: row.reviewId,
+    filePath: row.filePath,
+    side: row.side,
+    line: row.line,
+    anchorText: row.anchorText,
+    anchorSha: row.anchorSha,
+    resolvedAt: row.resolvedAt,
+    resolvedBy: row.resolvedBy,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    comments: threadComments
+  }
+}
+
+function requireReview(id: number): ReviewRow {
+  const row = getDatabase().select().from(reviews).where(eq(reviews.id, id)).get()
+  if (!row) throw new AppError('NOT_FOUND', `No review with id ${id}.`)
+  return row
+}
+
+function requireRepository(id: number): RepositoryRow {
+  const row = getDatabase().select().from(repositories).where(eq(repositories.id, id)).get()
+  if (!row) throw new AppError('NOT_FOUND', `No repository with id ${id}.`)
+  return row
+}
+
+function requireThread(id: number): CommentThreadRow {
+  const row = getDatabase().select().from(commentThreads).where(eq(commentThreads.id, id)).get()
+  if (!row) throw new AppError('NOT_FOUND', `No comment thread with id ${id}.`)
+  return row
+}
+
+function requireComment(id: number): CommentRow {
+  const row = getDatabase().select().from(comments).where(eq(comments.id, id)).get()
+  if (!row) throw new AppError('NOT_FOUND', `No comment with id ${id}.`)
+  return row
+}
+
+/** Load every thread of a review, each with its messages oldest-first. */
+function readThreads(reviewId: number): CommentThread[] {
+  const db = getDatabase()
+
+  const threadRows = db
+    .select()
+    .from(commentThreads)
+    .where(eq(commentThreads.reviewId, reviewId))
+    .orderBy(asc(commentThreads.createdAt), asc(commentThreads.id))
+    .all()
+
+  if (threadRows.length === 0) return []
+
+  const commentRows = db
+    .select()
+    .from(comments)
+    .where(
+      inArray(
+        comments.threadId,
+        threadRows.map((row) => row.id)
+      )
+    )
+    .orderBy(asc(comments.createdAt), asc(comments.id))
+    .all()
+
+  const byThread = new Map<number, Comment[]>()
+  for (const row of commentRows) {
+    const list = byThread.get(row.threadId)
+    if (list) list.push(toComment(row))
+    else byThread.set(row.threadId, [toComment(row)])
+  }
+
+  return threadRows.map((row) => toThread(row, byThread.get(row.id) ?? []))
+}
+
+/**
+ * The text of one line of the diff, captured when a thread is opened.
+ *
+ * Null when the line is not in the diff - an agent commenting on an unchanged
+ * part of a file, or on a stale line number. That is not an error: the comment
+ * is still worth keeping, it simply cannot be pinned to a line the reader can
+ * see, and `resolveAnchor` reports it as outdated from the start.
+ */
+async function captureAnchor(
+  repositoryPath: string,
+  review: ReviewRow,
+  filePath: string,
+  side: DiffSide,
+  line: number
+): Promise<{ anchorText: string | null; anchorSha: string | null }> {
+  const diff = await readReviewDiff(repositoryPath, review.baseRef, review.headRef, {
+    includeUncommitted: true
+  })
+
+  const file = findAnchorFile(diff.files, filePath)
+  const found = file?.hunks
+    .flatMap((hunk) => hunk.lines)
+    .find((candidate) => (side === 'base' ? candidate.oldNumber : candidate.newNumber) === line)
+
+  return { anchorText: found?.content ?? null, anchorSha: diff.head.sha }
+}
+
+/**
+ * Editing and deleting, without inventing an auth system.
+ *
+ * The person at the keyboard owns the app and may edit or delete anything in
+ * it, exactly as a repository owner can on GitHub. An agent is held to its own
+ * messages: it may correct or withdraw what its tool wrote, and cannot touch
+ * what a human or a *different* agent wrote. That asymmetry is not security -
+ * there is no attacker in this model - it is the difference between an agent
+ * fixing its own typo and an agent quietly rewriting someone else's review.
+ */
+function assertMayModify(actor: CommentAuthor, row: CommentRow): void {
+  if (actor.kind === 'human') return
+  if (row.authorKind === 'agent' && row.authorName === actor.name) return
+  throw new AppError(
+    'FORBIDDEN',
+    `This comment was written by ${authorDisplayName(toComment(row).author)}. An agent can only edit or delete its own comments.`
+  )
+}
+
+export const commentsService = {
+  /**
+   * Every thread on a review, with its messages.
+   *
+   * Deliberately a pure database read: no git runs here. The renderer already
+   * holds the diff it is displaying and anchors the threads against that one
+   * with the same shared function, which avoids computing the same diff twice
+   * and, more importantly, guarantees the comments are placed against exactly
+   * the diff on screen rather than one read a moment later.
+   */
+  // eslint-disable-next-line @typescript-eslint/require-await
+  async list(input: unknown): Promise<CommentThread[]> {
+    const { reviewId } = parse(listCommentsInputSchema, input)
+    requireReview(reviewId)
+    return readThreads(reviewId)
+  },
+
+  /**
+   * The same threads, each resolved against the current diff.
+   *
+   * This is the shape agents get. They have no diff in hand and no way to run
+   * the anchoring themselves, and an agent acting on a comment needs to know
+   * whether it still points at live code.
+   */
+  async listAnchored(input: unknown): Promise<AnchoredCommentThread[]> {
+    const { reviewId } = parse(listCommentsInputSchema, input)
+    const review = requireReview(reviewId)
+    const threads = readThreads(reviewId)
+
+    const inline = threads.filter((thread) => isInlineAnchor(thread))
+    if (inline.length === 0) {
+      return threads.map((thread) => ({ ...thread, anchor: null }))
+    }
+
+    const repository = requireRepository(review.repositoryId)
+    const diff = await readReviewDiff(repository.path, review.baseRef, review.headRef, {
+      includeUncommitted: true
+    })
+
+    return threads.map((thread) => {
+      if (!isInlineAnchor(thread)) return { ...thread, anchor: null }
+      const file = findAnchorFile(diff.files, thread.filePath)
+      return {
+        ...thread,
+        anchor: resolveAnchor(file, {
+          filePath: thread.filePath,
+          side: thread.side,
+          line: thread.line,
+          anchorText: thread.anchorText
+        })
+      }
+    })
+  },
+
+  /**
+   * Start a discussion - on the review as a whole, or on a line of the diff.
+   *
+   * A thread is never created empty: the opening message is written in the same
+   * transaction, so a failed insert cannot leave a headless thread behind for
+   * the UI to render as a blank card.
+   */
+  async createThread(input: unknown, actor: CommentAuthor): Promise<CommentThread> {
+    const { reviewId, body, filePath, side, line } = parse(createThreadInputSchema, input)
+    const review = requireReview(reviewId)
+
+    let anchorText: string | null = null
+    let anchorSha: string | null = null
+    if (filePath !== undefined && line !== undefined) {
+      const repository = requireRepository(review.repositoryId)
+      const captured = await captureAnchor(repository.path, review, filePath, side, line)
+      anchorText = captured.anchorText
+      anchorSha = captured.anchorSha
+    }
+
+    const timestamp = nowIso()
+    const db = getDatabase()
+
+    return db.transaction((tx) => {
+      const threadRow = tx
+        .insert(commentThreads)
+        .values({
+          reviewId,
+          filePath: filePath ?? null,
+          side: filePath === undefined ? null : side,
+          line: line ?? null,
+          anchorText,
+          anchorSha,
+          resolvedAt: null,
+          resolvedBy: null,
+          createdAt: timestamp,
+          updatedAt: timestamp
+        })
+        .returning()
+        .get()
+
+      const commentRow = tx
+        .insert(comments)
+        .values({
+          threadId: threadRow.id,
+          authorKind: actor.kind,
+          authorName: actor.name,
+          authorLabel: actor.label,
+          authorSession: actor.session,
+          body,
+          createdAt: timestamp,
+          updatedAt: timestamp
+        })
+        .returning()
+        .get()
+
+      // A new discussion is activity on the review; the list sorts by it.
+      tx.update(reviews).set({ updatedAt: timestamp }).where(eq(reviews.id, reviewId)).run()
+
+      return toThread(threadRow, [toComment(commentRow)])
+    })
+  },
+
+  /** Add a message to an existing thread. */
+  // eslint-disable-next-line @typescript-eslint/require-await
+  async reply(input: unknown, actor: CommentAuthor): Promise<Comment> {
+    const { threadId, body } = parse(replyToThreadInputSchema, input)
+    const thread = requireThread(threadId)
+
+    const timestamp = nowIso()
+    const db = getDatabase()
+
+    return db.transaction((tx) => {
+      const row = tx
+        .insert(comments)
+        .values({
+          threadId,
+          authorKind: actor.kind,
+          authorName: actor.name,
+          authorLabel: actor.label,
+          authorSession: actor.session,
+          body,
+          createdAt: timestamp,
+          updatedAt: timestamp
+        })
+        .returning()
+        .get()
+
+      tx
+        .update(commentThreads)
+        .set({ updatedAt: timestamp })
+        .where(eq(commentThreads.id, threadId))
+        .run()
+      tx.update(reviews).set({ updatedAt: timestamp }).where(eq(reviews.id, thread.reviewId)).run()
+
+      return toComment(row)
+    })
+  },
+
+  /**
+   * Edit a message. The body is replaced; authorship never is - a comment does
+   * not change hands because someone fixed a typo in it.
+   */
+  // eslint-disable-next-line @typescript-eslint/require-await
+  async update(input: unknown, actor: CommentAuthor): Promise<Comment> {
+    const { id, body } = parse(updateCommentInputSchema, input)
+    const existing = requireComment(id)
+    assertMayModify(actor, existing)
+
+    const row = getDatabase()
+      .update(comments)
+      .set({ body, updatedAt: nowIso() })
+      .where(eq(comments.id, id))
+      .returning()
+      .get()
+
+    return toComment(row)
+  },
+
+  /**
+   * Delete a message, and the thread with it when it was the last one.
+   *
+   * An empty thread is not a thing the UI can draw or a reader can act on, so
+   * it is cleaned up here rather than left as a tombstone.
+   */
+  // eslint-disable-next-line @typescript-eslint/require-await
+  async remove(input: unknown, actor: CommentAuthor): Promise<{ id: number; threadRemoved: boolean }> {
+    const { id } = parse(removeCommentInputSchema, input)
+    const existing = requireComment(id)
+    assertMayModify(actor, existing)
+
+    const db = getDatabase()
+    return db.transaction((tx) => {
+      tx.delete(comments).where(eq(comments.id, id)).run()
+
+      const remaining = tx
+        .select({ id: comments.id })
+        .from(comments)
+        .where(eq(comments.threadId, existing.threadId))
+        .all()
+
+      if (remaining.length === 0) {
+        tx.delete(commentThreads).where(eq(commentThreads.id, existing.threadId)).run()
+        return { id, threadRemoved: true }
+      }
+
+      tx
+        .update(commentThreads)
+        .set({ updatedAt: nowIso() })
+        .where(eq(commentThreads.id, existing.threadId))
+        .run()
+      return { id, threadRemoved: false }
+    })
+  },
+
+  /**
+   * Mark a discussion settled, or reopen it.
+   *
+   * Who resolved it is stored as a plain display name rather than a reference,
+   * for the same reason comment authorship is denormalised: the agent that
+   * resolved this thread may not exist by the time anyone reads it.
+   */
+  // eslint-disable-next-line @typescript-eslint/require-await
+  async setResolved(input: unknown, actor: CommentAuthor): Promise<CommentThread> {
+    const { threadId, resolved } = parse(setThreadResolvedInputSchema, input)
+    const thread = requireThread(threadId)
+
+    const timestamp = nowIso()
+    const db = getDatabase()
+
+    const row = db
+      .update(commentThreads)
+      .set({
+        resolvedAt: resolved ? timestamp : null,
+        resolvedBy: resolved ? authorDisplayName(actor) : null,
+        updatedAt: timestamp
+      })
+      .where(eq(commentThreads.id, threadId))
+      .returning()
+      .get()
+
+    const threadComments = db
+      .select()
+      .from(comments)
+      .where(eq(comments.threadId, thread.id))
+      .orderBy(asc(comments.createdAt), asc(comments.id))
+      .all()
+      .map(toComment)
+
+    return toThread(row, threadComments)
+  },
+
+  /** How many threads a review has, and how many are still open. */
+  // eslint-disable-next-line @typescript-eslint/require-await
+  async counts(reviewId: number): Promise<{ threads: number; unresolved: number }> {
+    const rows = getDatabase()
+      .select({ resolvedAt: commentThreads.resolvedAt })
+      .from(commentThreads)
+      .where(eq(commentThreads.reviewId, reviewId))
+      .all()
+
+    return {
+      threads: rows.length,
+      unresolved: rows.filter((row) => row.resolvedAt === null).length
+    }
+  }
+}
+
+export type CommentsService = typeof commentsService

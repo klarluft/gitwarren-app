@@ -197,3 +197,133 @@ export type RemoveReviewInput = z.input<typeof removeReviewInputSchema>
 export type ReviewCommitsInput = z.input<typeof reviewCommitsInputSchema>
 export type ReviewDiffInput = z.input<typeof reviewDiffInputSchema>
 export type RepositoryRefsInput = z.input<typeof repositoryRefsInputSchema>
+
+/* -------------------------------------------------------------------------- */
+/* Comments                                                                   */
+/* -------------------------------------------------------------------------- */
+
+export const MAX_COMMENT_LENGTH = 20_000
+export const MAX_AGENT_LABEL_LENGTH = 60
+
+export const commentIdSchema = z.number().int().positive()
+export const threadIdSchema = z.number().int().positive()
+export const diffSideSchema = z.enum(['base', 'head'])
+
+/**
+ * Note what is *not* here: no author fields on any input schema.
+ *
+ * Authorship is a property of the transport, not of the payload. A comment that
+ * came in over IPC is a human because typing it into the app is the only way to
+ * send it, and one that came in over MCP is an agent for the same reason. Every
+ * service call takes its actor as a second argument, supplied by the surface,
+ * so no caller can claim to be someone else by putting it in the body - which
+ * would be the one way this app could start lying about which review feedback
+ * was written by a machine.
+ */
+export const commentAuthorSchema = z.object({
+  kind: z.enum(['human', 'agent']),
+  name: z.string(),
+  label: z.string().nullable(),
+  session: z.string().nullable()
+})
+
+export const commentSchema = z.object({
+  id: commentIdSchema,
+  threadId: threadIdSchema,
+  author: commentAuthorSchema,
+  body: z.string(),
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime()
+})
+
+/**
+ * A thread and every message in it.
+ *
+ * `filePath`/`side`/`line` are null together for a review-level thread - the
+ * conversation tab - and set together for one anchored to a line of the diff.
+ */
+export const commentThreadSchema = z.object({
+  id: threadIdSchema,
+  reviewId: reviewIdSchema,
+  filePath: z.string().nullable(),
+  side: diffSideSchema.nullable(),
+  line: z.number().int().positive().nullable(),
+  /** The line's text when the thread was opened; see `shared/comment-anchors.ts`. */
+  anchorText: z.string().nullable(),
+  /** Head sha at that moment, so the UI can say what was being looked at. */
+  anchorSha: z.string().nullable(),
+  resolvedAt: z.iso.datetime().nullable(),
+  resolvedBy: z.string().nullable(),
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+  comments: z.array(commentSchema)
+})
+
+const commentBodySchema = z
+  .string()
+  .trim()
+  .min(1, 'Write something first.')
+  .max(MAX_COMMENT_LENGTH, 'That comment is too long.')
+
+export const listCommentsInputSchema = z.object({ reviewId: reviewIdSchema })
+
+/**
+ * Open a thread. Omit the anchor for a review-level comment; give `filePath`
+ * and `line` together to attach it to a line of the diff.
+ */
+export const createThreadInputSchema = z
+  .object({
+    reviewId: reviewIdSchema,
+    body: commentBodySchema,
+    /** Path as it appears in the diff. Omit for a review-level comment. */
+    filePath: z.string().trim().min(1).optional(),
+    /**
+     * Which side `line` numbers. Head is the default because commenting on
+     * code as it will exist is the overwhelmingly common case; base is for
+     * remarking on a line the change deleted.
+     */
+    side: diffSideSchema.optional().default('head'),
+    line: z.number().int().positive().optional()
+  })
+  .refine((value) => (value.filePath === undefined) === (value.line === undefined), {
+    message: 'A line comment needs both a file and a line number.',
+    path: ['line']
+  })
+
+export const replyToThreadInputSchema = z.object({
+  threadId: threadIdSchema,
+  body: commentBodySchema
+})
+
+export const updateCommentInputSchema = z.object({
+  id: commentIdSchema,
+  body: commentBodySchema
+})
+
+export const removeCommentInputSchema = z.object({ id: commentIdSchema })
+
+export const setThreadResolvedInputSchema = z.object({
+  threadId: threadIdSchema,
+  resolved: z.boolean()
+})
+
+/**
+ * A handle an agent picks for its own session, so two concurrent sessions of
+ * the same tool are told apart in the thread. Optional everywhere: an agent
+ * that never sets one is still identified by its tool name and session id.
+ */
+export const agentLabelSchema = z
+  .string()
+  .trim()
+  .min(1, 'A label cannot be empty.')
+  .max(MAX_AGENT_LABEL_LENGTH, 'That label is too long.')
+
+export type CommentAuthorData = z.infer<typeof commentAuthorSchema>
+export type Comment = z.infer<typeof commentSchema>
+export type CommentThread = z.infer<typeof commentThreadSchema>
+export type ListCommentsInput = z.input<typeof listCommentsInputSchema>
+export type CreateThreadInput = z.input<typeof createThreadInputSchema>
+export type ReplyToThreadInput = z.input<typeof replyToThreadInputSchema>
+export type UpdateCommentInput = z.input<typeof updateCommentInputSchema>
+export type RemoveCommentInput = z.input<typeof removeCommentInputSchema>
+export type SetThreadResolvedInput = z.input<typeof setThreadResolvedInputSchema>

@@ -19,5 +19,7 @@
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.web.tsbuildinfo",
     "paths": {"@/*": ["./src/renderer/src/*"], "@shared/*": ["./src/shared/*"]}
   },
-  "include": ["src/renderer/src/**/*", "src/shared/**/*"]
+  "include": ["src/renderer/src/**/*", "src/shared/**/*"],
+  "//": "Tests are node programs - they import node:test and node:assert - so they are checked by tsconfig.node.json, which has the node types. Without this the renderer build fails on a test file it has no business compiling.",
+  "exclude": ["src/**/__tests__/**"]
 }

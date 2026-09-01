@@ -26,6 +26,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsCount, TabsList, TabsPanel, TabsTab } from '@/components/ui/tabs'
 import { errorMessage } from '@/lib/errors'
 import { navigate, replace, type ReviewTab } from '@/lib/router'
+import { useReviewComments } from '../comments/use-comments'
 import { ReviewCommitsTab } from './review-commits-tab'
 import { ReviewConversationTab } from './review-conversation-tab'
 import { ReviewFilesTab } from './review-files-tab'
@@ -43,6 +44,10 @@ export function ReviewDetail({ reviewId, tab }: ReviewDetailProps) {
   const { data: review, error, isLoading } = useReview(reviewId)
   const { updateReview } = useReviewMutations()
   const commits = useReviewCommits(reviewId)
+  // Read here rather than inside the tab so the count is on the tab itself.
+  // It is one indexed query and it is polled, which matters because agents
+  // write into this review from their own processes while it is open.
+  const { threads } = useReviewComments(reviewId)
 
   const [editing, setEditing] = useState(false)
   const [removing, setRemoving] = useState<Review | null>(null)
@@ -73,6 +78,7 @@ export function ReviewDetail({ reviewId, tab }: ReviewDetailProps) {
 
   const workingTree = commits.data?.workingTree ?? null
   const isOpen = review.status === 'open'
+  const unresolvedThreads = threads.filter((thread) => thread.resolvedAt === null).length
 
   async function toggleStatus(): Promise<void> {
     if (!review) return
@@ -172,6 +178,9 @@ export function ReviewDetail({ reviewId, tab }: ReviewDetailProps) {
           <TabsTab value="conversation">
             <MessageSquare />
             Conversation
+            {/* Unresolved rather than total: the number that should make you
+                click is how much is still open, not how much was ever said. */}
+            {unresolvedThreads > 0 && <TabsCount>{unresolvedThreads}</TabsCount>}
           </TabsTab>
           <TabsTab value="commits">
             Commits
