@@ -486,10 +486,19 @@ export function FileDiffCard({
               {file.hunks.map((hunk, index) => {
                 const gap = gapByHunk.get(index)
                 const segments = gap ? segmentGap(gap, revealed, totalLines) : []
-                // The last expander of a gap carries the `@@` header of the
-                // hunk below it, the way GitHub puts the unfold controls on
-                // that row - so the hunk must not print it a second time.
-                const absorbed = segments[segments.length - 1]?.kind === 'hidden'
+
+                /**
+                 * A `@@` header announces a break in the file, so it is printed
+                 * only when there is still a break to announce.
+                 *
+                 * With a gap above the hunk there are two cases and neither
+                 * wants a header here: while the gap is folded its last
+                 * expander carries the header itself, the way GitHub puts the
+                 * unfold controls on that row; once it has been unfolded the
+                 * code runs continuously into the hunk, and a divider drawn
+                 * across continuous code is simply a lie about the file.
+                 */
+                const showHeader = gap === undefined
 
                 return (
                   <Fragment key={`${hunk.header}-${index}`}>
@@ -503,7 +512,7 @@ export function FileDiffCard({
                         rows={rowContext}
                       />
                     )}
-                    <HunkRows hunk={hunk} showHeader={!absorbed} {...rowContext} />
+                    <HunkRows hunk={hunk} showHeader={showHeader} {...rowContext} />
                   </Fragment>
                 )
               })}

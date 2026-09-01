@@ -250,6 +250,13 @@ none of them costing anything until used:
   **Expand all lines** in the file header opens every gap at once. Unfolded
   lines are ordinary context rows — a comment can be left on one exactly as on
   any other line.
+
+A `@@` header announces a break in the file, so it is drawn only while there is
+still a break to announce. A folded gap carries the header on its own expander
+row, the way GitHub puts the unfold controls there; unfold that gap and the
+header goes with it, because the code now runs continuously into the hunk and a
+divider across continuous code is a false statement about the file. Expand
+everything and the file reads top to bottom with no markers in it at all.
 - **Copy path** and **open in your editor**, per file.
 
 Every icon-only control carries a real tooltip rather than a `title` attribute
