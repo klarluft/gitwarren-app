@@ -1,6 +1,11 @@
 # Dependencies
 /node_modules
 
+# Claude Code scratch worktrees. Each one is a full second checkout of this
+# repository; the rest of .claude/ is deliberately left trackable, so project
+# level settings or skills can still be committed if they are ever added.
+/.claude/worktrees/
+
 # Build output
 #   out/     - electron-vite bundles (main, preload, renderer) + the MCP server
 #   release/ - electron-builder installers and update manifests (hundreds of MB)
