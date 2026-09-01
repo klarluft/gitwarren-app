@@ -25,6 +25,8 @@ import {
   type ReviewRow
 } from '../db/schema.js'
 import { readReviewDiff } from '../git-compare.js'
+import { attachmentReferencesIn, ingestBodyAttachments } from '../attachment-ingest.js'
+import { attachmentsBySha, parseAttachmentUrl } from './attachments.js'
 import { AppError } from '../../shared/errors.js'
 import { authorDisplayName, type CommentAuthor } from '../../shared/actors.js'
 import {
@@ -46,6 +48,7 @@ import {
   updateCommentInputSchema,
   type AnchorSnapshot,
   type Comment,
+  type CommentAttachment,
   type CommentThread
 } from '../../shared/schemas.js'
 
@@ -59,6 +62,47 @@ function nowIso(): string {
   return new Date().toISOString()
 }
 
+/**
+ * Resolve the attachment tokens in a body into files on disk.
+ *
+ * The body stays the source of truth about which images a comment has - there
+ * is no join table, and deleting an image from the text is all it takes to
+ * detach it. That is what makes `attachmentsService.sweep()` correct as a
+ * garbage collector rather than a second bookkeeping system to keep in step.
+ *
+ * A body with no token does no work at all, which is nearly every comment.
+ */
+function resolveAttachments(body: string): CommentAttachment[] {
+  const referenced = attachmentReferencesIn(body)
+  if (referenced.length === 0) return []
+
+  const bySha = attachmentsBySha(
+    referenced
+      .map((reference) => parseAttachmentUrl(reference.url)?.sha)
+      .filter((sha): sha is string => sha !== undefined)
+  )
+
+  const resolved: CommentAttachment[] = []
+  for (const reference of referenced) {
+    const sha = parseAttachmentUrl(reference.url)?.sha
+    const attachment = sha === undefined ? undefined : bySha.get(sha)
+    // A token with no row is a body that outlived its file - a sweep in another
+    // process, or a hand-edited body naming an image that never existed. The
+    // text still renders; there is simply nothing to hand an agent.
+    if (!attachment) continue
+    resolved.push({
+      url: attachment.url,
+      path: attachment.path,
+      alt: reference.alt,
+      mimeType: attachment.mimeType,
+      byteSize: attachment.byteSize,
+      width: attachment.width,
+      height: attachment.height
+    })
+  }
+  return resolved
+}
+
 function toComment(row: CommentRow): Comment {
   return {
     id: row.id,
@@ -70,6 +114,7 @@ function toComment(row: CommentRow): Comment {
       session: row.authorSession
     },
     body: row.body,
+    attachments: resolveAttachments(row.body),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt
   }
@@ -289,15 +334,17 @@ export const commentsService = {
    * the UI to render as a blank card.
    */
   async createThread(input: unknown, actor: CommentAuthor): Promise<CommentThread> {
-    const { reviewId, body, filePath, side, line } = parse(createThreadInputSchema, input)
+    const { reviewId, body: written, filePath, side, line } = parse(createThreadInputSchema, input)
     const review = requireReview(reviewId)
+    const repositoryPath = requireRepository(review.repositoryId).path
+
+    const body = await ingestBodyAttachments(written, { repositoryRoot: repositoryPath })
 
     let anchorText: string | null = null
     let anchorSha: string | null = null
     let anchorSnapshot: string | null = null
     if (filePath !== undefined && line !== undefined) {
-      const repository = requireRepository(review.repositoryId)
-      const captured = await captureAnchor(repository.path, review, filePath, side, line)
+      const captured = await captureAnchor(repositoryPath, review, filePath, side, line)
       anchorText = captured.anchorText
       anchorSha = captured.anchorSha
       anchorSnapshot = captured.snapshot === null ? null : JSON.stringify(captured.snapshot)
@@ -348,10 +395,14 @@ export const commentsService = {
   },
 
   /** Add a message to an existing thread. */
-  // eslint-disable-next-line @typescript-eslint/require-await
   async reply(input: unknown, actor: CommentAuthor): Promise<Comment> {
-    const { threadId, body } = parse(replyToThreadInputSchema, input)
+    const { threadId, body: written } = parse(replyToThreadInputSchema, input)
     const thread = requireThread(threadId)
+
+    const review = requireReview(thread.reviewId)
+    const body = await ingestBodyAttachments(written, {
+      repositoryRoot: requireRepository(review.repositoryId).path
+    })
 
     const timestamp = nowIso()
     const db = getDatabase()
@@ -387,11 +438,16 @@ export const commentsService = {
    * Edit a message. The body is replaced; authorship never is - a comment does
    * not change hands because someone fixed a typo in it.
    */
-  // eslint-disable-next-line @typescript-eslint/require-await
   async update(input: unknown, actor: CommentAuthor): Promise<Comment> {
-    const { id, body } = parse(updateCommentInputSchema, input)
+    const { id, body: written } = parse(updateCommentInputSchema, input)
     const existing = requireComment(id)
     assertMayModify(actor, existing)
+
+    const thread = requireThread(existing.threadId)
+    const review = requireReview(thread.reviewId)
+    const body = await ingestBodyAttachments(written, {
+      repositoryRoot: requireRepository(review.repositoryId).path
+    })
 
     const row = getDatabase()
       .update(comments)

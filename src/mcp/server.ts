@@ -62,6 +62,30 @@ import {
 
 const VERSION = '0.1.0'
 
+/**
+ * How to put a screenshot in a comment, shown rather than described.
+ *
+ * A worked example, because agents follow examples far more reliably than they
+ * follow instructions - and because the alternative an agent will otherwise
+ * reach for is a base64 data URI, which for a 400KB screenshot means emitting
+ * over half a million characters.
+ *
+ * Note that this text contains a markdown image inside an indented code block.
+ * It is safe: the ingest step parses the body rather than pattern-matching it,
+ * so an example never becomes an attachment. That is exactly the case a regex
+ * would have got wrong.
+ */
+const ATTACHMENT_GUIDANCE =
+  'To include a screenshot, write the file to disk first, then reference it as an\n' +
+  'ordinary markdown image:\n\n' +
+  '    The dropdown renders behind the modal:\n\n' +
+  '    ![dropdown behind modal](/tmp/dropdown-bug.png)\n\n' +
+  'The file is copied into GitWarren and the path rewritten, so the image survives\n' +
+  '/tmp being cleaned. Always write alt text - it is what agents without vision see.\n' +
+  'PNG, JPEG, GIF and WebP are accepted, up to 10 MB. A path that does not resolve is\n' +
+  'left in the text as written rather than failing the call, so check the returned\n' +
+  'body if it matters.'
+
 function ok(payload: unknown): CallToolResult {
   return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] }
 }
@@ -297,7 +321,13 @@ server.registerTool(
       '(the line is no longer in the diff, so the comment may be about code that has since been ' +
       'rewritten). Check the anchor before acting on a line comment. An outdated one still ' +
       'carries `anchorSnapshot`, the code as it read when the comment was written, which is how ' +
-      'to tell what was being objected to before it was rewritten.',
+      'to tell what was being objected to before it was rewritten.\n\n' +
+      'A body may contain images, written as markdown pointing at a ' +
+      '`gitwarren://attachment/...` URL - that is an internal token, not something to fetch. ' +
+      'Each one is resolved in the comment\'s `attachments` array, where `path` is a real file ' +
+      'on disk: read it with your own image tools. `alt` is the description whoever attached it ' +
+      'wrote, and is worth reading first - it is often enough on its own, and it is all you get ' +
+      'if you cannot see images.',
     inputSchema: listCommentsInputSchema.shape,
     annotations: { readOnlyHint: true, openWorldHint: false }
   },
@@ -315,7 +345,8 @@ server.registerTool(
       'default) for the code as it will be, "base" to remark on a line the change removed. ' +
       'The line is not required to be part of the diff: the comment is kept either way, and the ' +
       'returned thread says whether it could be anchored to a visible line. ' +
-      'Comments are attributed automatically from the MCP handshake - see `agent_identity`.',
+      'Comments are attributed automatically from the MCP handshake - see `agent_identity`.\n\n' +
+      ATTACHMENT_GUIDANCE,
     inputSchema: withLabel(createThreadInputSchema.shape),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false }
   },
@@ -329,7 +360,8 @@ server.registerTool(
     description:
       'Add a message to an existing thread. Use this rather than opening a new thread when ' +
       'responding to something someone already raised, so the discussion stays in one place. ' +
-      'Thread ids come from `list_review_comments`.',
+      'Thread ids come from `list_review_comments`.\n\n' +
+      ATTACHMENT_GUIDANCE,
     inputSchema: withLabel(replyToThreadInputSchema.shape),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false }
   },

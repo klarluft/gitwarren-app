@@ -205,3 +205,40 @@ export const comments = sqliteTable(
 
 export type CommentRow = typeof comments.$inferSelect
 export type NewCommentRow = typeof comments.$inferInsert
+
+/**
+ * A file someone attached to a comment - in practice a screenshot.
+ *
+ * Content-addressed: the row is keyed by the sha256 of the bytes, and the file
+ * on disk is `<dataDir>/attachments/<sha[0:2]>/<sha>.<ext>`. That makes ingest
+ * naturally idempotent, which matters because the GUI and the MCP server are
+ * separate processes writing the same database - pasting an image twice, or
+ * two processes ingesting the same file at once, converges on one row and one
+ * file rather than racing.
+ *
+ * This is app-owned data rather than something git owns, which is why it is
+ * stored at all. The reason to copy the bytes instead of remembering a path is
+ * the same reason `anchorSnapshot` above exists: a discussion has to outlive
+ * the thing it is about. An agent writes a screenshot to /tmp and references
+ * it; /tmp is purged next week; the comment still has to render. A pasted
+ * clipboard image settles it outright - it has no path at all, only bytes.
+ */
+export const attachments = sqliteTable('attachments', {
+  /** sha256 of the bytes, lowercase hex. Content-addressed: same bytes, same row. */
+  sha: text('sha').primaryKey(),
+  /** Determined by sniffing magic bytes, never from the supplied filename. */
+  ext: text('ext').notNull(),
+  mimeType: text('mime_type').notNull(),
+  byteSize: integer('byte_size').notNull(),
+  /** Nullable: dimensions are for layout and for telling an agent what it is about to read. */
+  width: integer('width'),
+  height: integer('height'),
+  /** For display and for a sensible default alt text. */
+  originalName: text('original_name'),
+  createdAt: text('created_at')
+    .notNull()
+    .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`)
+})
+
+export type AttachmentRow = typeof attachments.$inferSelect
+export type NewAttachmentRow = typeof attachments.$inferInsert

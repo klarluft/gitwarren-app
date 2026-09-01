@@ -6,10 +6,18 @@
     <!--
       Locked down for a local app: no remote code, and connect-src stays 'self'
       because every call goes over IPC rather than the network.
+
+      `gitwarren:` in img-src is the custom scheme the main process serves
+      attachments over - files the app copied into its own store, read off the
+      local disk. Note what is still absent: there is no remote img-src, so an
+      image in a comment body cannot reach the network. Comment bodies are
+      written by agents that may have just read untrusted content out of the
+      repository under review, and that is the rule which stops one of them
+      phoning home the moment somebody opens the review.
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: gitwarren:; connect-src 'self'"
     />
     <title>GitWarren</title>
   </head>

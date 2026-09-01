@@ -8,13 +8,19 @@
  * certainly belongs in the service instead.
  */
 import { BrowserWindow, dialog, ipcMain, shell, app } from 'electron'
+import { attachmentsService } from '../core/services/attachments.js'
 import { commentsService } from '../core/services/comments.js'
 import { repositoriesService } from '../core/services/repositories.js'
 import { reviewsService } from '../core/services/reviews.js'
 import { getDataDirectory, getDatabasePath } from '../core/paths.js'
 import { HUMAN_AUTHOR } from '../shared/actors.js'
 import { AppError } from '../shared/errors.js'
-import { IPC_CHANNELS, type AppInfo, type IpcResult } from '../shared/api.js'
+import {
+  IPC_CHANNELS,
+  type AppInfo,
+  type AttachmentIngestInput,
+  type IpcResult
+} from '../shared/api.js'
 import { getMcpLaunchInfo } from './mcp-launch.js'
 import { checkForUpdates, getUpdateStatus, quitAndInstall } from './updater.js'
 
@@ -70,6 +76,38 @@ export function registerIpcHandlers(): void {
   handle(IPC_CHANNELS.commentsSetResolved, (input) =>
     commentsService.setResolved(input, HUMAN_AUTHOR)
   )
+
+  // The renderer cannot touch the filesystem, so a pasted or dropped image
+  // arrives as bytes and is handed straight to the service - the same service
+  // an agent's file path goes through, so both surfaces produce the same row
+  // and the same token.
+  handle(IPC_CHANNELS.attachmentsIngest, (input) => {
+    if (typeof input !== 'object' || input === null || !('bytes' in input)) {
+      throw new AppError('INVALID_INPUT', 'An image is required.')
+    }
+    const { bytes, originalName } = input as AttachmentIngestInput
+    return attachmentsService.ingest({
+      bytes: Buffer.from(bytes),
+      originalName: typeof originalName === 'string' ? originalName : undefined
+    })
+  })
+
+  handle(IPC_CHANNELS.attachmentsPick, async () => {
+    const window = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+    const options: Electron.OpenDialogOptions = {
+      title: 'Attach an image',
+      buttonLabel: 'Attach',
+      properties: ['openFile'],
+      // A convenience for the dialog only. What the file actually is gets
+      // decided by sniffing its bytes, which is the check that matters.
+      filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp'] }]
+    }
+    const result = window
+      ? await dialog.showOpenDialog(window, options)
+      : await dialog.showOpenDialog(options)
+    const path = result.canceled ? null : (result.filePaths[0] ?? null)
+    return path === null ? null : await attachmentsService.ingest({ path })
+  })
 
   handle(IPC_CHANNELS.systemPickDirectory, async () => {
     const window = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]

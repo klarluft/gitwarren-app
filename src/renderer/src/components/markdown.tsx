@@ -36,9 +36,22 @@
  * that the renderer does not have, so for now they read as links rather than as
  * broken image icons.
  */
-import ReactMarkdown, { type Components } from 'react-markdown'
+import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { cn } from '@/lib/utils'
+
+/**
+ * Let attachment tokens through the URL filter, and nothing else new.
+ *
+ * react-markdown strips URLs whose protocol it does not recognise, which is the
+ * behaviour that keeps `javascript:` out of an href - so the default is kept
+ * for every other URL and only `gitwarren:` is added. The scheme resolves to a
+ * file this app copied into its own store and serves itself; see
+ * `registerAttachmentProtocol` in `main/index.ts`.
+ */
+function urlTransform(url: string): string {
+  return url.startsWith('gitwarren://attachment/') ? url : defaultUrlTransform(url)
+}
 
 /**
  * The app's own type scale, applied element by element.
@@ -208,7 +221,7 @@ export function Markdown({ body, className }: MarkdownProps) {
     // inherits, so marking the container makes the whole rendered body
     // selectable the way the plain-text version was.
     <div data-selectable className={cn('text-sm break-words', className)}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components} urlTransform={urlTransform}>
         {body}
       </ReactMarkdown>
     </div>

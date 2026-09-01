@@ -11,6 +11,7 @@ import { deserializeAppError } from '../shared/errors.js'
 import {
   IPC_CHANNELS,
   type AppInfo,
+  type AttachmentIngestInput,
   type GitWarrenApi,
   type IpcResult,
   type UpdateStatus
@@ -18,6 +19,7 @@ import {
 import type { RepositoryRefs, ReviewCommits, ReviewDiff } from '../shared/git.js'
 import type {
   AddRepositoryInput,
+  Attachment,
   Comment,
   CommentThread,
   CreateReviewInput,
@@ -84,6 +86,11 @@ const api: GitWarrenApi = {
       invoke<{ id: number; threadRemoved: boolean }>(IPC_CHANNELS.commentsRemove, input),
     setResolved: (input: SetThreadResolvedInput) =>
       invoke<CommentThread>(IPC_CHANNELS.commentsSetResolved, input)
+  },
+  attachments: {
+    ingest: (input: AttachmentIngestInput) =>
+      invoke<Attachment>(IPC_CHANNELS.attachmentsIngest, input),
+    pick: () => invoke<Attachment | null>(IPC_CHANNELS.attachmentsPick)
   },
   system: {
     pickDirectory: () => invoke<string | null>(IPC_CHANNELS.systemPickDirectory),

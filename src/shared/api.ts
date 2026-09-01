@@ -10,6 +10,7 @@ import type { SerializedAppError } from './errors.js'
 import type { RepositoryRefs, ReviewCommits, ReviewDiff } from './git.js'
 import type {
   AddRepositoryInput,
+  Attachment,
   Comment,
   CommentThread,
   CreateReviewInput,
@@ -58,6 +59,8 @@ export const IPC_CHANNELS = {
   systemPickDirectory: 'system:pickDirectory',
   systemRevealPath: 'system:revealPath',
   systemAppInfo: 'system:appInfo',
+  attachmentsIngest: 'attachments:ingest',
+  attachmentsPick: 'attachments:pick',
   updatesGetStatus: 'updates:getStatus',
   updatesCheck: 'updates:check',
   updatesInstallNow: 'updates:installNow',
@@ -74,6 +77,20 @@ export const IPC_CHANNELS = {
 export type IpcResult<T> =
   | { ok: true; data: T }
   | { ok: false; error: SerializedAppError }
+
+/**
+ * An image on its way into the store.
+ *
+ * A plain array of bytes rather than a Buffer or a Blob: the structured clone
+ * used by `ipcRenderer.invoke` carries `number[]` and `ArrayBuffer` faithfully,
+ * while Node's Buffer is not a thing the renderer has. The main process turns
+ * it back into bytes on arrival.
+ */
+export interface AttachmentIngestInput {
+  bytes: ArrayBuffer
+  /** Only ever used for display and default alt text; the format is sniffed. */
+  originalName?: string
+}
 
 export interface AppInfo {
   version: string
@@ -152,6 +169,20 @@ export interface GitWarrenApi {
     update(input: UpdateCommentInput): Promise<Comment>
     remove(input: RemoveCommentInput): Promise<{ id: number; threadRemoved: boolean }>
     setResolved(input: SetThreadResolvedInput): Promise<CommentThread>
+  }
+  /**
+   * Copying an image into the app's own store.
+   *
+   * The renderer has no filesystem access, so a pasted or dropped image crosses
+   * as raw bytes and a picked one crosses as a path chosen by the main process.
+   * Both land in the same service. Ingest happens here, at paste time, rather
+   * than at save time: the token is then a live URL immediately, so Preview
+   * draws the real image before the comment has been submitted.
+   */
+  attachments: {
+    ingest(input: AttachmentIngestInput): Promise<Attachment>
+    /** Opens the native image picker and ingests the choice. Null if cancelled. */
+    pick(): Promise<Attachment | null>
   }
   system: {
     /** Opens the native folder picker. Resolves to null if cancelled. */

@@ -228,11 +228,68 @@ export const commentAuthorSchema = z.object({
   session: z.string().nullable()
 })
 
+/**
+ * An image referenced by a comment body, resolved.
+ *
+ * The body itself holds only an opaque `gitwarren://attachment/<sha>.<ext>`
+ * token; this is that token looked up. Two consumers need different things from
+ * it and both are served here rather than by two shapes: the renderer fetches
+ * `url` through the custom protocol, and an agent reads `path`, which is a real
+ * file on disk.
+ *
+ * `path` is what makes attachments work for agents at all, and it is why there
+ * is no `get_attachment` tool. Returning an MCP `ImageContent` block would put
+ * the delivery of the image at the mercy of each client's handling of it, which
+ * varies; handing over an absolute path uses the image-reading path every
+ * coding agent already has.
+ */
+export const commentAttachmentSchema = z.object({
+  /** The token as it appears in the body. */
+  url: z.string(),
+  /** Absolute path to the file. Agents read this directly. */
+  path: z.string(),
+  /** Alt text as written in the markdown - what a non-vision agent "sees". */
+  alt: z.string(),
+  mimeType: z.string(),
+  byteSize: z.number().int(),
+  /** Null when the header could not be read; both are for layout and for
+   *  telling an agent what it is about to open. */
+  width: z.number().int().nullable(),
+  height: z.number().int().nullable()
+})
+
+/**
+ * A file just copied into the store, before anything refers to it.
+ *
+ * Deliberately not the same shape as `commentAttachment`: there is no `alt`
+ * yet, because alt text is a property of the reference in a body rather than of
+ * the file, and the caller is the thing that decides it. `originalName` is here
+ * and not there for the mirror-image reason - it is only useful at the moment
+ * of attaching, as a default description to offer.
+ */
+export const attachmentSchema = z.object({
+  sha: z.string(),
+  url: z.string(),
+  path: z.string(),
+  mimeType: z.string(),
+  byteSize: z.number().int(),
+  width: z.number().int().nullable(),
+  height: z.number().int().nullable(),
+  originalName: z.string().nullable()
+})
+
 export const commentSchema = z.object({
   id: commentIdSchema,
   threadId: threadIdSchema,
   author: commentAuthorSchema,
   body: z.string(),
+  /**
+   * Every image the body refers to, resolved. Empty for the great majority of
+   * comments. Carried on the comment rather than fetched separately so that an
+   * agent listing a review's discussion has the file paths in the same response
+   * as the text that talks about them.
+   */
+  attachments: z.array(commentAttachmentSchema),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime()
 })
@@ -351,6 +408,8 @@ export const agentLabelSchema = z
   .max(MAX_AGENT_LABEL_LENGTH, 'That label is too long.')
 
 export type AnchorSnapshot = z.infer<typeof anchorSnapshotSchema>
+export type Attachment = z.infer<typeof attachmentSchema>
+export type CommentAttachment = z.infer<typeof commentAttachmentSchema>
 export type CommentAuthorData = z.infer<typeof commentAuthorSchema>
 export type Comment = z.infer<typeof commentSchema>
 export type CommentThread = z.infer<typeof commentThreadSchema>
