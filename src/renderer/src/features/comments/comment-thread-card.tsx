@@ -16,6 +16,7 @@ import { useState } from 'react'
 import { Check, CircleDot, MessageSquare, MoreHorizontal, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Markdown } from '@/components/markdown'
 import { errorMessage } from '@/lib/errors'
 import { cn } from '@/lib/utils'
 import { AuthorAvatar, AuthorByline } from './comment-author'
@@ -247,9 +248,7 @@ function CommentRow({
             }}
           />
         ) : (
-          <p data-selectable className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed">
-            {comment.body}
-          </p>
+          <Markdown body={comment.body} className="mt-1" />
         )}
 
         {error !== null && (

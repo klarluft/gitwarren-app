@@ -21,6 +21,7 @@ import { MessageSquare, Pencil } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Markdown } from '@/components/markdown'
 import { errorMessage } from '@/lib/errors'
 import { absoluteTime, relativeTime } from '@/lib/format'
 import { replace } from '@/lib/router'
@@ -98,9 +99,7 @@ export function ReviewConversationTab({ review, onEdit }: ReviewConversationTabP
         </div>
 
         {review.description ? (
-          <p data-selectable className="whitespace-pre-wrap text-sm leading-relaxed">
-            {review.description}
-          </p>
+          <Markdown body={review.description} />
         ) : (
           <p className="text-sm italic text-muted-foreground">No description.</p>
         )}
