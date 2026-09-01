@@ -30,6 +30,7 @@ Local AI agents get the same capabilities through an MCP server over stdio.
 - [Data storage](#data-storage)
 - [Database migrations](#database-migrations)
 - [Agent access (MCP)](#agent-access-mcp)
+- [Images in comments](#images-in-comments)
 - [Release process](#release-process)
 - [Auto-update](#auto-update)
 - [Code signing and notarization](#code-signing-and-notarization)
@@ -284,13 +285,16 @@ src/
 │   ├── git.ts           live repository state; root resolution
 │   ├── git-compare.ts   worktrees, refs, commits, diffs, dirty state
 │   ├── diff-parser.ts   unified diff → files/hunks/lines
+│   ├── attachment-ingest.ts  rewrite a body's local image paths to tokens
 │   ├── db/              drizzle schema, client (WAL), migration resolution
-│   └── services/        repositories.ts, reviews.ts, comments.ts — the one
-│                        implementation of each operation
+│   └── services/        repositories.ts, reviews.ts, comments.ts,
+│                        attachments.ts — the one implementation of each
+│                        operation
 │
 ├── main/              Electron main process
 │   ├── index.ts         window lifecycle
 │   ├── ipc.ts           thin delegations to core/services
+│   ├── attachment-protocol.ts  serves gitwarren:// attachment images
 │   ├── updater.ts       electron-updater wiring
 │   └── mcp-launch.ts    computes this install's MCP launch command
 │
@@ -300,7 +304,7 @@ src/
 │   └── identity.ts      naming an agent from its MCP handshake
 └── renderer/          React app (no Node access)
     └── src/
-        ├── components/ui/   shadcn-style components on Base UI
+        ├── components/      markdown.tsx + ui/ (shadcn-style, on Base UI)
         ├── features/        repositories/, reviews/, comments/, agent/
         └── lib/             api access, error helpers, hash router
 ```
@@ -326,6 +330,11 @@ One SQLite file in the OS application-data directory:
 Set **`GITWARREN_DATA_DIR`** to override it — used by the tests, and handy for
 trying things against a scratch database.
 
+Alongside the database, in the same directory, is `attachments/` — images
+copied in from comments, named by the sha256 of their contents and sharded a
+directory deep (`attachments/ab/abc….png`). It is the only other thing GitWarren
+writes.
+
 Connection settings, all in `src/core/db/client.ts`:
 
 - `journal_mode = WAL` — the GUI can read while the MCP server writes
@@ -335,7 +344,7 @@ Connection settings, all in `src/core/db/client.ts`:
 
 ### What is and is not stored
 
-Four tables.
+Five tables.
 
 **`repositories`** — `id`, `path` (canonical repository root, UNIQUE), `name`,
 `createdAt`, `updatedAt`.
@@ -359,6 +368,13 @@ account but a description of where a message came from — the person at the
 keyboard, or a named agent process that has since exited. Copying the label onto
 the row keeps that description true forever, which a foreign key to a mutable
 identity would not.
+
+**`attachments`** — `sha` (PRIMARY KEY), `ext`, `mimeType`, `byteSize`, `width`,
+`height`, `originalName`, `createdAt`. See [Images in
+comments](#images-in-comments). Note what it does *not* have: a foreign key to
+the comment it belongs to. The body text is the only record of which images a
+comment uses, and unreferenced rows are collected by a sweep at startup — so
+deleting an image from a comment is just deleting it from the text.
 
 **Not** stored: branch, existence, resolved commits, diffs, or anything else git
 owns. Those are read on demand every time they are displayed. Caching them would
@@ -422,9 +438,9 @@ uses:
 | `update_review` | Title, description, endpoints, or open/closed. |
 | `remove_review` | Deletes the review record only. |
 | `agent_identity` | How this session's comments will be attributed. Optionally sets a session `label`. |
-| `list_review_comments` | Every thread, with messages, authors, and where each one lands in the current diff. Read-only. |
-| `add_review_comment` | Opens a thread. Omit `filePath`/`line` for a review-level comment. |
-| `reply_to_review_comment` | Adds a message to an existing thread. |
+| `list_review_comments` | Every thread, with messages, authors, resolved `attachments`, and where each one lands in the current diff. Read-only. |
+| `add_review_comment` | Opens a thread. Omit `filePath`/`line` for a review-level comment. Local image paths in the body are copied in and rewritten. |
+| `reply_to_review_comment` | Adds a message to an existing thread. Same image handling as above. |
 | `resolve_review_comment` | Marks a thread settled, or reopens it. |
 | `update_review_comment` | Edits one message. Own comments only. |
 | `delete_review_comment` | Deletes one message; the thread goes too if it was the last. |
@@ -518,6 +534,59 @@ already on screen — which matters, because the *include uncommitted* switch
 produces a genuinely different diff with different line numbers — and
 `list_review_comments` anchors against a diff it reads itself, so an agent and
 the screen never disagree about where a comment sits.
+
+### Images in comments
+
+Comment bodies and review descriptions are **markdown** — GitHub-flavoured, so
+tables, task lists, strikethrough and autolinks all work. The composer has the
+usual Write/Preview tabs and a formatting toolbar, and the preview renders
+through the same component the posted comment does, so it cannot drift.
+
+Two things are deliberately not rendered. **Raw HTML** is not, which is why
+there is no sanitiser anywhere in this app — react-markdown does not render
+embedded HTML unless asked, so there is nothing to misconfigure. And **remote
+images** are not: an `https://` image renders as a link, and the renderer's CSP
+has no remote `img-src`. Both exist because a comment here may have been written
+by an agent that just read untrusted content out of the repository under review,
+and it is stored and replayed into the window every time someone opens it.
+
+Images that *are* rendered come from the app's own store:
+
+```
+  body        ![dropdown behind modal](gitwarren://attachment/abc….png)
+                                       └──────────────┬──────────────┘
+  disk        <dataDir>/attachments/ab/abc….png       │  opaque token
+  renderer    <img src="gitwarren://…">  ─────────────┘  custom protocol
+  agent       attachments[].path  →  /Users/…/attachments/ab/abc….png
+```
+
+**Humans** paste, drop or pick an image; it is copied in and the markdown is
+inserted at the cursor. **Agents** write a file to disk and reference it as an
+ordinary markdown image — the path is rewritten to a token when the comment is
+saved. They cannot upload: base64 in a tool call means *emitting* over half a
+million characters for a 400KB screenshot, so a path is the only workable
+currency. In the other direction, every comment carries a resolved `attachments`
+array whose `path` is a real file, which an agent reads with the tools it
+already has. That is why there is no `get_attachment` tool — a path is strictly
+more reliable than an MCP `ImageContent` block, whose delivery varies by client.
+
+The bytes are copied rather than referenced because **a discussion has to
+outlive the file it is about**: `/tmp` gets purged, `test-results/` is wiped at
+the start of every Playwright run, and a pasted screenshot has no path at all.
+It is the same reason `anchorSnapshot` exists. Files are content-addressed by
+sha256, which makes ingest idempotent — necessary, since the GUI and the MCP
+server are separate processes that can ingest the same image at once.
+
+Two details are load-bearing and easy to get wrong. The rewrite **parses** the
+markdown rather than pattern-matching it, so an agent's example image inside a
+fenced code block is not silently ingested. And it **splices** the original
+string by node offset rather than re-serialising the parsed tree, so a body
+comes back byte-identical apart from its URLs — a round trip through mdast would
+quietly renormalise an author's bullet markers and fenced code.
+
+A path that does not resolve is left in the text as written and the comment
+saves anyway, on the same principle the composer already applies to humans: the
+comment is worth more than the link.
 
 ### Pointing an agent at it
 
@@ -736,6 +805,22 @@ a signature.
   participants, and there is no way to merge them after the fact.
 - **Nothing is pushed to the UI.** An agent's comment appears when the window
   polls (every 15s) or regains focus, not the moment it is written.
+- **Repo-relative images are not rendered.** `![](docs/arch.png)` in a comment
+  stays as written rather than resolving against the repository — it needs a
+  second protocol host and repository context threaded into the renderer. Such a
+  URL is left alone rather than copied into the attachment store, since a
+  committed file is git's and reading it live is the rule everywhere else here.
+- **Remote images are shown as links, never inlined**, and raw HTML in markdown
+  is not rendered at all. Both are deliberate; see
+  [Images in comments](#images-in-comments).
+- **Fenced code in comments is not syntax highlighted**, and neither Mermaid nor
+  any other diagram syntax is rendered.
+- **SVG cannot be attached.** It is a script-bearing document rather than a
+  raster image, so only PNG, JPEG, GIF and WebP are accepted, up to 10 MB.
+- **Orphaned attachments are collected at startup, not immediately.** An image
+  pasted into a composer that is then abandoned sits on disk until the next
+  launch of the GUI. The sweep runs only there, never in the MCP server, which
+  may be one of several concurrent processes.
 - **Diffs are unified, not side-by-side**, and have no syntax highlighting or
   word-level intra-line highlighting.
 - **Large diffs are clipped.** A file's patch stops rendering past 4,000 lines
