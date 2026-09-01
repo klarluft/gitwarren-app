@@ -38,6 +38,8 @@ Local AI agents get the same capabilities through an MCP server over stdio.
 - [Auto-update](#auto-update)
 - [Code signing and notarization](#code-signing-and-notarization)
 - [Known limitations](#known-limitations)
+- [Contributing](#contributing)
+- [License](#license)
 
 ---
 
@@ -971,3 +973,55 @@ a signature.
 - **Editing a repository's path** is allowed and re-validated, but there is no
   detection of a repository having moved — you have to notice the *Folder
   missing* badge and repoint it yourself.
+
+---
+
+## Contributing
+
+Contributions are welcome. Open an issue first for anything larger than a bug
+fix — see [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow, the
+two design constraints that changes need to respect, and what a good pull
+request looks like here.
+
+Before a first contribution can be merged you will be asked to sign the
+[Contributor License Agreement](CLA.md). A bot handles it on your pull request;
+it takes about ten seconds and only happens once. The CLA keeps copyright in the
+codebase in one place, which is what makes it possible to offer GitWarren under
+a commercial licence alongside the GPL, or to change licence later, without
+having to track down every past contributor. You keep full ownership of your
+work and can use it elsewhere however you like.
+
+---
+
+## License
+
+GitWarren is free software, licensed under the **GNU General Public License,
+version 3 or (at your option) any later version**. The full text is in
+[LICENSE](LICENSE).
+
+In short: you may use, study, modify and redistribute it, including
+commercially. If you distribute a modified version, or a program that
+incorporates this one, you must release that under the GPL as well and make the
+source available. That reciprocity is the point — it keeps GitWarren and
+anything built on it open.
+
+The copyright is held by Michal Wrzosek, and every contribution is covered by
+the [CLA](CLA.md). A licence other than the GPL — for embedding GitWarren in a
+closed-source product, for instance — can therefore be granted on request:
+email **michal@wrzosek.pl**.
+
+```
+Copyright © 2026 Michal Wrzosek
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with
+this program. If not, see <https://www.gnu.org/licenses/>.
+```

@@ -1,0 +1,118 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  # Allows a re-run against an existing tag without re-pushing it.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build (e.g. v0.1.0)'
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  # electron-builder creates the GitHub release itself if one is missing. With
+  # three platform jobs starting at once that races, and the usual result is
+  # two or three duplicate drafts for the same tag. Creating it once up front
+  # means every build job finds an existing draft and only uploads into it.
+  draft:
+    name: Create draft release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create the draft if it does not exist
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists, leaving it alone."
+          else
+            gh release create "$TAG" --draft --title "$TAG" --generate-notes
+          fi
+
+  build:
+    name: ${{ matrix.name }}
+    needs: draft
+    runs-on: ${{ matrix.os }}
+    # One platform failing should not throw away the artifacts the others
+    # already produced — they can be uploaded to the same draft on a re-run.
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Both architectures are built in a single job per platform on
+          # purpose. electron-builder writes one update manifest per run
+          # (latest.yml / latest-mac.yml / latest-linux.yml) listing that
+          # run's artifacts. Splitting the arches across two jobs produces two
+          # manifests with the same filename, and whichever uploads second
+          # silently wins — breaking auto-update for the other architecture.
+          - os: macos-latest
+            name: macOS (arm64 + x64)
+          - os: windows-latest
+            name: Windows (x64 + arm64)
+          - os: ubuntu-latest
+            name: Linux (x64 + arm64)
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build and publish
+        env:
+          # electron-builder uploads to the repo named in the `publish` block
+          # of electron-builder.yml using this token.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+          # --- Code signing (optional) -------------------------------------
+          # macOS and Windows read the same pair. Base64-encode the .p12 and
+          # store it as CSC_LINK. Absent secrets resolve to an empty string,
+          # which electron-builder treats as "unsigned" rather than an error,
+          # so this workflow works before any certificate exists.
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+
+          # Without this, electron-builder hunts the runner keychain for any
+          # usable identity and fails confusingly when it finds none.
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ secrets.CSC_LINK != '' }}
+
+          # --- macOS notarization (optional) -------------------------------
+          # Inert until `notarize: true` is set in electron-builder.yml.
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: npm run release
+
+      # Kept for the unsigned-build era: if publishing fails, or a build is
+      # being checked before there is a release to attach it to, the
+      # installers are still retrievable from the run itself.
+      - name: Upload installers as a workflow artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ runner.os }}
+          path: |
+            release/*/*.dmg
+            release/*/*.zip
+            release/*/*.exe
+            release/*/*.AppImage
+            release/*/*.yml
+            release/*/*.blockmap
+          if-no-files-found: ignore
+          retention-days: 14

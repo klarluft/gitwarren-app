@@ -7,7 +7,7 @@
     "name": "Michal Wrzosek",
     "email": "michal@wrzosek.pl"
   },
-  "license": "MIT",
+  "license": "GPL-3.0-or-later",
   "private": true,
   "homepage": "https://github.com/michal-wrzosek/gitwarren-app",
   "repository": {

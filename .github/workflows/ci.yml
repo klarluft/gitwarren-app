@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel an in-flight run when the branch is pushed again.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Lint, typecheck, test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # `npm ci` runs the postinstall (electron-builder install-app-deps),
+      # which rebuilds better-sqlite3 against Electron's headers. The tests
+      # open a real SQLite file, so this has to happen before them.
+      - run: npm ci
+
+      - run: npm run lint
+
+      - run: npm run typecheck
+
+      # The suite shells out to a real git and writes to a temp
+      # GITWARREN_DATA_DIR, so git has to be present — it is, on all
+      # GitHub-hosted runners.
+      - run: npm test
