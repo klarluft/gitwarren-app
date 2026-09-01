@@ -1,3 +1,5 @@
+<img src="src/renderer/src/assets/logo.png" alt="" width="112" height="112" />
+
 # GitWarren
 
 A cross-platform desktop app for doing local code reviews of your own git
@@ -392,6 +394,7 @@ src/
 │   └── identity.ts      naming an agent from its MCP handshake
 └── renderer/          React app (no Node access)
     └── src/
+        ├── assets/          logo.png, inlined as a data: URI by the CSP
         ├── components/      markdown.tsx + ui/ (shadcn-style, on Base UI)
         ├── features/        repositories/, reviews/, comments/, agent/
         └── lib/             api access, error helpers, hash router
@@ -402,6 +405,15 @@ rule dividing them: **zod is for values that cross a trust boundary** — anythi
 a caller supplies that the service must not believe. Git output is produced by
 reading the disk and flows one way out to the UI, so a runtime schema for it
 would be ceremony with no payoff.
+
+Outside `src/`, `gitwarren-logo.png` in the repository root is the 1710px master
+of the logo. The two files that are actually used are cut from it and should be
+recut from it rather than from each other:
+
+| File | Size | Used for |
+| --- | --- | --- |
+| `build/icon.png` | 1024px, artwork inset to 860px | electron-builder renders the `.icns`, `.ico` and Linux icons from it; `main/index.ts` also hands it to `BrowserWindow` so Linux windows have an icon at all. The inset is the padding the macOS icon grid expects — without it the Dock icon sits noticeably larger than its neighbours. |
+| `src/renderer/src/assets/logo.png` | 128px, no padding | The app header, and the image at the top of this README. |
 
 ---
 

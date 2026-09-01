@@ -3,6 +3,11 @@
  */
 import { app, BrowserWindow, dialog, shell } from 'electron'
 import { join } from 'node:path'
+// The same file electron-builder turns into the .icns/.ico; `?asset` copies it
+// next to the bundle so it also exists at runtime. macOS takes its icon from
+// the app bundle and ignores this, but a Linux window has no icon at all unless
+// one is handed to BrowserWindow.
+import icon from '../../build/icon.png?asset'
 import { getDatabase, closeDatabase } from '../core/db/client.js'
 import { getDatabasePath, getDataDirectory } from '../core/paths.js'
 import { attachmentsService } from '../core/services/attachments.js'
@@ -49,6 +54,7 @@ function createWindow(): BrowserWindow {
     show: false,
     autoHideMenuBar: true,
     title: 'GitWarren',
+    ...(process.platform === 'darwin' ? {} : { icon }),
     backgroundColor: '#0b0b0e',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     webPreferences: {

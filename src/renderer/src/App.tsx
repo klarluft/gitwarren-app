@@ -6,6 +6,11 @@
  * the app reads better narrow.
  */
 import { useRef } from 'react'
+// `?inline` rather than a bundled file URL: the packaged renderer is loaded
+// over file://, where the `img-src 'self'` in index.html does not cover a
+// sibling file. A data: URI is allowed by that same policy, and at this size
+// costs less than the exception would.
+import logo from './assets/logo.png?inline'
 import { ScrollToTop } from './components/scroll-to-top'
 import { TooltipProvider } from './components/ui/tooltip'
 import { UpdateBanner } from './components/update-banner'
@@ -61,11 +66,15 @@ export function App() {
 function HomeScreen() {
   return (
     <>
-      <div className="mb-6">
-        <h1 className="text-xl font-semibold tracking-tight">GitWarren</h1>
-        <p className="text-sm text-muted-foreground">
-          Local code review for your git repositories
-        </p>
+      <div className="mb-6 flex items-center gap-3">
+        {/* Decorative: the wordmark next to it already names the app. */}
+        <img src={logo} alt="" className="size-10 shrink-0" />
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight">GitWarren</h1>
+          <p className="text-sm text-muted-foreground">
+            Local code review for your git repositories
+          </p>
+        </div>
       </div>
 
       <div className="flex flex-col gap-6">
