@@ -949,6 +949,35 @@ and much less so afterwards, since revocation invalidates already-distributed
 builds. Note that an account is limited to five Developer ID Application
 certificates, so revoke rather than abandon the unwanted one.
 
+**If the new certificate shows up as invalid, the intermediate is missing.**
+macOS ships the original Developer ID intermediate but not necessarily the G2
+one, and a certificate whose chain cannot be completed is not counted as a
+valid identity — so `security find-identity -v` stays silent about it while
+`security find-identity` (no `-v`) lists it happily. That difference is the
+diagnosis:
+
+```bash
+security find-identity -p codesigning        # lists it
+security find-identity -v -p codesigning     # does not
+```
+
+Install the missing link from [Apple's certificate authority
+page](https://www.apple.com/certificateauthority/):
+
+```bash
+curl -O https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer
+security add-certificates -k ~/Library/Keychains/login.keychain-db DeveloperIDG2CA.cer
+```
+
+It grants no new trust — the intermediate is itself issued by Apple Root CA,
+which macOS already trusts. It only supplies the link needed to build the chain.
+
+**Do not leave both certificates in the keychain.** They have identical common
+names, and electron-builder resolves the identity by name and takes what it
+finds first — so a release would pick between them unpredictably. Once the
+replacement is confirmed working, revoke the old certificate in the portal and
+delete it, with its private key, from Keychain Access.
+
 **2. Create an app-specific password for notarization.**
 
 Notarization uploads the build to Apple and cannot use your ordinary password
