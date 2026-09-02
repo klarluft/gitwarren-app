@@ -17,9 +17,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 24 to match the npm that writes package-lock.json locally. Node 22
+      # ships npm 10, which keeps a top-level entry for every dependency of an
+      # optional platform package; npm 11 prunes them, so a lockfile written by
+      # npm 11 is rejected by `npm ci` on npm 10 as out of sync. Keep this in
+      # step with release.yml and deploy-site.yml.
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
 
       # `npm ci` runs the postinstall (electron-builder install-app-deps),
