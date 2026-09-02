@@ -34,3 +34,6 @@ pnpm-debug.log*
 
 # macOS
 .DS_Store
+
+# scratch output from scripts/capture-demo.mjs
+screenshots-out/

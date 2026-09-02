@@ -28,6 +28,7 @@
     "src/shared/**/*",
     "electron.vite.config.ts",
     "vite.mcp.config.ts",
-    "drizzle.config.ts"
+    "drizzle.config.ts",
+    "scripts/**/*.ts"
   ]
 }
