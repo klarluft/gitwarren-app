@@ -21,17 +21,46 @@
  * substitute for a Developer ID — the app still cannot notarize and still
  * cannot auto-update.
  *
- * Skipped when CSC_LINK is set, since electron-builder is then about to sign
- * properly and would overwrite this anyway.
+ * Skipped whenever electron-builder is about to sign for real and would
+ * overwrite this anyway: CSC_LINK set (the CI path, a base64 .p12), or a
+ * Developer ID Application identity already in the keychain (the local path,
+ * after `npm run package` on a machine enrolled in the Developer Program).
  */
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
+
+/**
+ * True when the keychain holds a Developer ID Application identity that
+ * electron-builder will find on its own. Auto-discovery being off means it
+ * will not go looking, so the keychain does not matter in that case.
+ */
+function hasDeveloperIdIdentity() {
+  if (process.env.CSC_IDENTITY_AUTO_DISCOVERY === 'false') return false
+
+  try {
+    const identities = execFileSync('security', ['find-identity', '-v', '-p', 'codesigning'], {
+      encoding: 'utf8'
+    })
+    return identities.includes('Developer ID Application')
+  } catch {
+    // No keychain, or `security` unavailable — treat it as no identity and
+    // fall through to the ad-hoc signature.
+    return false
+  }
+}
 
 export default async function adhocSign(context) {
   if (context.electronPlatformName !== 'darwin') return
 
   if (process.env.CSC_LINK) {
     console.log('  • ad-hoc signing skipped   reason=CSC_LINK is set, real signing will run')
+    return
+  }
+
+  if (hasDeveloperIdIdentity()) {
+    console.log(
+      '  • ad-hoc signing skipped   reason=Developer ID in keychain, real signing will run'
+    )
     return
   }
 

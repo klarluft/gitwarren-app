@@ -875,39 +875,202 @@ They *are* required before distributing to anyone else — and specifically,
 **auto-update on macOS will not work unsigned**, because Squirrel.Mac validates
 the code signature of the downloaded build before swapping it in.
 
-**macOS.** Needs an Apple Developer account ($99/year), a *Developer ID
-Application* certificate in the login keychain, and an app-specific password (or
-App Store Connect API key) for notarization. Then set `notarize: true` in
-`electron-builder.yml` and provide:
+The hardened runtime is already enabled, with entitlements in
+`build/entitlements.mac.plist` covering what this app actually needs: JIT for
+V8, library validation disabled (the app spawns `git`, and agents spawn the
+bundled MCP server), and user-selected file access for repositories on any
+volume. `notarize: true` is set in `electron-builder.yml`, which stays inert
+until both a signature and Apple credentials exist — see *How the switches
+interact* below.
+
+### macOS: one-time setup
+
+Everything here happens once per developer account, not once per release. It
+needs a paid Apple Developer Program membership ($99/year).
+
+**1. Create the Developer ID Application certificate.**
+
+This is the certificate for apps distributed outside the Mac App Store. Note
+that only the **Account Holder** can create one under an organization
+membership — a plain Admin cannot, and the certificate type simply will not
+appear in the list for them.
+
+With Xcode installed, *Settings → Accounts → Manage Certificates → + →
+Developer ID Application* does the whole thing. With only the Command Line
+Tools, generate the request by hand:
+
+1. Open **Keychain Access → Certificate Assistant → Request a Certificate From
+   a Certificate Authority**.
+2. Enter your Apple ID email and a common name, leave *CA Email Address* empty,
+   choose **Saved to disk** and tick **Let me specify key pair information**.
+3. Key size 2048 bits, algorithm RSA. Save the `.certSigningRequest`.
+4. Go to [developer.apple.com/account/resources/certificates](https://developer.apple.com/account/resources/certificates),
+   press **+**, choose **Developer ID Application**, and upload the request.
+   Pick the *G2 Sub-CA* profile type when asked.
+5. Download the resulting `.cer` and double-click it to install into the login
+   keychain.
+
+The private key never leaves your Mac — Apple only ever sees the request. That
+also means **Apple cannot re-issue this key if you lose it**, so export the
+`.p12` described under *CI secrets* below and keep a copy somewhere durable. An
+account is limited to five Developer ID Application certificates, and each is
+valid for five years.
+
+Confirm the result:
+
+```bash
+security find-identity -v -p codesigning
+# 1) ABC123... "Developer ID Application: Klarluft B.V. (XXXXXXXXXX)"
+#    1 valid identities found
+```
+
+The parenthesised code is the **Team ID**. It is also on
+[developer.apple.com/account](https://developer.apple.com/account) under
+*Membership details*.
+
+**2. Create an app-specific password for notarization.**
+
+Notarization uploads the build to Apple and cannot use your ordinary password
+under two-factor auth. At [appleid.apple.com](https://appleid.apple.com) →
+*Sign-In and Security → App-Specific Passwords*, generate one and keep the
+`xxxx-xxxx-xxxx-xxxx` string.
+
+An App Store Connect API key works instead, via `APPLE_API_KEY`,
+`APPLE_API_KEY_ID` and `APPLE_API_ISSUER`. It is the better choice for a shared
+CI account, because it is scoped and revocable without touching a person's
+Apple ID; the app-specific password is fewer steps for a single developer.
+
+### Building a signed release locally
+
+electron-builder finds the certificate in the login keychain on its own.
+Notarization needs the credentials in the environment:
 
 ```bash
 export APPLE_ID="you@example.com"
 export APPLE_APP_SPECIFIC_PASSWORD="xxxx-xxxx-xxxx-xxxx"
 export APPLE_TEAM_ID="XXXXXXXXXX"
+
+npm run package
 ```
 
-The hardened runtime is already enabled, with entitlements in
-`build/entitlements.mac.plist` covering what this app actually needs: JIT for
-V8, library validation disabled (the app spawns `git`, and agents spawn the
-bundled MCP server), and user-selected file access for repositories on any
-volume.
+Storing the password in the keychain instead keeps it out of the shell history
+and out of a dotfile:
 
-**Windows.** Needs a code-signing certificate — since June 2023 an OV
-certificate must live on a hardware token or an HSM, so the practical options
-are a cloud signing service or an EV certificate. Configure it through
+```bash
+xcrun notarytool store-credentials gitwarren \
+  --apple-id "you@example.com" \
+  --team-id "XXXXXXXXXX" \
+  --password "xxxx-xxxx-xxxx-xxxx"
+
+export APPLE_KEYCHAIN_PROFILE=gitwarren
+npm run package
+```
+
+Expect the run to take noticeably longer than an unsigned one. Apple's
+notarization service usually answers within a few minutes, but it queues, and
+each architecture is submitted separately. The log lines to look for are
+`signing  file=release/.../GitWarren.app  identityName=Developer ID
+Application: ...`, then `notarization successful`. Stapling happens
+automatically after that, so the finished app validates on the user's machine
+without a network round-trip.
+
+### Verifying a signed build
+
+Worth doing once, on the first signed release, rather than discovering a
+problem from a user:
+
+```bash
+APP="release/0.1.0/mac-arm64/GitWarren.app"
+
+# The signature is intact and covers every nested binary.
+codesign --verify --deep --strict --verbose=2 "$APP"
+
+# Signed by the right authority, with the hardened runtime on.
+codesign -dv --verbose=4 "$APP" 2>&1 | grep -E 'Authority|TeamIdentifier|flags'
+# Authority=Developer ID Application: Klarluft B.V. (XXXXXXXXXX)
+# TeamIdentifier=XXXXXXXXXX
+# flags=0x10000(runtime)
+
+# The notarization ticket is stapled to the bundle.
+xcrun stapler validate "$APP"
+
+# What Gatekeeper will decide on the user's machine.
+spctl -a -vvv -t install "$APP"
+# source=Notarized Developer ID
+```
+
+`source=Notarized Developer ID` is the line that matters. Anything else — most
+often `source=Unnotarized Developer ID` — means the signature landed but the
+notarization did not, and the download will still be refused.
+
+### CI secrets
+
+The release workflow reads five optional secrets. Setting them switches the
+GitHub Actions build from ad-hoc to properly signed and notarized; leaving them
+unset keeps the existing unsigned behaviour.
+
+Export the certificate *with its private key* from Keychain Access — select the
+**Developer ID Application** entry under *My Certificates*, right-click →
+*Export*, choose **Personal Information Exchange (.p12)**, and set a password.
+Then:
+
+```bash
+base64 -i certificate.p12 | pbcopy   # this is CSC_LINK
+
+gh secret set CSC_LINK                    # base64 of the .p12
+gh secret set CSC_KEY_PASSWORD            # the .p12 export password
+gh secret set APPLE_ID                    # your Apple ID email
+gh secret set APPLE_APP_SPECIFIC_PASSWORD # xxxx-xxxx-xxxx-xxxx
+gh secret set APPLE_TEAM_ID               # XXXXXXXXXX
+```
+
+The same `CSC_LINK` / `CSC_KEY_PASSWORD` pair is what a Windows certificate
+would use, so adding one later does not introduce a second mechanism.
+
+The workflow deliberately exports these through `$GITHUB_ENV` rather than a
+step-level `env:` block. An absent secret is not an unset variable in GitHub
+Actions — it is an empty string, and electron-builder's macOS packager only
+null-checks `CSC_LINK`, so an empty one wins over every other source and is
+then resolved as a path relative to the project directory, failing with
+`⨯ /Users/runner/work/<repo>/<repo> not a file`. The loop in *Export the
+signing secrets that exist* skips empty values so the unset case stays unset.
+
+### How the switches interact
+
+Three independent things decide what a macOS build comes out as, which is why
+none of them has to be toggled per build:
+
+| Certificate | Apple credentials | Result |
+| --- | --- | --- |
+| absent | either way | ad-hoc signed by `scripts/adhoc-sign.mjs`, not notarized |
+| present | absent | signed, `skipped macOS notarization` warning, not notarized |
+| present | present | signed, notarized, stapled |
+
+Notarization is only attempted after a real signature succeeds, so `notarize:
+true` is harmless on a machine with no certificate — the code path is never
+reached. `scripts/adhoc-sign.mjs` stands down as soon as either `CSC_LINK` is
+set or a Developer ID identity is in the keychain, so it never fights with the
+real signature.
+
+### Windows
+
+Needs a code-signing certificate — since June 2023 an OV certificate must live
+on a hardware token or an HSM, so the practical options are a cloud signing
+service or an EV certificate. Configure it through
 `win.certificateFile`/`certificatePassword`, or a signing hook for a cloud
 provider. Without signing, SmartScreen warns users on first run; updates still
 work, since electron-updater verifies the sha512 from the manifest rather than
 a signature.
 
-**Linux.** AppImage needs no signing.
+### Linux
+
+AppImage needs no signing.
 
 ### Releasing before the certificates exist
 
 The release pipeline is complete without any of the above. Every signing secret
 is optional, so tagging a version today produces installers for all three
-platforms; adding the certificates later changes no workflow and no config
-beyond `notarize`.
+platforms; adding the certificates later changes no workflow and no config.
 
 What each platform costs while unsigned:
 
