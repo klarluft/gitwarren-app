@@ -1,0 +1,52 @@
+name: Deploy site
+
+# gitwarren.com bakes its download URLs in at build time, reading them from
+# this repository's releases API. electron-builder puts the version in every
+# asset name (GitWarren-0.1.0-arm64.dmg), so there is no static
+# `releases/latest/download/<name>` URL the site could link instead — it has to
+# rebuild for the buttons to point at a new release.
+#
+# Deliberately triggered by `release: published`, not by the tag push that
+# drives release.yml. That workflow creates a *draft* and uploads installers
+# into it, and a draft's assets are not visible to the releases API. Rebuilding
+# the site at the end of release.yml would therefore publish a site whose
+# buttons still point at the previous release, or fall back to the releases
+# page. Publishing the draft is the moment the assets become real.
+#
+# `published` rather than `released` on purpose: `released` does not fire for
+# prereleases, and v0.1.0 is one.
+
+on:
+  release:
+    types: [published]
+  # Allows a redeploy without touching a release — useful after a site change
+  # that has not been deployed by other means.
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Rebuild and deploy gitwarren.com
+    runs-on: ubuntu-latest
+    steps:
+      # Both repositories are public, so the default token is enough here.
+      - name: Check out the site
+        uses: actions/checkout@v4
+        with:
+          repository: klarluft/gitwarren-site
+          ref: main
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      # `npm run deploy` is `astro build && wrangler deploy` — the build is
+      # what reads this repository's releases API, so nothing about the
+      # release needs to be passed through.
+      - name: Build and deploy
+        run: npm run deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
