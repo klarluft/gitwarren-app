@@ -14,7 +14,10 @@ permissions:
   contents: write
 
 env:
-  NODE_VERSION: '22'
+  # 24, not 22, so `npm ci` reads the lockfile with the same npm major that
+  # wrote it — see the comment in ci.yml. Only the host toolchain; the Node
+  # that ships inside the app is Electron's, not this one.
+  NODE_VERSION: '24'
 
 jobs:
   # electron-builder creates the GitHub release itself if one is missing. With

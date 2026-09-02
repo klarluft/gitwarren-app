@@ -35,9 +35,15 @@ jobs:
           repository: klarluft/gitwarren-site
           ref: main
 
+      # 24, not 22, to match the npm that writes gitwarren-site's lockfile.
+      # Node 22 ships npm 10, which keeps a top-level entry for every dep of an
+      # optional platform package (@emnapi/runtime, pulled in by sharp's
+      # @img/sharp-wasm32); npm 11 prunes them. A lockfile written by npm 11 is
+      # therefore rejected by `npm ci` on npm 10 as out of sync, even though it
+      # is perfectly valid. Site development runs on Node 24, so CI follows it.
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
           cache: npm
 
       - run: npm ci
