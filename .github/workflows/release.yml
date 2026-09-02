@@ -74,29 +74,56 @@ jobs:
 
       - run: npm ci
 
+      # --- Code signing and notarization (both optional) -------------------
+      # Base64-encode the .p12 and store it as CSC_LINK; macOS and Windows read
+      # the same pair. Everything here is absent until a Developer ID exists.
+      #
+      # An absent secret does not leave its variable unset — GitHub Actions
+      # exports it as an empty string. electron-builder's macOS packager only
+      # null-checks CSC_LINK (its Windows one also rejects ""), so the empty
+      # string wins over every other source and is then resolved as a path
+      # relative to the project directory — which is a directory, not a file:
+      #
+      #   • empty password will be used  reason=CSC_KEY_PASSWORD is not defined
+      #   ⨯ /Users/runner/work/<repo>/<repo> not a file
+      #
+      # Exporting through $GITHUB_ENV instead lets the unset case stay unset.
+      # Note that a step-level `env:` would override these, so the build step
+      # below must not name them.
+      - name: Export the signing secrets that exist
+        shell: bash
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          for name in CSC_LINK CSC_KEY_PASSWORD APPLE_ID \
+                      APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+            value="${!name}"
+            [ -n "$value" ] || continue
+            # Heredoc form: a base64 .p12 may legitimately contain newlines.
+            printf '%s<<CSC_VALUE_EOF\n%s\nCSC_VALUE_EOF\n' "$name" "$value" \
+              >> "$GITHUB_ENV"
+          done
+
+          # Without this, electron-builder hunts the runner keychain for any
+          # usable identity and fails confusingly when it finds none.
+          if [ -n "$CSC_LINK" ]; then
+            echo "CSC_IDENTITY_AUTO_DISCOVERY=true" >> "$GITHUB_ENV"
+          else
+            echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
+          fi
+
+      # With no certificate the macOS build falls back to the ad-hoc signature
+      # from scripts/adhoc-sign.mjs, and notarization stays inert regardless
+      # while `notarize: false` is set in electron-builder.yml.
       - name: Build and publish
         env:
           # electron-builder uploads to the repo named in the `publish` block
           # of electron-builder.yml using this token.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-          # --- Code signing (optional) -------------------------------------
-          # macOS and Windows read the same pair. Base64-encode the .p12 and
-          # store it as CSC_LINK. Absent secrets resolve to an empty string,
-          # which electron-builder treats as "unsigned" rather than an error,
-          # so this workflow works before any certificate exists.
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-
-          # Without this, electron-builder hunts the runner keychain for any
-          # usable identity and fails confusingly when it finds none.
-          CSC_IDENTITY_AUTO_DISCOVERY: ${{ secrets.CSC_LINK != '' }}
-
-          # --- macOS notarization (optional) -------------------------------
-          # Inert until `notarize: true` is set in electron-builder.yml.
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: npm run release
 
       # Kept for the unsigned-build era: if publishing fails, or a build is
