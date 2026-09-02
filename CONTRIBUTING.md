@@ -45,7 +45,9 @@ elsewhere however you like.
 
 ## Development setup
 
-Requirements: **Node 22+**, **npm 10+**, and **git on your PATH**.
+Requirements: the Node in [`.nvmrc`](.nvmrc) (**24.20.0**) and **git on your
+PATH**. `nvm` and `fnm` read `.nvmrc` on `cd`; `engine-strict` in `.npmrc`
+turns a mismatched toolchain into an error rather than a warning.
 
 ```bash
 npm install          # also rebuilds native deps for Electron

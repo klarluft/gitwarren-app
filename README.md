@@ -328,8 +328,12 @@ says so.
 
 ## Development setup
 
-Requirements: **Node 22+**, **npm 10+**, and **git on your PATH** (GitWarren
-shells out to your own git rather than bundling one).
+Requirements: the Node in [`.nvmrc`](.nvmrc) (**24.20.0**, which ships npm
+11.19) and **git on your PATH** (GitWarren shells out to your own git rather
+than bundling one). With `nvm` or `fnm` the version is picked up automatically
+on `cd`; `engines` in `package.json` sets the floor at Node 24.20 / npm 11.10
+and `.npmrc` sets `engine-strict`, so an older toolchain fails loudly instead
+of quietly writing a lockfile CI cannot install.
 
 ```bash
 npm install          # also rebuilds native deps for Electron
