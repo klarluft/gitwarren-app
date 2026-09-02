@@ -25,6 +25,12 @@ extraResources:
     to: drizzle
     filter: ['**/*']
 
+# Ad-hoc signs macOS builds when no Developer ID is configured. Without it an
+# unsigned download is reported as *damaged* rather than merely unidentified,
+# because packaging invalidates the seal on the signature Electron ships with.
+# No-ops on Windows and Linux, and stands aside once CSC_LINK is set.
+afterPack: ./scripts/adhoc-sign.mjs
+
 win:
   target:
     - target: nsis

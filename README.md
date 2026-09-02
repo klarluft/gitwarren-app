@@ -902,6 +902,60 @@ a signature.
 
 **Linux.** AppImage needs no signing.
 
+### Releasing before the certificates exist
+
+The release pipeline is complete without any of the above. Every signing secret
+is optional, so tagging a version today produces installers for all three
+platforms; adding the certificates later changes no workflow and no config
+beyond `notarize`.
+
+What each platform costs while unsigned:
+
+| Platform | Installs? | Auto-updates? |
+| --- | --- | --- |
+| Linux | Yes, unchanged | Yes, unchanged |
+| Windows | Yes, past a SmartScreen warning | Yes |
+| macOS | Yes, past a manual Gatekeeper override | **No** |
+
+Linux is unaffected — an AppImage is never signed. Windows shows *"Windows
+protected your PC"* until the certificate exists and SmartScreen has built
+reputation against it, but installs and updates work throughout.
+
+macOS is the one that is genuinely degraded, in two ways. Gatekeeper refuses a
+downloaded build that is not notarized, and the user has to allow it explicitly
+in **System Settings → Privacy & Security**, where a *GitWarren was blocked*
+row appears after the first launch attempt. Right-click → Open no longer works
+as a bypass; Apple removed that in macOS Sequoia. Stripping the quarantine
+attribute by hand does the same thing:
+
+```bash
+xattr -d com.apple.quarantine /Applications/GitWarren.app
+```
+
+Both are fine for a developer trying the app deliberately, and both are far too
+much to ask of anyone else.
+
+The second cost is the one to plan around: **auto-update does not work at all on
+an unsigned macOS build**, so anyone who installs one is on a dead-end version.
+They will not be moved forward by the updater and will have to download the
+first signed release by hand. Publishing unsigned macOS artifacts as a
+pre-release, rather than as a headline version, keeps that population small.
+
+A local build runs with none of this friction, because a bundle you produced
+yourself carries no `com.apple.quarantine` attribute and Gatekeeper is never
+consulted. That is why `npm run package` output opens by double-clicking while
+the same file downloaded from a release does not.
+
+`afterPack` runs [`scripts/adhoc-sign.mjs`](scripts/adhoc-sign.mjs), which
+ad-hoc signs macOS builds whenever no Developer ID is present. This is not a
+substitute for signing — Gatekeeper still refuses the download — but it changes
+*how* it refuses. Packaging invalidates the seal on the linker signature
+Electron ships with, and macOS reports a bundle whose seal does not match as
+**damaged**, which reads as malware rather than as the ordinary unidentified
+developer users know how to allow. Re-signing ad-hoc makes the signature
+self-consistent again, so the refusal is the honest one and the Privacy &
+Security override works.
+
 ---
 
 ## Known limitations
