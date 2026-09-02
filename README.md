@@ -895,12 +895,15 @@ that only the **Account Holder** can create one under an organization
 membership — a plain Admin cannot, and the certificate type simply will not
 appear in the list for them.
 
-With Xcode installed, *Settings → Accounts → Manage Certificates → + →
-Developer ID Application* does the whole thing. With only the Command Line
-Tools, generate the request by hand:
+Do this through the developer portal rather than through Xcode. Xcode's
+*Settings → Accounts → Manage Certificates* is fewer clicks, but it never asks
+which sub-CA to issue under and has been observed picking the legacy one — see
+*Check which sub-CA issued it* below, which is worth reading before you start
+rather than after.
 
 1. Open **Keychain Access → Certificate Assistant → Request a Certificate From
-   a Certificate Authority**.
+   a Certificate Authority**. (This works with only the Command Line Tools
+   installed; Xcode is not needed for any of it.)
 2. Enter your Apple ID email and a common name, leave *CA Email Address* empty,
    choose **Saved to disk** and tick **Let me specify key pair information**.
 3. Key size 2048 bits, algorithm RSA. Save the `.certSigningRequest`.
@@ -914,7 +917,7 @@ The private key never leaves your Mac — Apple only ever sees the request. That
 also means **Apple cannot re-issue this key if you lose it**, so export the
 `.p12` described under *CI secrets* below and keep a copy somewhere durable. An
 account is limited to five Developer ID Application certificates, and each is
-valid for five years.
+valid for five years when issued under the current sub-CA.
 
 Confirm the result:
 
@@ -927,6 +930,24 @@ security find-identity -v -p codesigning
 The parenthesised code is the **Team ID**. It is also on
 [developer.apple.com/account](https://developer.apple.com/account) under
 *Membership details*.
+
+**Check which sub-CA issued it.** Apple's original *Developer ID Certification
+Authority* intermediate expires on **1 February 2027**, and a leaf certificate
+cannot outlive its issuer — so a certificate issued under it is silently
+truncated to whatever remains of that date instead of running the full five
+years. The *G2 Sub-CA* exists to replace it:
+
+```bash
+security find-certificate -c "Developer ID Application" -p |
+  openssl x509 -noout -issuer -dates
+```
+
+An expiry of exactly `Feb  1 22:12:15 2027 GMT` means the legacy sub-CA issued
+it, whatever the portal appeared to offer. Create a fresh one under **G2
+Sub-CA** and revoke the short one — cheaply done before anything has shipped,
+and much less so afterwards, since revocation invalidates already-distributed
+builds. Note that an account is limited to five Developer ID Application
+certificates, so revoke rather than abandon the unwanted one.
 
 **2. Create an app-specific password for notarization.**
 
