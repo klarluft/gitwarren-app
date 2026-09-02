@@ -1,6 +1,6 @@
 appId: com.gitwarren.app
 productName: GitWarren
-copyright: Copyright © 2026 Michal Wrzosek
+copyright: Copyright © 2026 Klarluft B.V.
 
 directories:
   buildResources: build
@@ -84,5 +84,5 @@ linux:
 
 publish:
   provider: github
-  owner: michal-wrzosek
+  owner: klarluft
   repo: gitwarren-app

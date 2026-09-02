@@ -780,7 +780,7 @@ same database independently.
 ## Release process
 
 Artifacts and the update manifest are published to **GitHub Releases**
-(`michal-wrzosek/gitwarren-app`, configured in `electron-builder.yml`).
+(`klarluft/gitwarren-app`, configured in `electron-builder.yml`).
 
 ```bash
 # 1. Bump the version. electron-builder reads it from package.json,
@@ -1059,13 +1059,17 @@ incorporates this one, you must release that under the GPL as well and make the
 source available. That reciprocity is the point — it keeps GitWarren and
 anything built on it open.
 
-The copyright is held by Michal Wrzosek, and every contribution is covered by
-the [CLA](CLA.md). A licence other than the GPL — for embedding GitWarren in a
-closed-source product, for instance — can therefore be granted on request:
-email **michal@wrzosek.pl**.
+The copyright is held by **Klarluft B.V.** (Rotterdam, The Netherlands · KVK
+86875590), and every contribution is covered by the [CLA](CLA.md). Because the
+copyright sits in one place rather than being spread across contributors, a
+licence other than the GPL — for embedding GitWarren in a closed-source product,
+for instance — can be granted on request: email **contact@klarluft.com**.
+
+[Michal Wrzosek](https://github.com/michal-wrzosek) (<michal@wrzosek.pl>) is the
+creator of GitWarren and currently its main maintainer.
 
 ```
-Copyright © 2026 Michal Wrzosek
+Copyright © 2026 Klarluft B.V.
 
 This program is free software: you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software

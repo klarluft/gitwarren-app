@@ -106,7 +106,7 @@ state matters more than anything else.
 ## Security
 
 Do not open a public issue for a security problem. Email
-**michal@wrzosek.pl** with the details and give a reasonable window for a fix
+**contact@klarluft.com** with the details and give a reasonable window for a fix
 before disclosing.
 
 ## Licence

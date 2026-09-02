@@ -28,14 +28,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           path-to-signatures: 'signatures/version1/cla.json'
-          path-to-document: 'https://github.com/michal-wrzosek/gitwarren-app/blob/main/CLA.md'
+          path-to-document: 'https://github.com/klarluft/gitwarren-app/blob/main/CLA.md'
           # Signatures live on their own branch so they never appear in a
           # source diff or trigger CI.
           branch: 'cla-signatures'
           allowlist: 'michal-wrzosek,dependabot[bot]'
           custom-notsigned-prcomment: >
             Thanks for the pull request. Before it can be merged, please read the
-            [Contributor License Agreement](https://github.com/michal-wrzosek/gitwarren-app/blob/main/CLA.md)
+            [Contributor License Agreement](https://github.com/klarluft/gitwarren-app/blob/main/CLA.md)
             and sign it by posting a comment on this pull request with exactly:
           custom-pr-sign-comment: 'I have read the CLA Document and I hereby sign the CLA'
           custom-allsigned-prcomment: 'All contributors have signed the CLA. Thanks!'

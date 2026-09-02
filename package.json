@@ -4,15 +4,23 @@
   "version": "0.1.0",
   "description": "Desktop app for doing local-only code reviews",
   "author": {
-    "name": "Michal Wrzosek",
-    "email": "michal@wrzosek.pl"
+    "name": "Klarluft B.V.",
+    "email": "contact@klarluft.com",
+    "url": "https://klarluft.com"
   },
+  "contributors": [
+    {
+      "name": "Michal Wrzosek",
+      "email": "michal@wrzosek.pl",
+      "url": "https://github.com/michal-wrzosek"
+    }
+  ],
   "license": "GPL-3.0-or-later",
   "private": true,
-  "homepage": "https://github.com/michal-wrzosek/gitwarren-app",
+  "homepage": "https://github.com/klarluft/gitwarren-app",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/michal-wrzosek/gitwarren-app.git"
+    "url": "git+https://github.com/klarluft/gitwarren-app.git"
   },
   "main": "./out/main/index.js",
   "type": "module",

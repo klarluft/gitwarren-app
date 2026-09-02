@@ -2,8 +2,21 @@
 
 **Version 1.0**
 
-Thank you for your interest in contributing to GitWarren (the "Project"),
-maintained by Michal Wrzosek (the "Owner").
+Thank you for your interest in contributing to GitWarren (the "Project"). The
+Project is owned and maintained by (the "Owner"):
+
+> **Klarluft B.V.**
+> Van Aerssenlaan 40C
+> 3039 KE Rotterdam
+> The Netherlands
+>
+> KVK: 86875590 · VAT: NL864128915B01
+> contact@klarluft.com
+
+Michal Wrzosek (<michal@wrzosek.pl>, <https://github.com/michal-wrzosek>) is the
+creator of the Project and currently its main maintainer, acting on behalf of
+the Owner. Copyright is held by the Owner, not by any individual maintainer, so
+that it stays in one place — which is the point of this agreement.
 
 This agreement clarifies the intellectual property licence granted with
 Contributions from any person or entity. It protects You as a Contributor as
