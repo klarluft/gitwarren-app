@@ -2,14 +2,15 @@
  * The list of reviews for one repository, with its loading, empty and error
  * states kept together so it is visible that all of them are handled.
  */
-import { useState } from 'react'
-import { AlertCircle, ArrowRight, GitPullRequestArrow, Plus, RefreshCw } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { AlertCircle, ArrowRight, Filter, GitPullRequestArrow, Plus, RefreshCw } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Tooltip } from '@/components/ui/tooltip'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { errorMessage } from '@/lib/errors'
+import { useRegisterCommands, type Command } from '@/features/commands/command-registry'
 import { absoluteTime, relativeTime } from '@/lib/format'
 import { navigate } from '@/lib/router'
 import { cn } from '@/lib/utils'
@@ -32,6 +33,46 @@ export function ReviewList({ repositoryId }: { repositoryId: number }) {
   const { data: reviews, error, isLoading, isRefreshing, refresh } = useReviews(
     repositoryId,
     filter === 'all' ? undefined : filter
+  )
+
+  useRegisterCommands(
+    useMemo<Command[]>(
+      () => [
+        {
+          id: 'reviews:create',
+          label: 'New review',
+          group: 'Repository',
+          keys: 'n',
+          keywords: 'compare branch create open',
+          icon: Plus,
+          run: () => setFormOpen(true)
+        },
+        {
+          id: 'reviews:refresh',
+          label: 'Refresh reviews',
+          group: 'Repository',
+          keys: 'r',
+          keywords: 'reload',
+          icon: RefreshCw,
+          run: () => void refresh()
+        },
+        // The digits follow the filter buttons left to right, which is the only
+        // ordering anyone would guess at.
+        ...FILTERS.map(
+          (option, index): Command => ({
+            id: `reviews:filter:${option.value}`,
+            label: `Show ${option.label.toLowerCase()} reviews`,
+            group: 'Repository',
+            keys: String(index + 1),
+            keywords: 'filter status',
+            icon: Filter,
+            disabled: filter === option.value,
+            run: () => setFilter(option.value)
+          })
+        )
+      ],
+      [filter, refresh]
+    )
   )
 
   return (
@@ -118,6 +159,8 @@ function ReviewCard({ review }: { review: Review }) {
     <Card
       role="button"
       tabIndex={0}
+      // Picked up by the j/k shortcuts; the browser's own focus does the rest.
+      data-nav-item
       onClick={() => navigate({ name: 'review', reviewId: review.id, tab: 'conversation' })}
       onKeyDown={(event) => {
         if (event.key === 'Enter' || event.key === ' ') {

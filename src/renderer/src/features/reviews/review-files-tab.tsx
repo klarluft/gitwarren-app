@@ -11,7 +11,16 @@
  * cached under its own SWR key so flipping back is instant.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertCircle, FileDiff, PanelLeft, PanelLeftClose, RefreshCw } from 'lucide-react'
+import {
+  AlertCircle,
+  ArrowDown,
+  ArrowUp,
+  FileDiff,
+  GitCompareArrows,
+  PanelLeft,
+  PanelLeftClose,
+  RefreshCw
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import {
@@ -27,6 +36,8 @@ import { api } from '@/lib/api'
 import { errorMessage } from '@/lib/errors'
 import { plural } from '@/lib/format'
 import { useStoredFlag, useStoredPreference } from '@/lib/preferences'
+import { revealElement } from '@/lib/reveal'
+import { useRegisterCommands, type Command } from '@/features/commands/command-registry'
 import type { DiffFocus } from '@/lib/router'
 import { CommentThreadCard } from '../comments/comment-thread-card'
 import { useCommentMutations, useReviewComments } from '../comments/use-comments'
@@ -228,6 +239,86 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
   )
 
   const marked = useFocusScroll(focus, !isLoading && data !== undefined)
+
+  /**
+   * Step through the diff one file at a time.
+   *
+   * "Where am I" is whichever file the intersection observer says is at the top
+   * of the page - the same answer the file tree highlights - so `]` continues
+   * from what you are reading rather than from wherever you last jumped.
+   */
+  const stepFile = useCallback(
+    (delta: number): void => {
+      if (paths.length === 0) return
+      const current = activePath === null ? -1 : paths.indexOf(activePath)
+      const next = Math.min(paths.length - 1, Math.max(0, current + delta))
+      const path = paths[next]
+      if (path !== undefined) revealElement(fileDomId(path))
+    },
+    [paths, activePath]
+  )
+
+  const canIncludeUncommitted = data?.workingTree != null
+
+  useRegisterCommands(
+    useMemo<Command[]>(
+      () => [
+        {
+          id: 'files:next',
+          label: 'Next file',
+          group: 'Files changed',
+          keys: ']',
+          keywords: 'down scroll',
+          icon: ArrowDown,
+          disabled: paths.length === 0,
+          run: () => stepFile(1)
+        },
+        {
+          id: 'files:previous',
+          label: 'Previous file',
+          group: 'Files changed',
+          keys: '[',
+          keywords: 'up scroll back',
+          icon: ArrowUp,
+          disabled: paths.length === 0,
+          run: () => stepFile(-1)
+        },
+        {
+          id: 'files:tree',
+          label: treeOpen ? 'Hide the file list' : 'Show the file list',
+          group: 'Files changed',
+          keys: 't',
+          keywords: 'tree sidebar panel toggle',
+          icon: treeOpen ? PanelLeftClose : PanelLeft,
+          disabled: paths.length === 0,
+          run: () => setTreeOpen(!treeOpen)
+        },
+        {
+          id: 'files:uncommitted',
+          label: includeUncommitted
+            ? 'Exclude uncommitted changes'
+            : 'Include uncommitted changes',
+          group: 'Files changed',
+          keys: 'u',
+          keywords: 'working tree dirty staged unstaged untracked',
+          icon: GitCompareArrows,
+          // Nothing to fold in when no worktree has this branch checked out.
+          disabled: !canIncludeUncommitted,
+          run: () => setIncludeUncommitted(!includeUncommitted)
+        },
+        {
+          id: 'files:refresh',
+          label: 'Refresh the diff',
+          group: 'Files changed',
+          keys: 'r',
+          keywords: 'reload re-read disk git',
+          icon: RefreshCw,
+          run: () => void refresh()
+        }
+      ],
+      [paths.length, stepFile, treeOpen, setTreeOpen, includeUncommitted, canIncludeUncommitted, refresh]
+    )
+  )
 
   if (isLoading) return <LoadingState />
 

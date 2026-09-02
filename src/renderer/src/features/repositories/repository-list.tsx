@@ -4,13 +4,14 @@
  * The states are kept in one place rather than scattered through the tree so
  * it is obvious that all four are actually handled.
  */
-import { useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { AlertCircle, FolderGit2, Plus, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip } from '@/components/ui/tooltip'
 import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { errorCode, errorMessage } from '@/lib/errors'
+import { useRegisterCommands, type Command } from '@/features/commands/command-registry'
 import { RepositoryCard } from './repository-card'
 import { RepositoryFormDialog } from './repository-form-dialog'
 import { RemoveRepositoryDialog } from './remove-repository-dialog'
@@ -24,15 +25,41 @@ export function RepositoryList() {
   const [editing, setEditing] = useState<RepositoryWithGitState | undefined>(undefined)
   const [removing, setRemoving] = useState<RepositoryWithGitState | null>(null)
 
-  function openAdd(): void {
+  const openAdd = useCallback((): void => {
     setEditing(undefined)
     setFormOpen(true)
-  }
+  }, [])
 
   function openEdit(repository: RepositoryWithGitState): void {
     setEditing(repository)
     setFormOpen(true)
   }
+
+  useRegisterCommands(
+    useMemo<Command[]>(
+      () => [
+        {
+          id: 'repositories:add',
+          label: 'Add repository',
+          group: 'Repositories',
+          keys: 'n',
+          keywords: 'new track clone folder',
+          icon: Plus,
+          run: openAdd
+        },
+        {
+          id: 'repositories:refresh',
+          label: 'Refresh repositories',
+          group: 'Repositories',
+          keys: 'r',
+          keywords: 'reload git state',
+          icon: RefreshCw,
+          run: () => void refresh()
+        }
+      ],
+      [openAdd, refresh]
+    )
+  )
 
   return (
     <section className="flex flex-col gap-4">

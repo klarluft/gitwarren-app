@@ -24,6 +24,8 @@ export function RepositoryCard({ repository, onEdit, onRemove }: RepositoryCardP
     <Card
       role="button"
       tabIndex={0}
+      // Picked up by the j/k shortcuts; the browser's own focus does the rest.
+      data-nav-item
       onClick={open}
       onKeyDown={(event) => {
         if (event.key === 'Enter' || event.key === ' ') {
