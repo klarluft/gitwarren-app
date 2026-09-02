@@ -944,10 +944,10 @@ security find-certificate -c "Developer ID Application" -p |
 
 An expiry of exactly `Feb  1 22:12:15 2027 GMT` means the legacy sub-CA issued
 it, whatever the portal appeared to offer. Create a fresh one under **G2
-Sub-CA** and revoke the short one — cheaply done before anything has shipped,
-and much less so afterwards, since revocation invalidates already-distributed
-builds. Note that an account is limited to five Developer ID Application
-certificates, so revoke rather than abandon the unwanted one.
+Sub-CA** and retire the short one as described below. Note that an account is
+limited to five Developer ID Application certificates and a retired one still
+occupies a slot until it expires, so it is worth getting this right rather than
+iterating.
 
 **If the new certificate shows up as invalid, the intermediate is missing.**
 macOS ships the original Developer ID intermediate but not necessarily the G2
@@ -972,11 +972,30 @@ security add-certificates -k ~/Library/Keychains/login.keychain-db DeveloperIDG2
 It grants no new trust — the intermediate is itself issued by Apple Root CA,
 which macOS already trusts. It only supplies the link needed to build the chain.
 
-**Do not leave both certificates in the keychain.** They have identical common
-names, and electron-builder resolves the identity by name and takes what it
-finds first — so a release would pick between them unpredictably. Once the
-replacement is confirmed working, revoke the old certificate in the portal and
-delete it, with its private key, from Keychain Access.
+**Do not leave both certificates in the keychain.** Their common names are
+identical, so `codesign` cannot tell them apart and refuses to guess:
+
+```
+Developer ID Application: ... : ambiguous (matches "Developer ID Application: ..."
+and "Developer ID Application: ..." in .../login.keychain-db)
+```
+
+That is a build failure, not a silent wrong choice — and pinning
+`mac.identity` to a SHA-1 hash does not avoid it, because electron-builder
+resolves the hash and then passes `codesign` the *name*. Once the replacement
+is confirmed working, delete the old certificate and its private key:
+
+```bash
+security delete-identity -Z <sha-1 of the old certificate> ~/Library/Keychains/login.keychain-db
+```
+
+**Retiring is all you can do — a Developer ID certificate cannot be revoked
+from the portal.** App Store certificates have a *Revoke* button; Developer ID
+certificates deliberately do not, because revocation invalidates every app ever
+signed with that certificate, timestamps included. It is reserved for a
+*compromised* private key and has to be arranged with Apple Product Security by
+email. Deleting the key you no longer want is not that situation: with the key
+gone the certificate cannot sign anything, and it simply expires on schedule.
 
 **2. Create an app-specific password for notarization.**
 
