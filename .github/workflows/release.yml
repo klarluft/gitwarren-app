@@ -78,8 +78,17 @@ jobs:
       - run: npm ci
 
       # --- Code signing and notarization (both optional) -------------------
-      # Base64-encode the .p12 and store it as CSC_LINK; macOS and Windows read
-      # the same pair. Everything here is absent until a Developer ID exists.
+      # CSC_LINK / CSC_KEY_PASSWORD are read by *both* the macOS and the
+      # Windows packager, so they must be filled per platform rather than
+      # exported globally. Handing every runner the same pair makes the
+      # Windows job try to Authenticode-sign an .exe with an Apple Developer
+      # ID certificate:
+      #
+      #   ⨯ Cannot extract publisher name from code signing certificate
+      #
+      # The Apple certificate therefore reaches macOS runners only, and
+      # Windows waits for its own certificate in WINDOWS_CSC_* secrets that do
+      # not exist yet — until they do, Windows builds unsigned as before.
       #
       # An absent secret does not leave its variable unset — GitHub Actions
       # exports it as an empty string. electron-builder's macOS packager only
@@ -96,28 +105,68 @@ jobs:
       - name: Export the signing secrets that exist
         shell: bash
         env:
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          MAC_CSC_LINK: ${{ secrets.CSC_LINK }}
+          MAC_CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          WINDOWS_CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
+          WINDOWS_CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          for name in CSC_LINK CSC_KEY_PASSWORD APPLE_ID \
-                      APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
-            value="${!name}"
-            [ -n "$value" ] || continue
+          emit() {
             # Heredoc form: a base64 .p12 may legitimately contain newlines.
-            printf '%s<<CSC_VALUE_EOF\n%s\nCSC_VALUE_EOF\n' "$name" "$value" \
-              >> "$GITHUB_ENV"
-          done
+            [ -n "$2" ] || return 0
+            printf '%s<<CSC_VALUE_EOF\n%s\nCSC_VALUE_EOF\n' "$1" "$2" >> "$GITHUB_ENV"
+          }
 
-          # Without this, electron-builder hunts the runner keychain for any
-          # usable identity and fails confusingly when it finds none.
-          if [ -n "$CSC_LINK" ]; then
-            echo "CSC_IDENTITY_AUTO_DISCOVERY=true" >> "$GITHUB_ENV"
-          else
-            echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
+          case "$RUNNER_OS" in
+            macOS)
+              emit CSC_LINK "$MAC_CSC_LINK"
+              emit CSC_KEY_PASSWORD "$MAC_CSC_KEY_PASSWORD"
+              emit APPLE_ID "$APPLE_ID"
+              emit APPLE_APP_SPECIFIC_PASSWORD "$APPLE_APP_SPECIFIC_PASSWORD"
+              emit APPLE_TEAM_ID "$APPLE_TEAM_ID"
+
+              # Without this, electron-builder hunts the runner keychain for
+              # any usable identity and fails confusingly when it finds none.
+              if [ -n "$MAC_CSC_LINK" ]; then
+                echo "CSC_IDENTITY_AUTO_DISCOVERY=true" >> "$GITHUB_ENV"
+              else
+                echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
+              fi
+              ;;
+            Windows)
+              emit CSC_LINK "$WINDOWS_CSC_LINK"
+              emit CSC_KEY_PASSWORD "$WINDOWS_CSC_KEY_PASSWORD"
+              ;;
+          esac
+
+      # electron-builder reaches the certificate several minutes into the run,
+      # after packaging, and reports a mismatch as a bare `MAC verification
+      # failed during PKCS12 import`. Checking here costs a second and names
+      # the actual cause, which is otherwise easy to misread as a bad
+      # certificate rather than a badly *stored* one — a base64 blob truncated
+      # while being pasted into a prompt looks identical to a wrong password.
+      - name: Check the certificate and its password agree
+        if: runner.os == 'macOS' && env.CSC_LINK != ''
+        shell: bash
+        run: |
+          if ! printf '%s' "$CSC_LINK" | base64 --decode > "$RUNNER_TEMP/csc.p12"; then
+            echo "::error::CSC_LINK is not valid base64. Set it from a file rather" \
+                 "than by pasting: base64 -i cert.p12 | gh secret set CSC_LINK"
+            exit 1
           fi
+
+          if ! openssl pkcs12 -in "$RUNNER_TEMP/csc.p12" -passin env:CSC_KEY_PASSWORD \
+               -noout 2>/dev/null; then
+            echo "::error::CSC_LINK and CSC_KEY_PASSWORD disagree. Either the password" \
+                 "is wrong, carries a trailing newline (use printf '%s', not echo), or" \
+                 "the base64 was truncated when the secret was set."
+            exit 1
+          fi
+
+          rm -f "$RUNNER_TEMP/csc.p12"
+          echo "Certificate opens with the stored password."
 
       # With no certificate the macOS build falls back to the ad-hoc signature
       # from scripts/adhoc-sign.mjs. `notarize: true` in electron-builder.yml
