@@ -1083,18 +1083,37 @@ Export the certificate *with its private key* from Keychain Access — select th
 *Export*, choose **Personal Information Exchange (.p12)**, and set a password.
 Then:
 
-```bash
-base64 -i certificate.p12 | pbcopy   # this is CSC_LINK
+**Pipe the values in; do not paste them.** A base64 `.p12` runs to several
+thousand characters, and many terminals silently truncate a paste of that size
+into an interactive prompt. The result is a secret that looks set and fails
+much later as `MAC verification failed during PKCS12 import (wrong password?)`
+— which reads as a password problem when the certificate is what got cut short.
 
-gh secret set CSC_LINK                    # base64 of the .p12
+```bash
+base64 -i certificate.p12 | gh secret set CSC_LINK
+
+# Short enough to paste safely; the prompt also keeps them out of shell history.
 gh secret set CSC_KEY_PASSWORD            # the .p12 export password
-gh secret set APPLE_ID                    # your Apple ID email
+gh secret set APPLE_ID                    # you@example.com
 gh secret set APPLE_APP_SPECIFIC_PASSWORD # xxxx-xxxx-xxxx-xxxx
 gh secret set APPLE_TEAM_ID               # XXXXXXXXXX
 ```
 
-The same `CSC_LINK` / `CSC_KEY_PASSWORD` pair is what a Windows certificate
-would use, so adding one later does not introduce a second mechanism.
+Only the base64 needs piping — it is the one value long enough to be truncated.
+If you do pipe a short secret, use `printf '%s'` rather than `echo`: `gh` stores
+stdin verbatim, so `echo` puts a trailing newline inside the password.
+
+The release workflow checks that `CSC_LINK` and `CSC_KEY_PASSWORD` agree before
+it builds anything, so a mistake here surfaces in seconds with a message naming
+the cause rather than several minutes in.
+
+**These are macOS-only.** `CSC_LINK` and `CSC_KEY_PASSWORD` are read by
+electron-builder's Windows packager too, so the workflow deliberately exports
+them on macOS runners alone — handed to a Windows runner, the same pair makes
+it try to Authenticode-sign an `.exe` with an Apple Developer ID certificate
+and fail with `Cannot extract publisher name from code signing certificate`. A
+Windows certificate, when there is one, goes in separate `WINDOWS_CSC_LINK` and
+`WINDOWS_CSC_KEY_PASSWORD` secrets, which the workflow already reads.
 
 The workflow deliberately exports these through `$GITHUB_ENV` rather than a
 step-level `env:` block. An absent secret is not an unset variable in GitHub
