@@ -65,9 +65,14 @@ mac:
   gatekeeperAssess: false
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
-  # Signing and notarisation are opt-in; see the README. Unsigned local builds
-  # are expected during development.
-  notarize: false
+  # Notarisation runs only after a real Developer ID signature succeeds, and
+  # only when Apple credentials are present in the environment (the APPLE_ID
+  # trio, an App Store Connect API key, or APPLE_KEYCHAIN_PROFILE). An unsigned
+  # local build never reaches it, and a signed build with no credentials logs
+  # `skipped macOS notarization` and carries on — so leaving this on costs
+  # nothing and stops a release shipping un-notarised by omission. See the
+  # README for the setup steps.
+  notarize: true
 
 dmg:
   artifactName: ${productName}-${version}-${arch}.${ext}

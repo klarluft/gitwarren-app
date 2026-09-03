@@ -120,8 +120,10 @@ jobs:
           fi
 
       # With no certificate the macOS build falls back to the ad-hoc signature
-      # from scripts/adhoc-sign.mjs, and notarization stays inert regardless
-      # while `notarize: false` is set in electron-builder.yml.
+      # from scripts/adhoc-sign.mjs. `notarize: true` in electron-builder.yml
+      # is inert in that case — notarization is only attempted once a real
+      # signature has succeeded — and with a certificate but no APPLE_* secrets
+      # it logs `skipped macOS notarization` rather than failing the build.
       - name: Build and publish
         env:
           # electron-builder uploads to the repo named in the `publish` block
