@@ -36,11 +36,13 @@ jobs:
           ref: main
 
       # The checkout above is the *site*, so this reads gitwarren-site's own
-      # .nvmrc — that repository declares the Node its lockfile is written
-      # with, and this job simply obeys it. Nothing to keep in sync by hand.
+      # package.json — setup-node takes the version from its `engines.node`,
+      # which is where that repository states the Node it builds with. Nothing
+      # to keep in sync by hand. (It has no .nvmrc; pointing at one here is
+      # what broke the v0.1.3 deploy.)
       - uses: actions/setup-node@v4
         with:
-          node-version-file: .nvmrc
+          node-version-file: package.json
           cache: npm
 
       - run: npm ci
