@@ -8,6 +8,13 @@ macOS, Windows and Linux.
 A cross-platform desktop app for doing local code reviews of your own git
 repositories. Single user, single machine, no server, no account.
 
+Built for the moment a coding agent — Claude Code, Codex, or anything else that
+edits files on your disk — has just finished, and its work is sitting in your
+worktree uncommitted. Read that diff here, on your own machine, before it
+becomes a commit.
+
+<a href="https://gitwarren.com"><img src="docs/review-uncommitted.png" alt="A GitWarren review: the files-changed tab with staged, unstaged and untracked work folded into the diff, and the amber uncommitted badge in the branch header" width="800" /></a>
+
 Tell GitWarren which local git repositories you care about, then open **reviews**
 against them — a review is a comparison of two refs, presented the way a pull
 request is, with *conversation*, *commits* and *files changed* tabs.
