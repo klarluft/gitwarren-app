@@ -204,11 +204,30 @@ function startAgent() {
 
 class Recorder {
   frames = []
+  marks = {}
+  squeezes = []
   #writes = []
   #off = null
 
   constructor(cdp) {
     this.cdp = cdp
+  }
+
+  /** Remember the moment something happened, on the screencast's clock. */
+  mark(name) {
+    this.marks[name] = Date.now() / 1000
+  }
+
+  /**
+   * Make the stretch between two marks last exactly `seconds` in the cut.
+   *
+   * For waits whose real length is not part of the story - the agent's reply
+   * arrives whenever the comment list next refreshes, which is anything from
+   * a moment to a few seconds - the recording keeps what happened and the
+   * edit decides how long it takes.
+   */
+  squeeze(from, to, seconds) {
+    this.squeezes.push({ from, to, seconds })
   }
 
   async start() {
@@ -267,15 +286,35 @@ function probe(file) {
  * crossfade applied, so the expensive part is done once.
  */
 async function encode(recorder) {
-  const { frames, endedAt } = recorder
+  const { frames, endedAt, marks, squeezes } = recorder
   if (frames.length < 2) throw new Error('Too few frames recorded')
 
-  const list = frames
-    .map((frame, index) => {
-      const next = frames[index + 1]
-      const duration = Math.max((next ? next.at : endedAt) - frame.at, 1 / FPS)
-      return `file '${frame.file}'\nduration ${duration.toFixed(4)}`
+  const durations = frames.map((frame, index) => {
+    const next = frames[index + 1]
+    return Math.max((next ? next.at : endedAt) - frame.at, 1 / FPS)
+  })
+
+  // A frame is on screen from its timestamp until the next one, so the frame
+  // that is showing when a window closes straddles the boundary - the reply
+  // frame's time on screen is mostly the hold after it. Only the part of each
+  // frame inside the window is rescaled; the rest keeps its real length.
+  for (const { from, to, seconds } of squeezes) {
+    const start = marks[from]
+    const end = marks[to]
+    const overlap = frames.map((frame, index) => {
+      const shownUntil = frame.at + durations[index]
+      return Math.max(0, Math.min(shownUntil, end) - Math.max(frame.at, start))
     })
+    const total = overlap.reduce((sum, part) => sum + part, 0)
+    if (total === 0) continue
+    const factor = seconds / total
+    frames.forEach((_, index) => {
+      durations[index] = durations[index] - overlap[index] + overlap[index] * factor
+    })
+  }
+
+  const list = frames
+    .map((frame, index) => `file '${frame.file}'\nduration ${durations[index].toFixed(4)}`)
     .join('\n')
   const listFile = join(FRAME_DIR, 'frames.txt')
   // The demuxer ignores the last duration unless the last file is repeated.
@@ -388,12 +427,16 @@ async function main() {
   await type(cdp, COMMENT)
   await wait(700)
   await submitComposer(cdp)
-  await wait(1800)
+  recorder.mark('posted')
+  await wait(1500)
 
-  // 5. The agent answers.
+  // 5. The agent answers. However long the refresh takes, the cut shows the
+  //    posted comment for a beat and then the reply.
   await agent.reply()
   await waitForText(cdp, 'closes on Escape by itself')
-  await wait(4200)
+  recorder.mark('replied')
+  recorder.squeeze('posted', 'replied', 1.4)
+  await wait(3000)
 
   await recorder.stop()
   await cdp.send('Emulation.clearDeviceMetricsOverride')
