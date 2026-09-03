@@ -17,9 +17,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # .nvmrc is the single source of truth, shared with local development
+      # through `fnm env --use-on-cd`. Pinning the version in one file rather
+      # than three keeps CI from drifting away from the machines that write
+      # package-lock.json. `engines` in package.json states the floor and
+      # .npmrc makes it an error rather than a warning.
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: npm
 
       # `npm ci` runs the postinstall (electron-builder install-app-deps),

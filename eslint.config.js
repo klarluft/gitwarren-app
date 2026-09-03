@@ -4,7 +4,11 @@ import tseslint from 'typescript-eslint'
 import reactHooks from 'eslint-plugin-react-hooks'
 
 export default tseslint.config(
-  { ignores: ['out/**', 'release/**', 'node_modules/**', 'drizzle/**'] },
+  // .claude/ holds git worktrees — full copies of this repository. Flat
+  // config does not skip dot-directories the way eslintrc did, so without
+  // this ESLint lints the project once per worktree: minutes of work, and
+  // enough heap to OOM. It is gitignored, so only local runs ever saw it.
+  { ignores: ['out/**', 'release/**', 'node_modules/**', 'drizzle/**', '.claude/**'] },
 
   js.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,

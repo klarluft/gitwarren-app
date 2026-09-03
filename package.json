@@ -1,7 +1,7 @@
 {
   "name": "gitwarren",
   "productName": "GitWarren",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Desktop app for doing local-only code reviews",
   "author": {
     "name": "Klarluft B.V.",
@@ -25,7 +25,8 @@
   "main": "./out/main/index.js",
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": ">=24.20.0",
+    "npm": ">=11.10.0"
   },
   "scripts": {
     "dev": "electron-vite dev",
