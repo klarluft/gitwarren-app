@@ -104,6 +104,13 @@ const api: GitWarrenApi = {
     appInfo: () => invoke<AppInfo>(IPC_CHANNELS.systemAppInfo),
     editors: () => invoke<EditorList>(IPC_CHANNELS.systemEditors)
   },
+  navigation: {
+    onDeepLink: (listener: (hash: string) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, hash: string): void => listener(hash)
+      ipcRenderer.on(IPC_CHANNELS.navigationDeepLink, handler)
+      return () => ipcRenderer.off(IPC_CHANNELS.navigationDeepLink, handler)
+    }
+  },
   updates: {
     getStatus: () => invoke<UpdateStatus>(IPC_CHANNELS.updatesGetStatus),
     check: () => invoke<UpdateStatus>(IPC_CHANNELS.updatesCheck),
