@@ -75,25 +75,36 @@ jobs:
       - run: npm ci
 
       # --- Code signing and notarization (both optional) -------------------
-      # CSC_LINK / CSC_KEY_PASSWORD are read by *both* the macOS and the
-      # Windows packager, so they must be filled per platform rather than
-      # exported globally. Handing every runner the same pair makes the
-      # Windows job try to Authenticode-sign an .exe with an Apple Developer
-      # ID certificate:
+      # Only the Windows certificate travels under CSC_LINK / CSC_KEY_PASSWORD.
+      # Handing a Windows runner the Apple .p12 makes it try to Authenticode-
+      # sign an .exe with a Developer ID certificate:
       #
       #   ⨯ Cannot extract publisher name from code signing certificate
       #
-      # The Apple certificate therefore reaches macOS runners only, and
-      # Windows waits for its own certificate in WINDOWS_CSC_* secrets that do
-      # not exist yet — until they do, Windows builds unsigned as before.
+      # macOS deliberately does *not* use them. Setting CSC_LINK there sends
+      # electron-builder down its own createKeychain path, which imports the
+      # certificate and then runs
+      #
+      #   security set-key-partition-list -S apple-tool:,apple: -s -k <pw>
+      #
+      # passing the *certificate* password to a flag that means the *keychain*
+      # password (app-builder-lib/out/codeSign/macCodeSign.js; the keychain's
+      # own password is a random value generated a few lines above and never
+      # reused here). macOS rejects it and the build dies minutes in with
+      #
+      #   security: SecKeychainUnlock: The user name or passphrase you entered
+      #   is not correct.
+      #
+      # which reads as a bad certificate even though the certificate is fine.
+      # Unchanged as of 26.16.0, so upgrading is not the fix. The step below
+      # therefore builds the keychain itself — passing the keychain password
+      # where it belongs — and hands electron-builder CSC_KEYCHAIN, which
+      # macPackager consults only when CSC_LINK is absent.
       #
       # An absent secret does not leave its variable unset — GitHub Actions
-      # exports it as an empty string. electron-builder's macOS packager only
-      # null-checks CSC_LINK (its Windows one also rejects ""), so the empty
-      # string wins over every other source and is then resolved as a path
-      # relative to the project directory — which is a directory, not a file:
+      # exports it as an empty string, and electron-builder's Windows packager
+      # resolves "" as a path relative to the project directory:
       #
-      #   • empty password will be used  reason=CSC_KEY_PASSWORD is not defined
       #   ⨯ /Users/runner/work/<repo>/<repo> not a file
       #
       # Exporting through $GITHUB_ENV instead lets the unset case stay unset.
@@ -102,8 +113,6 @@ jobs:
       - name: Export the signing secrets that exist
         shell: bash
         env:
-          MAC_CSC_LINK: ${{ secrets.CSC_LINK }}
-          MAC_CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
           WINDOWS_CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
           WINDOWS_CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -118,19 +127,9 @@ jobs:
 
           case "$RUNNER_OS" in
             macOS)
-              emit CSC_LINK "$MAC_CSC_LINK"
-              emit CSC_KEY_PASSWORD "$MAC_CSC_KEY_PASSWORD"
               emit APPLE_ID "$APPLE_ID"
               emit APPLE_APP_SPECIFIC_PASSWORD "$APPLE_APP_SPECIFIC_PASSWORD"
               emit APPLE_TEAM_ID "$APPLE_TEAM_ID"
-
-              # Without this, electron-builder hunts the runner keychain for
-              # any usable identity and fails confusingly when it finds none.
-              if [ -n "$MAC_CSC_LINK" ]; then
-                echo "CSC_IDENTITY_AUTO_DISCOVERY=true" >> "$GITHUB_ENV"
-              else
-                echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
-              fi
               ;;
             Windows)
               emit CSC_LINK "$WINDOWS_CSC_LINK"
@@ -138,17 +137,30 @@ jobs:
               ;;
           esac
 
-      # electron-builder reaches the certificate several minutes into the run,
-      # after packaging, and reports a mismatch as a bare `MAC verification
-      # failed during PKCS12 import`. Checking here costs a second and names
-      # the actual cause, which is otherwise easy to misread as a bad
-      # certificate rather than a badly *stored* one — a base64 blob truncated
-      # while being pasted into a prompt looks identical to a wrong password.
-      - name: Check the certificate and its password agree
-        if: runner.os == 'macOS' && env.CSC_LINK != ''
+      # Builds the signing keychain by hand, for the reason above. It also
+      # checks the certificate up front: electron-builder would otherwise
+      # reach it several minutes into the run and report a mismatch as a bare
+      # `MAC verification failed during PKCS12 import`, easy to misread as a
+      # bad certificate rather than a badly *stored* one — a base64 blob
+      # truncated while being pasted looks identical to a wrong password.
+      - name: Import the Apple certificate into a keychain
+        if: runner.os == 'macOS'
         shell: bash
+        env:
+          MAC_CSC_LINK: ${{ secrets.CSC_LINK }}
+          MAC_CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
         run: |
-          if ! printf '%s' "$CSC_LINK" | base64 --decode > "$RUNNER_TEMP/csc.p12"; then
+          if [ -z "$MAC_CSC_LINK" ]; then
+            # No certificate: scripts/adhoc-sign.mjs takes over. Auto-discovery
+            # has to be off, or electron-builder hunts the runner keychain for
+            # an identity that is not there and fails confusingly.
+            echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
+            echo "No Apple certificate configured; this build will be ad-hoc signed."
+            exit 0
+          fi
+
+          p12="$RUNNER_TEMP/csc.p12"
+          if ! printf '%s' "$MAC_CSC_LINK" | base64 --decode > "$p12"; then
             echo "::error::CSC_LINK is not valid base64. Set it from a file rather" \
                  "than by pasting: base64 -i cert.p12 | gh secret set CSC_LINK"
             exit 1
@@ -159,8 +171,8 @@ jobs:
           # legacy provider is loaded, reporting it indistinguishably from a
           # wrong password. macOS ships LibreSSL here, which reads them and
           # still rejects a genuinely wrong password.
-          if ! err=$(/usr/bin/openssl pkcs12 -in "$RUNNER_TEMP/csc.p12" \
-                       -passin env:CSC_KEY_PASSWORD -noout 2>&1); then
+          if ! err=$(/usr/bin/openssl pkcs12 -in "$p12" \
+                       -passin env:MAC_CSC_KEY_PASSWORD -noout 2>&1); then
             echo "::error::CSC_LINK and CSC_KEY_PASSWORD disagree. Either the password" \
                  "is wrong, carries a trailing newline (use printf '%s', not echo), or" \
                  "the base64 was truncated when the secret was set." \
@@ -169,8 +181,43 @@ jobs:
             exit 1
           fi
 
-          rm -f "$RUNNER_TEMP/csc.p12"
-          echo "Certificate opens with the stored password."
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          # Never printed, and thrown away with the runner.
+          keychain_password=$(/usr/bin/openssl rand -base64 24)
+
+          security create-keychain -p "$keychain_password" "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          # No auto-lock: the default five-minute timeout expires mid-build,
+          # and codesign against a locked keychain fails.
+          security set-keychain-settings "$keychain"
+          # codesign only searches the user's keychain list, so the temporary
+          # keychain has to join it — keeping whatever is already there.
+          security list-keychains -d user -s "$keychain" \
+            $(security list-keychains -d user | tr -d '"')
+
+          security import "$p12" -k "$keychain" -P "$MAC_CSC_KEY_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/productbuild
+          # -k takes the *keychain* password, which is the whole point of this
+          # step. Without the partition list every codesign call blocks on a
+          # UI prompt that no one is there to answer.
+          security set-key-partition-list -S apple-tool:,apple: -s \
+            -k "$keychain_password" "$keychain" > /dev/null
+
+          rm -f "$p12"
+
+          if ! security find-identity -v -p codesigning "$keychain" \
+               | grep -q "Developer ID Application"; then
+            echo "::error::The certificate imported but carries no Developer ID" \
+                 "Application identity. An Apple Development or Mac Development" \
+                 "certificate cannot sign a distributed build."
+            exit 1
+          fi
+
+          # electron-builder reads this only when CSC_LINK is unset, which is
+          # exactly why CSC_LINK is not exported on macOS.
+          echo "CSC_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+          echo "CSC_IDENTITY_AUTO_DISCOVERY=true" >> "$GITHUB_ENV"
+          security find-identity -v -p codesigning "$keychain"
 
       # With no certificate the macOS build falls back to the ad-hoc signature
       # from scripts/adhoc-sign.mjs. `notarize: true` in electron-builder.yml

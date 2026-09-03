@@ -22,7 +22,10 @@
  * cannot auto-update.
  *
  * Skipped whenever electron-builder is about to sign for real and would
- * overwrite this anyway: CSC_LINK set (the CI path, a base64 .p12), or a
+ * overwrite this anyway: CSC_KEYCHAIN set (the CI path — the release workflow
+ * imports the .p12 into a keychain of its own rather than letting
+ * electron-builder do it, see the comment there), CSC_LINK set (the same on
+ * Windows, and still honoured on macOS for anyone signing by hand), or a
  * Developer ID Application identity already in the keychain (the local path,
  * after `npm run package` on a machine enrolled in the Developer Program).
  */
@@ -37,8 +40,14 @@ import { join } from 'node:path'
 function hasDeveloperIdIdentity() {
   if (process.env.CSC_IDENTITY_AUTO_DISCOVERY === 'false') return false
 
+  // CSC_KEYCHAIN names a keychain that may not be in the default search list,
+  // so ask about it directly rather than trusting the list to include it.
+  const keychain = process.env.CSC_KEYCHAIN
+  const args = ['find-identity', '-v', '-p', 'codesigning']
+  if (keychain) args.push(keychain)
+
   try {
-    const identities = execFileSync('security', ['find-identity', '-v', '-p', 'codesigning'], {
+    const identities = execFileSync('security', args, {
       encoding: 'utf8'
     })
     return identities.includes('Developer ID Application')
@@ -51,6 +60,11 @@ function hasDeveloperIdIdentity() {
 
 export default async function adhocSign(context) {
   if (context.electronPlatformName !== 'darwin') return
+
+  if (process.env.CSC_KEYCHAIN) {
+    console.log('  • ad-hoc signing skipped   reason=CSC_KEYCHAIN is set, real signing will run')
+    return
+  }
 
   if (process.env.CSC_LINK) {
     console.log('  • ad-hoc signing skipped   reason=CSC_LINK is set, real signing will run')
