@@ -1091,14 +1091,17 @@ much later as `MAC verification failed during PKCS12 import (wrong password?)`
 
 ```bash
 base64 -i certificate.p12 | gh secret set CSC_LINK
-printf '%s' 'the .p12 export password' | gh secret set CSC_KEY_PASSWORD
-printf '%s' 'you@example.com'          | gh secret set APPLE_ID
-printf '%s' 'xxxx-xxxx-xxxx-xxxx'      | gh secret set APPLE_APP_SPECIFIC_PASSWORD
-printf '%s' 'XXXXXXXXXX'               | gh secret set APPLE_TEAM_ID
+
+# Short enough to paste safely; the prompt also keeps them out of shell history.
+gh secret set CSC_KEY_PASSWORD            # the .p12 export password
+gh secret set APPLE_ID                    # you@example.com
+gh secret set APPLE_APP_SPECIFIC_PASSWORD # xxxx-xxxx-xxxx-xxxx
+gh secret set APPLE_TEAM_ID               # XXXXXXXXXX
 ```
 
-`printf '%s'` rather than `echo`, because `gh` stores stdin verbatim and a
-trailing newline from `echo` becomes part of the password.
+Only the base64 needs piping — it is the one value long enough to be truncated.
+If you do pipe a short secret, use `printf '%s'` rather than `echo`: `gh` stores
+stdin verbatim, so `echo` puts a trailing newline inside the password.
 
 The release workflow checks that `CSC_LINK` and `CSC_KEY_PASSWORD` agree before
 it builds anything, so a mistake here surfaces in seconds with a message naming
