@@ -10,8 +10,17 @@
  * would arrive if pushed is a question you ask per visit, and each answer is
  * cached under its own SWR key so flipping back is instant.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { AlertCircle, FileDiff, PanelLeft, PanelLeftClose, RefreshCw } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  AlertCircle,
+  ArrowDown,
+  ArrowUp,
+  FileDiff,
+  GitCompareArrows,
+  PanelLeft,
+  PanelLeftClose,
+  RefreshCw
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import {
@@ -27,6 +36,8 @@ import { api } from '@/lib/api'
 import { errorMessage } from '@/lib/errors'
 import { plural } from '@/lib/format'
 import { useStoredFlag, useStoredPreference } from '@/lib/preferences'
+import { revealElement } from '@/lib/reveal'
+import { useRegisterCommands, type Command } from '@/features/commands/command-registry'
 import type { DiffFocus } from '@/lib/router'
 import { CommentThreadCard } from '../comments/comment-thread-card'
 import { useCommentMutations, useReviewComments } from '../comments/use-comments'
@@ -40,6 +51,48 @@ import { findAnchorFile, isInlineAnchor, resolveAnchor } from '@shared/comment-a
 import { threadSnippet } from '@shared/comment-snippets'
 import type { FileDiff as FileDiffData } from '@shared/git'
 import type { CommentThread, Review } from '@shared/schemas'
+
+/**
+ * How far below the top of the scroller a file card may still sit and count as
+ * the one being read.
+ *
+ * Larger than it looks like it needs to be, deliberately. `scrollIntoView` does
+ * not land exactly on zero - measured, it settles several pixels short - and the
+ * cards are separated by a gap of their own. A threshold tighter than that error
+ * makes a stepped-to file read as "not reached yet", so the next press aims at
+ * the same file again and stepping appears to stick. It only has to stay far
+ * below the height of any card to be unambiguous, and it does.
+ */
+const TOP_EDGE_SLACK = 24
+
+/**
+ * The element a card actually scrolls inside.
+ *
+ * The app scrolls in a `<main>` that sits below the title bar, not in the
+ * window, so a card resting at the top of the page still reports a viewport
+ * offset of the title bar's height. Comparing against the scroller's own top
+ * edge instead is what makes "which file is at the top" independent of whatever
+ * chrome the shell puts above it.
+ */
+function scrollParent(element: HTMLElement): HTMLElement {
+  for (let node = element.parentElement; node !== null; node = node.parentElement) {
+    const overflow = getComputedStyle(node).overflowY
+    if (overflow === 'auto' || overflow === 'scroll') return node
+  }
+  return document.documentElement
+}
+
+/**
+ * How long a file step keeps counting as "where you are" for the next one.
+ *
+ * Stepping scrolls smoothly, which takes a few hundred milliseconds, and during
+ * that time the layout still says you are on the file you are leaving. Someone
+ * tapping `]` three times to move three files would otherwise be told "you are
+ * on file 4" three times over and never get past file 5. Within this window the
+ * step continues from where the last one was aimed; after it, the layout is
+ * measured again, so scrolling by hand always resyncs.
+ */
+const STEP_CHAIN_MS = 800
 
 /**
  * Place every line comment against the diff that is actually on screen.
@@ -228,6 +281,112 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
   )
 
   const marked = useFocusScroll(focus, !isLoading && data !== undefined)
+
+  /**
+   * Step through the diff one file at a time.
+   *
+   * Where the reader currently is comes from the layout, read at the moment the
+   * key is pressed, rather than from the observer that drives the file tree's
+   * highlight. The observer reports asynchronously and has usually said nothing
+   * at all on arrival, which made the first press of `]` scroll to the file
+   * already at the top - that is, do nothing. Measuring instead is one cheap
+   * layout read on a keystroke, and it is never a frame behind.
+   */
+  const lastStep = useRef<{ index: number; at: number } | null>(null)
+
+  const stepFile = useCallback(
+    (delta: number): void => {
+      if (paths.length === 0) return
+
+      const now = Date.now()
+      const pending = lastStep.current
+      let current: number
+
+      if (pending !== null && now - pending.at < STEP_CHAIN_MS) {
+        current = pending.index
+      } else {
+        // The last card whose top edge has passed the top of the scroller is
+        // the one being read; everything after it is still below.
+        current = 0
+        let edge: number | null = null
+        for (const [index, path] of paths.entries()) {
+          const element = document.getElementById(fileDomId(path))
+          if (element === null) continue
+          edge ??= scrollParent(element).getBoundingClientRect().top
+          if (element.getBoundingClientRect().top - edge > TOP_EDGE_SLACK) break
+          current = index
+        }
+      }
+
+      const next = Math.min(paths.length - 1, Math.max(0, current + delta))
+      lastStep.current = { index: next, at: now }
+      const path = paths[next]
+      if (path !== undefined) revealElement(fileDomId(path))
+    },
+    [paths]
+  )
+
+  const canIncludeUncommitted = data?.workingTree != null
+
+  useRegisterCommands(
+    useMemo<Command[]>(
+      () => [
+        {
+          id: 'files:next',
+          label: 'Next file',
+          group: 'Files changed',
+          keys: ']',
+          keywords: 'down scroll',
+          icon: ArrowDown,
+          disabled: paths.length === 0,
+          run: () => stepFile(1)
+        },
+        {
+          id: 'files:previous',
+          label: 'Previous file',
+          group: 'Files changed',
+          keys: '[',
+          keywords: 'up scroll back',
+          icon: ArrowUp,
+          disabled: paths.length === 0,
+          run: () => stepFile(-1)
+        },
+        {
+          id: 'files:tree',
+          label: treeOpen ? 'Hide the file list' : 'Show the file list',
+          group: 'Files changed',
+          keys: 't',
+          keywords: 'tree sidebar panel toggle',
+          icon: treeOpen ? PanelLeftClose : PanelLeft,
+          disabled: paths.length === 0,
+          run: () => setTreeOpen(!treeOpen)
+        },
+        {
+          id: 'files:uncommitted',
+          label: includeUncommitted
+            ? 'Exclude uncommitted changes'
+            : 'Include uncommitted changes',
+          group: 'Files changed',
+          keys: 'u',
+          keywords: 'working tree dirty staged unstaged untracked',
+          icon: GitCompareArrows,
+          // Nothing to fold in when no worktree has this branch checked out.
+          disabled: !canIncludeUncommitted,
+          run: () => setIncludeUncommitted(!includeUncommitted)
+        },
+        {
+          id: 'files:refresh',
+          label: 'Refresh the diff',
+          group: 'Files changed',
+          keys: 'r',
+          keywords: 'reload re-read disk git',
+          icon: RefreshCw,
+          run: () => void refresh()
+        }
+      ],
+      [paths.length, stepFile, treeOpen, setTreeOpen, includeUncommitted, canIncludeUncommitted, refresh]
+    )
+  )
 
   if (isLoading) return <LoadingState />
 

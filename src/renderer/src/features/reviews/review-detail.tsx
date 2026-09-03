@@ -8,12 +8,15 @@
  * on - which is the single most useful thing this app can tell you on arrival.
  * The diff stays lazy, because that one is not cheap.
  */
-import { useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import {
   AlertCircle,
+  ArrowDownFromLine,
   ArrowLeft,
   ArrowRight,
   CircleDot,
+  FileDiff,
+  GitCommitHorizontal,
   GitPullRequestArrow,
   MessageSquare,
   Pencil,
@@ -26,7 +29,9 @@ import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsCount, TabsList, TabsPanel, TabsTab } from '@/components/ui/tabs'
 import { errorMessage } from '@/lib/errors'
-import { navigate, replace, type DiffFocus, type ReviewTab } from '@/lib/router'
+import { plural } from '@/lib/format'
+import { useRegisterCommands, type Command } from '@/features/commands/command-registry'
+import { navigate, replace, REVIEW_TABS, type DiffFocus, type ReviewTab } from '@/lib/router'
 import { useReviewComments } from '../comments/use-comments'
 import { ReviewCommitsTab } from './review-commits-tab'
 import { ReviewConversationTab } from './review-conversation-tab'
@@ -34,7 +39,21 @@ import { ReviewFilesTab } from './review-files-tab'
 import { ReviewFormDialog } from './review-form-dialog'
 import { RemoveReviewDialog } from './remove-review-dialog'
 import { useReview, useReviewCommits, useReviewMutations } from './use-reviews'
+import type { CompareEndpoint } from '@shared/git'
 import type { Review } from '@shared/schemas'
+
+/** Tab labels and icons, shared by the tab strip's commands and the strip. */
+const TAB_LABELS: Record<ReviewTab, string> = {
+  conversation: 'Conversation',
+  commits: 'Commits',
+  files: 'Files changed'
+}
+
+const TAB_ICONS: Record<ReviewTab, typeof MessageSquare> = {
+  conversation: MessageSquare,
+  commits: GitCommitHorizontal,
+  files: FileDiff
+}
 
 interface ReviewDetailProps {
   reviewId: number
@@ -56,6 +75,84 @@ export function ReviewDetail({ reviewId, tab, focus }: ReviewDetailProps) {
   const [removing, setRemoving] = useState<Review | null>(null)
   const [statusBusy, setStatusBusy] = useState(false)
   const [statusError, setStatusError] = useState<unknown>(null)
+
+  const toggleStatus = useCallback(async (): Promise<void> => {
+    if (!review) return
+    setStatusBusy(true)
+    setStatusError(null)
+    try {
+      await updateReview({ id: review.id, status: review.status === 'open' ? 'closed' : 'open' })
+    } catch (caught) {
+      setStatusError(caught)
+    } finally {
+      setStatusBusy(false)
+    }
+  }, [review, updateReview])
+
+  useRegisterCommands(
+    useMemo<Command[]>(
+      () =>
+        review === undefined
+          ? []
+          : [
+              // The digits match the tabs left to right. `replace` rather than
+              // `navigate` for the same reason the tab strip uses it: back
+              // should leave the review, not walk the tabs on the way out.
+              ...REVIEW_TABS.map(
+                (name, index): Command => ({
+                  id: `review:tab:${name}`,
+                  label: TAB_LABELS[name],
+                  group: 'Review',
+                  keys: String(index + 1),
+                  keywords: 'tab',
+                  icon: TAB_ICONS[name],
+                  disabled: tab === name,
+                  run: () => replace({ name: 'review', reviewId, tab: name })
+                })
+              ),
+              {
+                id: 'review:edit',
+                label: 'Edit review',
+                group: 'Review',
+                keys: 'e',
+                keywords: 'title description base head ref rename',
+                icon: Pencil,
+                run: () => setEditing(true)
+              },
+              {
+                id: 'review:status',
+                label: review.status === 'open' ? 'Close review' : 'Reopen review',
+                group: 'Review',
+                // No key on purpose: changing a review's status is a decision,
+                // not navigation, and a bare letter is too easy to lean on.
+                keywords: 'close reopen resolve finish status',
+                icon: GitPullRequestArrow,
+                disabled: statusBusy,
+                run: () => void toggleStatus()
+              },
+              {
+                id: 'review:repository',
+                label: `Go to ${review.repository.name}`,
+                group: 'Navigate',
+                keys: 'g r',
+                keywords: 'repository parent',
+                icon: ArrowLeft,
+                run: () => navigate({ name: 'repository', repositoryId: review.repositoryId })
+              },
+              {
+                id: 'review:remove',
+                label: 'Delete review',
+                group: 'Review',
+                keywords: 'remove destroy',
+                icon: Trash2,
+                // Also keyless: it opens a confirmation, but a shortcut that
+                // starts a deletion is a shortcut someone will hit by accident.
+                run: () => setRemoving(review)
+              }
+            ],
+      [review, reviewId, tab, statusBusy, toggleStatus]
+    )
+  )
 
   if (isLoading) return <LoadingState />
 
@@ -82,19 +179,6 @@ export function ReviewDetail({ reviewId, tab, focus }: ReviewDetailProps) {
   const workingTree = commits.data?.workingTree ?? null
   const isOpen = review.status === 'open'
   const unresolvedThreads = threads.filter((thread) => thread.resolvedAt === null).length
-
-  async function toggleStatus(): Promise<void> {
-    if (!review) return
-    setStatusBusy(true)
-    setStatusError(null)
-    try {
-      await updateReview({ id: review.id, status: isOpen ? 'closed' : 'open' })
-    } catch (caught) {
-      setStatusError(caught)
-    } finally {
-      setStatusBusy(false)
-    }
-  }
 
   return (
     <div className="flex flex-col gap-5">
@@ -123,8 +207,10 @@ export function ReviewDetail({ reviewId, tab, focus }: ReviewDetailProps) {
 
             <p className="mt-1.5 flex flex-wrap items-center gap-1.5 font-mono text-xs text-muted-foreground">
               <span className="rounded bg-muted px-1.5 py-0.5">{review.baseRef}</span>
+              <UpstreamDrift endpoint={commits.data?.base} role="base" />
               <ArrowRight className="size-3" />
               <span className="rounded bg-muted px-1.5 py-0.5">{review.headRef}</span>
+              <UpstreamDrift endpoint={commits.data?.head} role="head" />
               {workingTree?.isDirty && (
                 <Badge
                   variant="warning"
@@ -220,6 +306,58 @@ export function ReviewDetail({ reviewId, tab, focus }: ReviewDetailProps) {
         onRemoved={() => navigate({ name: 'repository', repositoryId: review.repositoryId })}
       />
     </div>
+  )
+}
+
+/**
+ * Says when an endpoint's branch has fallen behind the branch it tracks.
+ *
+ * A review's endpoints are branch *names*, so `main` means whatever the local
+ * branch points at. When that is behind `origin/main`, everything the trunk has
+ * gained since sits inside the diff, looking like the work of the branch under
+ * review - and nothing on the screen would otherwise say so. The base is the
+ * damaging case, which is why its wording names the consequence rather than
+ * just the fact.
+ *
+ * Silent when level or merely ahead: a base you have local commits on top of is
+ * unusual but not misleading, and a warning that fires on the ordinary case
+ * stops being read.
+ */
+function UpstreamDrift({
+  endpoint,
+  role
+}: {
+  endpoint: CompareEndpoint | undefined
+  role: 'base' | 'head'
+}) {
+  const upstream = endpoint?.upstream
+  if (!upstream) return null
+
+  if (upstream.gone) {
+    return (
+      <Badge variant="outline" title={`${upstream.ref} no longer exists on the remote.`}>
+        upstream gone
+      </Badge>
+    )
+  }
+
+  if (upstream.behind === 0) return null
+
+  return (
+    <Badge
+      variant="warning"
+      title={
+        role === 'base'
+          ? `Local ${endpoint?.ref} is ${plural(upstream.behind, 'commit')} behind ${upstream.ref}, ` +
+            'and this diff is measured against the local branch - so anything the trunk has gained ' +
+            'since is being shown as part of this review. Update the local branch and refresh.'
+          : `Local ${endpoint?.ref} is ${plural(upstream.behind, 'commit')} behind ${upstream.ref}, ` +
+            'so this review is showing less than what has been pushed.'
+      }
+    >
+      <ArrowDownFromLine />
+      {upstream.behind} behind {upstream.ref}
+    </Badge>
   )
 }
 

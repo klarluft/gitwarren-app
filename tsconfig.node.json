@@ -19,6 +19,7 @@
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
     "paths": {"@core/*": ["./src/core/*"], "@shared/*": ["./src/shared/*"]}
   },
+  "//tests": "The renderer's own unit tests are node programs like every other test here, so they are checked with this config rather than the web one, which excludes them. Both the test and the module under test are named one by one because `composite` requires every file to be listed, and a wildcard over renderer/lib would drag in modules that genuinely need the DOM. Only DOM-free modules can be tested this way - see `renderer/src/lib/keys.ts` on why it declares its own event shape.",
   "//": "electron-vite/node is in `types` for the `?asset` import suffix - the main process imports the app icon that way so the file also exists at runtime.",
   "include": [
     "src/main/**/*",
@@ -26,6 +27,10 @@
     "src/core/**/*",
     "src/mcp/**/*",
     "src/shared/**/*",
+    "src/renderer/src/lib/keys.ts",
+    "src/renderer/src/lib/fuzzy.ts",
+    "src/renderer/src/lib/__tests__/keys.test.ts",
+    "src/renderer/src/lib/__tests__/fuzzy.test.ts",
     "electron.vite.config.ts",
     "vite.mcp.config.ts",
     "drizzle.config.ts",

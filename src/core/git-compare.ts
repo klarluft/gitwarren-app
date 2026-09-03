@@ -33,6 +33,7 @@ import type {
   ReviewCommits,
   ReviewCompare,
   ReviewDiff,
+  UpstreamTracking,
   WorkingTreeChanges,
   WorkingTreeFile
 } from '../shared/git.js'
@@ -324,16 +325,77 @@ async function guessDefaultBranch(repositoryPath: string, refs: GitRef[]): Promi
 // Resolving a review's two endpoints
 // ---------------------------------------------------------------------------
 
+/**
+ * Read `%(upstream:track,nobracket)` into numbers.
+ *
+ * Git writes this for people, not for parsers: `ahead 2`, `behind 11`,
+ * `ahead 1, behind 3`, `gone`, or nothing at all when the branch is level with
+ * its upstream. Pulled out as a pure function because those five shapes are
+ * exactly what a test should pin down, and none of them needs a repository.
+ */
+export function parseUpstreamTrack(track: string): Pick<UpstreamTracking, 'ahead' | 'behind' | 'gone'> {
+  const text = track.trim()
+  if (text === 'gone') return { ahead: 0, behind: 0, gone: true }
+
+  const ahead = /ahead (\d+)/.exec(text)
+  const behind = /behind (\d+)/.exec(text)
+  return {
+    ahead: ahead ? Number(ahead[1]) : 0,
+    behind: behind ? Number(behind[1]) : 0,
+    gone: false
+  }
+}
+
+/**
+ * What this ref tracks, when it is a local branch that tracks anything.
+ *
+ * One `for-each-ref` restricted to the single branch, rather than a
+ * `rev-list --count` pair: git already maintains this relationship and will
+ * report it without walking any commits. A ref that is a tag, a remote branch
+ * or a raw sha simply matches nothing here, which is the right answer.
+ */
+async function readUpstreamTracking(
+  repositoryPath: string,
+  ref: string
+): Promise<UpstreamTracking | null> {
+  const branch = ref.replace(/^refs\/heads\//, '')
+  const result = await runGitRaw(
+    [
+      // `%00` is git's escape for a NUL, not a NUL itself: an argument may not
+      // contain one. git writes the real byte into its output, which is what
+      // the split below then looks for.
+      'for-each-ref',
+      '--format=%(upstream:short)%00%(upstream:track,nobracket)',
+      `refs/heads/${branch}`
+    ],
+    repositoryPath
+  )
+  if (result.code !== 0) return null
+
+  const line = result.stdout.split('\n').find((candidate) => candidate.trim().length > 0)
+  if (line === undefined) return null
+
+  const [upstreamRef, track] = line.split(FIELD)
+  // Present but empty means a local branch that tracks nothing.
+  if (!upstreamRef) return null
+
+  return { ref: upstreamRef, ...parseUpstreamTrack(track ?? '') }
+}
+
 async function resolveEndpoint(repositoryPath: string, ref: string): Promise<CompareEndpoint> {
   // `^{commit}` makes an annotated tag resolve to the commit it points at, and
   // rejects refs that name a tree or a blob.
-  const result = await runGit(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], repositoryPath)
+  const [result, upstream] = await Promise.all([
+    runGit(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], repositoryPath),
+    readUpstreamTracking(repositoryPath, ref)
+  ])
+
   if (result.code !== 0 || !result.stdout) {
     // Phrased to read correctly both when creating a review against a typo and
     // when opening one whose branch has since been deleted.
-    return { ref, sha: null, shortSha: null, error: `\`${ref}\` does not resolve to a commit.` }
+    return { ref, sha: null, shortSha: null, upstream, error: `\`${ref}\` does not resolve to a commit.` }
   }
-  return { ref, sha: result.stdout, shortSha: shortenSha(result.stdout), error: null }
+  return { ref, sha: result.stdout, shortSha: shortenSha(result.stdout), upstream, error: null }
 }
 
 /**
@@ -346,8 +408,8 @@ export async function resolveCompare(
   headRef: string
 ): Promise<ReviewCompare> {
   const missing: ReviewCompare = {
-    base: { ref: baseRef, sha: null, shortSha: null, error: null },
-    head: { ref: headRef, sha: null, shortSha: null, error: null },
+    base: { ref: baseRef, sha: null, shortSha: null, upstream: null, error: null },
+    head: { ref: headRef, sha: null, shortSha: null, upstream: null, error: null },
     mergeBase: null,
     headWorktree: null,
     workingTree: null,

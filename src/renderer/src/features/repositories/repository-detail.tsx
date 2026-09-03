@@ -5,7 +5,7 @@
  * cache, so the git state shown is current even if you arrived by a link or a
  * reload rather than by clicking through the list.
  */
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { AlertCircle, ArrowLeft, FolderOpen, Pencil } from 'lucide-react'
 import useSWR from 'swr'
 import { Button } from '@/components/ui/button'
@@ -14,6 +14,7 @@ import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { api, CACHE_KEYS } from '@/lib/api'
 import { errorMessage } from '@/lib/errors'
+import { useRegisterCommands, type Command } from '@/features/commands/command-registry'
 import { navigate } from '@/lib/router'
 import { ReviewList } from '@/features/reviews/review-list'
 import { GitStateBadge } from './git-state'
@@ -26,6 +27,40 @@ export function RepositoryDetail({ repositoryId }: { repositoryId: number }) {
   const { data: repository, error, isLoading } = useSWR<RepositoryWithGitState, unknown>(
     `${CACHE_KEYS.repositories}:${repositoryId}`,
     () => api.repositories.get({ id: repositoryId })
+  )
+
+  useRegisterCommands(
+    useMemo<Command[]>(
+      () =>
+        repository === undefined
+          ? []
+          : [
+              {
+                id: 'repository:edit',
+                label: 'Edit repository',
+                group: 'Repository',
+                hint: repository.name,
+                keys: 'e',
+                keywords: 'rename settings',
+                icon: Pencil,
+                run: () => setEditing(true)
+              },
+              {
+                id: 'repository:reveal',
+                label: 'Show in file manager',
+                group: 'Repository',
+                hint: repository.path,
+                keys: 'o',
+                keywords: 'finder explorer folder open reveal',
+                icon: FolderOpen,
+                // A missing folder cannot be revealed, and saying so in the
+                // palette beats a key that silently does nothing.
+                disabled: !repository.git.exists,
+                run: () => void api.system.revealPath(repository.path)
+              }
+            ],
+      [repository]
+    )
   )
 
   if (isLoading) {

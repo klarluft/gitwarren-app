@@ -159,11 +159,38 @@ export interface FileContent {
   error: string | null
 }
 
+/**
+ * Where a local branch stands against the remote branch it tracks.
+ *
+ * Worth carrying because a review's endpoints are branch *names*, and a name
+ * resolves to whatever the local branch happens to point at. A base ref called
+ * `main` that is fifty commits behind `origin/main` produces a diff containing
+ * fifty commits of other people's work, attributed to the branch under review -
+ * which reads as though the author wrote them. The reviewer cannot tell that
+ * from the diff alone, so the app has to say it.
+ */
+export interface UpstreamTracking {
+  /** Short name of the tracked branch, e.g. `origin/main`. */
+  ref: string
+  /** Commits the upstream has that this branch does not. */
+  behind: number
+  /** Commits this branch has that the upstream does not. */
+  ahead: number
+  /** The upstream branch has been deleted; the counts are then meaningless. */
+  gone: boolean
+}
+
 /** How the two endpoints of a review resolved against the repository right now. */
 export interface CompareEndpoint {
   ref: string
   sha: string | null
   shortSha: string | null
+  /**
+   * Null when the ref is not a local branch (a tag, a remote branch, a raw
+   * sha) or when it tracks nothing - in all of those cases there is no drift
+   * to report.
+   */
+  upstream: UpstreamTracking | null
   /** Set when the ref no longer resolves - a deleted branch, say. */
   error: string | null
 }
