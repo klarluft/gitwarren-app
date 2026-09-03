@@ -1089,19 +1089,31 @@ into an interactive prompt. The result is a secret that looks set and fails
 much later as `MAC verification failed during PKCS12 import (wrong password?)`
 — which reads as a password problem when the certificate is what got cut short.
 
-```bash
-base64 -i certificate.p12 | gh secret set CSC_LINK
+The certificate pair has to be stored as one verified unit, so
+[`scripts/set-signing-secrets.sh`](scripts/set-signing-secrets.sh) does it:
 
-# Short enough to paste safely; the prompt also keeps them out of shell history.
-gh secret set CSC_KEY_PASSWORD            # the .p12 export password
+```bash
+./scripts/set-signing-secrets.sh ~/Documents/certificate.p12
+```
+
+It prompts for the password without echoing it, refuses to store anything
+unless that password actually opens the `.p12` *and* a private key is inside,
+and then sets both secrets from exactly those bytes. The remaining three are
+short enough to paste at a prompt, which also keeps them out of shell history:
+
+```bash
 gh secret set APPLE_ID                    # you@example.com
 gh secret set APPLE_APP_SPECIFIC_PASSWORD # xxxx-xxxx-xxxx-xxxx
 gh secret set APPLE_TEAM_ID               # XXXXXXXXXX
 ```
 
-Only the base64 needs piping — it is the one value long enough to be truncated.
-If you do pipe a short secret, use `printf '%s'` rather than `echo`: `gh` stores
-stdin verbatim, so `echo` puts a trailing newline inside the password.
+Setting the pair by hand is where this goes wrong, in two ways that produce an
+identical error. A base64 `.p12` runs to several thousand characters and many
+terminals silently truncate a paste that long, and `echo "$pw" | gh secret set`
+stores the trailing newline as part of the password. Both surface much later as
+`MAC verification failed during PKCS12 import (wrong password?)`, which reads
+as a bad certificate rather than a badly stored one. If you do set them by
+hand, pipe the base64 from the file and use `printf '%s'` rather than `echo`.
 
 The release workflow checks that `CSC_LINK` and `CSC_KEY_PASSWORD` agree before
 it builds anything, so a mistake here surfaces in seconds with a message naming
