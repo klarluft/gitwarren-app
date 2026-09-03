@@ -1124,23 +1124,50 @@ hand, pipe the base64 from the file and use `printf '%s'` rather than `echo`.
 
 The release workflow checks that `CSC_LINK` and `CSC_KEY_PASSWORD` agree before
 it builds anything, so a mistake here surfaces in seconds with a message naming
-the cause rather than several minutes in.
+the cause rather than several minutes in. The secret names are unchanged, and
+`scripts/set-signing-secrets.sh` still sets them.
 
-**These are macOS-only.** `CSC_LINK` and `CSC_KEY_PASSWORD` are read by
-electron-builder's Windows packager too, so the workflow deliberately exports
-them on macOS runners alone — handed to a Windows runner, the same pair makes
-it try to Authenticode-sign an `.exe` with an Apple Developer ID certificate
-and fail with `Cannot extract publisher name from code signing certificate`. A
-Windows certificate, when there is one, goes in separate `WINDOWS_CSC_LINK` and
-`WINDOWS_CSC_KEY_PASSWORD` secrets, which the workflow already reads.
+**The Apple certificate never reaches a Windows runner.** electron-builder's
+Windows packager reads `CSC_LINK` and `CSC_KEY_PASSWORD` too, and handed the
+Apple pair it tries to Authenticode-sign an `.exe` with a Developer ID
+certificate, failing with `Cannot extract publisher name from code signing
+certificate`. A Windows certificate, when there is one, goes in separate
+`WINDOWS_CSC_LINK` and `WINDOWS_CSC_KEY_PASSWORD` secrets, which the workflow
+already reads.
 
-The workflow deliberately exports these through `$GITHUB_ENV` rather than a
-step-level `env:` block. An absent secret is not an unset variable in GitHub
-Actions — it is an empty string, and electron-builder's macOS packager only
-null-checks `CSC_LINK`, so an empty one wins over every other source and is
-then resolved as a path relative to the project directory, failing with
-`⨯ /Users/runner/work/<repo>/<repo> not a file`. The loop in *Export the
-signing secrets that exist* skips empty values so the unset case stays unset.
+**On macOS the workflow builds the keychain itself** and never exports
+`CSC_LINK`. Setting it would send electron-builder down its own
+`createKeychain` path, which imports the certificate and then runs
+
+```
+security set-key-partition-list -S apple-tool:,apple: -s -k <password>
+```
+
+passing the *certificate* password to a flag that means the *keychain*
+password — the keychain's own password is a random value generated a few lines
+earlier in `app-builder-lib/out/codeSign/macCodeSign.js` and never reused
+there. macOS rejects it and the build dies several minutes in with
+
+```
+security: SecKeychainUnlock: The user name or passphrase you entered is not correct.
+```
+
+which reads as a bad certificate even when the certificate is perfectly good.
+It is unchanged as of electron-builder 26.16.0, so upgrading is not the fix.
+The *Import the Apple certificate into a keychain* step therefore creates,
+unlocks and populates a temporary keychain itself — passing the keychain
+password where it belongs — verifies a Developer ID Application identity
+actually landed in it, and hands electron-builder `CSC_KEYCHAIN`, which
+`macPackager` consults only when `CSC_LINK` is absent. That step also does the
+`CSC_LINK`/`CSC_KEY_PASSWORD` agreement check, so a badly stored secret still
+surfaces in seconds rather than several minutes in.
+
+The Windows secrets go through `$GITHUB_ENV` rather than a step-level `env:`
+block. An absent secret is not an unset variable in GitHub Actions — it is an
+empty string, which electron-builder resolves as a path relative to the project
+directory, failing with `⨯ /Users/runner/work/<repo>/<repo> not a file`. The
+loop in *Export the signing secrets that exist* skips empty values so the unset
+case stays unset.
 
 ### How the switches interact
 
@@ -1155,9 +1182,9 @@ none of them has to be toggled per build:
 
 Notarization is only attempted after a real signature succeeds, so `notarize:
 true` is harmless on a machine with no certificate — the code path is never
-reached. `scripts/adhoc-sign.mjs` stands down as soon as either `CSC_LINK` is
-set or a Developer ID identity is in the keychain, so it never fights with the
-real signature.
+reached. `scripts/adhoc-sign.mjs` stands down as soon as `CSC_KEYCHAIN` or
+`CSC_LINK` is set, or a Developer ID identity is in the keychain, so it never
+fights with the real signature.
 
 ### Windows
 
