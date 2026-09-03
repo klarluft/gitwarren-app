@@ -25,7 +25,8 @@
   "main": "./out/main/index.js",
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": ">=24.20.0",
+    "npm": ">=11.10.0"
   },
   "scripts": {
     "dev": "electron-vite dev",
@@ -35,8 +36,8 @@
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "typecheck:node": "tsc -p tsconfig.node.json --noEmit",
     "typecheck:web": "tsc -p tsconfig.web.json --noEmit",
-    "lint": "node --max-old-space-size=6144 node_modules/eslint/bin/eslint.js .",
-    "lint:fix": "node --max-old-space-size=6144 node_modules/eslint/bin/eslint.js . --fix",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
     "test": "node scripts/run-tests.mjs",
     "db:generate": "drizzle-kit generate",
     "mcp:dev": "tsx src/mcp/server.ts",
