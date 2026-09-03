@@ -11,6 +11,7 @@
 import { useCallback, useMemo, useState } from 'react'
 import {
   AlertCircle,
+  ArrowDownFromLine,
   ArrowLeft,
   ArrowRight,
   CircleDot,
@@ -28,6 +29,7 @@ import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsCount, TabsList, TabsPanel, TabsTab } from '@/components/ui/tabs'
 import { errorMessage } from '@/lib/errors'
+import { plural } from '@/lib/format'
 import { useRegisterCommands, type Command } from '@/features/commands/command-registry'
 import { navigate, replace, REVIEW_TABS, type DiffFocus, type ReviewTab } from '@/lib/router'
 import { useReviewComments } from '../comments/use-comments'
@@ -37,6 +39,7 @@ import { ReviewFilesTab } from './review-files-tab'
 import { ReviewFormDialog } from './review-form-dialog'
 import { RemoveReviewDialog } from './remove-review-dialog'
 import { useReview, useReviewCommits, useReviewMutations } from './use-reviews'
+import type { CompareEndpoint } from '@shared/git'
 import type { Review } from '@shared/schemas'
 
 /** Tab labels and icons, shared by the tab strip's commands and the strip. */
@@ -204,8 +207,10 @@ export function ReviewDetail({ reviewId, tab, focus }: ReviewDetailProps) {
 
             <p className="mt-1.5 flex flex-wrap items-center gap-1.5 font-mono text-xs text-muted-foreground">
               <span className="rounded bg-muted px-1.5 py-0.5">{review.baseRef}</span>
+              <UpstreamDrift endpoint={commits.data?.base} role="base" />
               <ArrowRight className="size-3" />
               <span className="rounded bg-muted px-1.5 py-0.5">{review.headRef}</span>
+              <UpstreamDrift endpoint={commits.data?.head} role="head" />
               {workingTree?.isDirty && (
                 <Badge
                   variant="warning"
@@ -301,6 +306,58 @@ export function ReviewDetail({ reviewId, tab, focus }: ReviewDetailProps) {
         onRemoved={() => navigate({ name: 'repository', repositoryId: review.repositoryId })}
       />
     </div>
+  )
+}
+
+/**
+ * Says when an endpoint's branch has fallen behind the branch it tracks.
+ *
+ * A review's endpoints are branch *names*, so `main` means whatever the local
+ * branch points at. When that is behind `origin/main`, everything the trunk has
+ * gained since sits inside the diff, looking like the work of the branch under
+ * review - and nothing on the screen would otherwise say so. The base is the
+ * damaging case, which is why its wording names the consequence rather than
+ * just the fact.
+ *
+ * Silent when level or merely ahead: a base you have local commits on top of is
+ * unusual but not misleading, and a warning that fires on the ordinary case
+ * stops being read.
+ */
+function UpstreamDrift({
+  endpoint,
+  role
+}: {
+  endpoint: CompareEndpoint | undefined
+  role: 'base' | 'head'
+}) {
+  const upstream = endpoint?.upstream
+  if (!upstream) return null
+
+  if (upstream.gone) {
+    return (
+      <Badge variant="outline" title={`${upstream.ref} no longer exists on the remote.`}>
+        upstream gone
+      </Badge>
+    )
+  }
+
+  if (upstream.behind === 0) return null
+
+  return (
+    <Badge
+      variant="warning"
+      title={
+        role === 'base'
+          ? `Local ${endpoint?.ref} is ${plural(upstream.behind, 'commit')} behind ${upstream.ref}, ` +
+            'and this diff is measured against the local branch - so anything the trunk has gained ' +
+            'since is being shown as part of this review. Update the local branch and refresh.'
+          : `Local ${endpoint?.ref} is ${plural(upstream.behind, 'commit')} behind ${upstream.ref}, ` +
+            'so this review is showing less than what has been pushed.'
+      }
+    >
+      <ArrowDownFromLine />
+      {upstream.behind} behind {upstream.ref}
+    </Badge>
   )
 }
 
