@@ -37,3 +37,6 @@ pnpm-debug.log*
 
 # scratch output from scripts/capture-demo.mjs
 screenshots-out/
+
+# scratch output from scripts/capture-hero-video.mjs
+video-out/

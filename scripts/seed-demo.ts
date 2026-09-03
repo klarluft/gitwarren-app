@@ -22,8 +22,8 @@ import { reviewsService } from '../src/core/services/reviews.js'
 import { HUMAN_AUTHOR, type CommentAuthor } from '../src/shared/actors.js'
 import type { ReviewDiff } from '../src/shared/git.js'
 
-/** Where the demo repositories were created. Overridable for a different machine. */
-const DEMO_ROOT = process.env.DEMO_REPO_ROOT ?? `${process.env.HOME}/github.com/klarluft`
+/** Where scripts/make-demo-repos.sh put the demo repositories. */
+const DEMO_ROOT = process.env.DEMO_REPO_ROOT ?? '/tmp/gw-demo-repos'
 
 /**
  * A Claude Code session, as the MCP handshake would describe one. The session

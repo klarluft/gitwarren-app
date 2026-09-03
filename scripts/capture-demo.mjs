@@ -16,6 +16,7 @@
  */
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { Cdp, hideScrollbars, settle, wait } from './cdp.mjs'
 
 const PORT = Number(process.env.CDP_PORT ?? 9222)
 /**
@@ -123,109 +124,11 @@ const SHOTS = [
   }
 ]
 
-/** Minimal CDP client. Node 22 ships a global WebSocket, so this needs no deps. */
-class Cdp {
-  #socket
-  #nextId = 1
-  #pending = new Map()
-
-  static async attach(port) {
-    const response = await fetch(`http://localhost:${port}/json/list`)
-    const targets = await response.json()
-    const page = targets.find((target) => target.type === 'page')
-    if (!page) throw new Error('No page target. Is the app running with --remote-debugging-port?')
-
-    const client = new Cdp()
-    await client.#connect(page.webSocketDebuggerUrl)
-    return client
-  }
-
-  #connect(url) {
-    return new Promise((resolve, reject) => {
-      this.#socket = new WebSocket(url)
-      this.#socket.addEventListener('open', () => resolve())
-      this.#socket.addEventListener('error', () => reject(new Error(`Cannot connect to ${url}`)))
-      this.#socket.addEventListener('message', (event) => {
-        const message = JSON.parse(event.data)
-        const waiting = this.#pending.get(message.id)
-        if (!waiting) return
-        this.#pending.delete(message.id)
-        if (message.error) waiting.reject(new Error(message.error.message))
-        else waiting.resolve(message.result)
-      })
-    })
-  }
-
-  send(method, params = {}) {
-    const id = this.#nextId++
-    this.#socket.send(JSON.stringify({ id, method, params }))
-    return new Promise((resolve, reject) => this.#pending.set(id, { resolve, reject }))
-  }
-
-  async evaluate(expression) {
-    const result = await this.send('Runtime.evaluate', {
-      expression,
-      returnByValue: true,
-      awaitPromise: true
-    })
-    return result.result?.value
-  }
-
-  close() {
-    this.#socket.close()
-  }
-}
-
-const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
-
-/**
- * Wait for the screen to stop changing.
- *
- * Every screen fetches through SWR, so there is a skeleton phase and then a
- * content phase, and the second one arrives whenever git happens to answer.
- * Polling until the rendered text is the same twice in a row is a far better
- * signal than any fixed sleep - and the skeleton check stops it settling on a
- * frame of placeholders.
- */
-async function settle(cdp, { timeout = 15_000 } = {}) {
-  const deadline = Date.now() + timeout
-  let previous = null
-  let stableSince = null
-
-  while (Date.now() < deadline) {
-    const state = await cdp.evaluate(`(() => {
-      const skeletons = document.querySelectorAll('.animate-pulse').length
-      return JSON.stringify({ skeletons, text: document.body.innerText.length })
-    })()`)
-
-    if (state === previous && state !== null) {
-      if (stableSince === null) stableSince = Date.now()
-      const { skeletons } = JSON.parse(state)
-      // Stable for two consecutive polls and nothing still loading.
-      if (skeletons === 0 && Date.now() - stableSince >= 400) return
-    } else {
-      stableSince = null
-    }
-
-    previous = state
-    await wait(250)
-  }
-
-  console.warn('  (timed out waiting for the screen to settle; capturing anyway)')
-}
-
 async function main() {
   await mkdir(OUT_DIR, { recursive: true })
   const cdp = await Cdp.attach(PORT)
 
-  // Overlay scrollbars are a pointing-device affordance, and in a still image
-  // they read as a stray line down the edge of the product.
-  await cdp.evaluate(`(() => {
-    const style = document.createElement('style')
-    style.textContent = '*::-webkit-scrollbar{width:0!important;height:0!important;display:none!important}'
-    document.head.appendChild(style)
-    return 'ok'
-  })()`)
+  await hideScrollbars(cdp)
 
   for (const shot of SHOTS) {
     await cdp.send('Emulation.setDeviceMetricsOverride', {
