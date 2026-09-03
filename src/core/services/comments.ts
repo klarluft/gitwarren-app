@@ -52,6 +52,20 @@ import {
   type CommentThread
 } from '../../shared/schemas.js'
 
+/**
+ * Where a thread sits, which is everything needed to link to it.
+ *
+ * `CommentThread` satisfies this structurally, so a caller holding a whole
+ * thread never needs to ask for one.
+ */
+export interface CommentLocation {
+  reviewId: number
+  /** Null for a review-level thread, which is not about any particular line. */
+  filePath: string | null
+  side: DiffSide | null
+  line: number | null
+}
+
 /** A thread plus where it lands in the diff as it stands right now. */
 export interface AnchoredCommentThread extends CommentThread {
   /** Null for a review-level thread, which has no line to drift away from. */
@@ -295,6 +309,31 @@ export const commentsService = {
     const { reviewId } = parse(listCommentsInputSchema, input)
     requireReview(reviewId)
     return readThreads(reviewId)
+  },
+
+  /**
+   * Which review a thread belongs to, and where in it.
+   *
+   * Exists for the MCP server, which hands an agent a link back into the GUI
+   * for every comment it writes. A reply or an edit returns only a message, so
+   * the link's file and line have to be looked up - and reading every thread on
+   * the review to find one of them would be absurd.
+   *
+   * Typed arguments rather than `unknown`, unlike everything else here: this is
+   * not reachable from a tool call or an IPC channel, so there is no untrusted
+   * boundary to re-parse at.
+   */
+  locate(reference: { threadId: number } | { commentId: number }): CommentLocation {
+    const threadId =
+      'threadId' in reference ? reference.threadId : requireComment(reference.commentId).threadId
+    const thread = requireThread(threadId)
+
+    return {
+      reviewId: thread.reviewId,
+      filePath: thread.filePath,
+      side: thread.side,
+      line: thread.line
+    }
   },
 
   /**

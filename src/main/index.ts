@@ -9,10 +9,20 @@ import { join } from 'node:path'
 // one is handed to BrowserWindow.
 import icon from '../../build/icon.png?asset'
 import { getDatabase, closeDatabase } from '../core/db/client.js'
+import { clearGuiRuntime, writeGuiRuntime } from '../core/gui-runtime.js'
 import { getDatabasePath, getDataDirectory } from '../core/paths.js'
 import { attachmentsService } from '../core/services/attachments.js'
+import { hrefFor } from '../shared/routes.js'
 import { registerAttachmentProtocol, registerAttachmentScheme } from './attachment-protocol.js'
+import {
+  receiveDeepLink,
+  receiveDeepLinkFromArgv,
+  registerDeepLinkClient,
+  setWindowFactory,
+  takePendingRoute
+} from './deep-link.js'
 import { registerIpcHandlers } from './ipc.js'
+import { startLinkServer, stopLinkServer } from './link-server.js'
 import { disposeUpdater, initialiseUpdater } from './updater.js'
 
 const isDev = !app.isPackaged
@@ -76,10 +86,17 @@ function createWindow(): BrowserWindow {
     return { action: 'deny' }
   })
 
+  // A deep link that arrived before there was a window becomes this window's
+  // starting location, so a cold start from a link paints the review itself
+  // rather than the repository list and then a jump.
+  const pending = takePendingRoute()
+  const hash = pending ? hrefFor(pending) : undefined
+
   if (isDev && process.env.ELECTRON_RENDERER_URL) {
-    void window.loadURL(process.env.ELECTRON_RENDERER_URL)
+    void window.loadURL(process.env.ELECTRON_RENDERER_URL + (hash ?? ''))
   } else {
-    void window.loadFile(join(import.meta.dirname, '../renderer/index.html'))
+    const page = join(import.meta.dirname, '../renderer/index.html')
+    void (hash ? window.loadFile(page, { hash }) : window.loadFile(page))
   }
 
   return window
@@ -91,13 +108,26 @@ function createWindow(): BrowserWindow {
 if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
-  app.on('second-instance', () => {
+  app.on('second-instance', (_event, argv) => {
     const [existing] = BrowserWindow.getAllWindows()
     if (existing) {
       if (existing.isMinimized()) existing.restore()
       existing.focus()
     }
+    // Windows and Linux deliver a deep link by starting the app again with the
+    // URL in argv; the single-instance lock turns that into this event.
+    receiveDeepLinkFromArgv(argv)
   })
+
+  // macOS delivers it as an event instead - and can do so before `whenReady`
+  // resolves, when the click is what launched the app. Registered out here for
+  // that reason: a listener attached inside `whenReady` would miss it.
+  app.on('open-url', (event, url) => {
+    event.preventDefault()
+    receiveDeepLink(url)
+  })
+
+  registerDeepLinkClient()
 
   void app.whenReady().then(() => {
     // Opening the database here runs migrations before the UI can issue its
@@ -111,7 +141,24 @@ if (!app.requestSingleInstanceLock()) {
 
     registerAttachmentProtocol()
     registerIpcHandlers()
+
+    // Started here rather than after the window so the port is published as
+    // early as it can be - an agent asking for a link a second after launch
+    // should get one. The port arrives asynchronously, hence the callback.
+    startLinkServer((port) => writeGuiRuntime({ port, pid: process.pid }))
+
+    // Buffers the launch URL, if this start came from a link on Windows or
+    // Linux, so that `createWindow` below opens straight onto it.
+    receiveDeepLinkFromArgv(process.argv)
+
     createWindow()
+
+    // Only now: a link buffered during startup belongs to the window above, not
+    // to a second one opened alongside it. From here on a link that arrives
+    // with no window - macOS, where closing the last one does not quit - opens
+    // one for itself.
+    setWindowFactory(createWindow)
+
     initialiseUpdater()
 
     // Attachments no body refers to any more are collected here, and only here.
@@ -137,6 +184,10 @@ if (!app.requestSingleInstanceLock()) {
 
   app.on('before-quit', () => {
     disposeUpdater()
+    stopLinkServer()
+    // Removed rather than left to the pid check, so that a reader is told "no
+    // GUI" immediately instead of after a syscall on a recycled pid.
+    clearGuiRuntime()
     closeDatabase()
   })
 }

@@ -43,6 +43,7 @@ Local AI agents get the same capabilities through an MCP server over stdio.
 - [Data storage](#data-storage)
 - [Database migrations](#database-migrations)
 - [Agent access (MCP)](#agent-access-mcp)
+- [Linking the user back into the app](#linking-the-user-back-into-the-app)
 - [Images in comments](#images-in-comments)
 - [Release process](#release-process)
 - [Auto-update](#auto-update)
@@ -382,10 +383,13 @@ src/
 │   ├── diff-gaps.ts     where a diff's hidden lines are, for unfolding them
 │   ├── validation.ts    one zod-error → AppError conversion, used everywhere
 │   ├── errors.ts        AppError + the error-code vocabulary
+│   ├── routes.ts        the hash grammar, as data — parsed by three processes
+│   ├── deep-link.ts     gitwarren:// URL ⇄ Route, the hostile-input boundary
 │   └── api.ts           IPC channel names and the bridge's type
 │
 ├── core/              The shared service layer. Never imports electron.
 │   ├── paths.ts         per-platform data directory (+ env override)
+│   ├── gui-runtime.ts   the running GUI's loopback port, for other processes
 │   ├── git-exec.ts      the one place `git` is spawned
 │   ├── git.ts           live repository state; root resolution
 │   ├── git-compare.ts   worktrees, refs, commits, diffs, dirty state
@@ -400,6 +404,8 @@ src/
 │   ├── index.ts         window lifecycle
 │   ├── ipc.ts           thin delegations to core/services
 │   ├── attachment-protocol.ts  serves gitwarren:// attachment images
+│   ├── deep-link.ts     receives gitwarren:// URLs from the OS
+│   ├── link-server.ts   the loopback page holding the "Open GitWarren" button
 │   ├── updater.ts       electron-updater wiring
 │   ├── editors.ts       finds the user's code editor and opens a file in it
 │   └── mcp-launch.ts    computes this install's MCP launch command
@@ -407,6 +413,7 @@ src/
 ├── preload/           The only bridge into the renderer
 ├── mcp/               stdio MCP server
 │   ├── server.ts        tool definitions
+│   ├── gui-link.ts      the `guiUrl` on every review and comment payload
 │   └── identity.ts      naming an agent from its MCP handshake
 └── renderer/          React app (no Node access)
     └── src/
@@ -561,6 +568,10 @@ uses:
 | `update_review_comment` | Edits one message. Own comments only. |
 | `delete_review_comment` | Deletes one message; the thread goes too if it was the last. |
 
+Every result above that carries a review or a comment also carries a `guiUrl`
+that opens it in the app — see
+[Linking the user back into the app](#linking-the-user-back-into-the-app).
+
 **There is deliberately no `get_review_diff` or `list_review_commits`**, even
 though the service layer produces both for the UI. An agent pointed at these
 repositories can run `git log` and `git diff` itself, against the real working
@@ -573,6 +584,68 @@ Failures come back as tool errors prefixed with the code
 (`NOT_A_GIT_REPOSITORY`, `DUPLICATE_REPOSITORY`, `PATH_NOT_FOUND`, `NOT_FOUND`,
 `INVALID_INPUT`, `FORBIDDEN`, `GIT_UNAVAILABLE`), so an agent can react to the
 kind of failure rather than parsing prose.
+
+### Linking the user back into the app
+
+Every payload that carries a review or a comment also carries a **`guiUrl`** —
+an address that opens the app on exactly that review, and on the commented line
+where there is one. It is there so an agent can end its turn with a link instead
+of "I've left three comments on review 4, have a look". When GitWarren is not
+running it is **`null`**, and the tool descriptions say what that means, because
+an agent acts on a documented null far more reliably than on an absent field.
+
+The link is a chain of three hops, and each one is load-bearing:
+
+```
+http://127.0.0.1:52413/#review/4/files/src%2Fapp.ts/head/42   ← what the agent prints
+        │  terminal linkifies it, and clicking opens the browser
+        ▼
+a one-page server inside the GUI, serving an "Open GitWarren" button
+        │  the user clicks it
+        ▼
+gitwarren://review/4/files/src%2Fapp.ts/head/42                ← OS protocol handler
+```
+
+**Why not hand out the `gitwarren://` URL directly?** Terminals linkify `http`
+and almost none of them linkify a custom scheme, so the agent would be printing
+text the user has to copy by hand.
+
+**Why a button rather than a redirect?** Two reasons. Browsers refuse scripted
+navigation to a custom scheme — but more importantly, the click is what makes
+the window actually come forward. Windows grants foreground rights only to the
+process that *is* foreground or that launched the one asking, so an Electron app
+woken by a background HTTP request cannot raise itself: `win.focus()` flashes the
+taskbar and stops there ([electron#2867](https://github.com/electron/electron/issues/2867)).
+GNOME's Mutter demotes self-requested activation in much the same way. A protocol
+launch from the browser the user just clicked in inherits the right on all three
+platforms. So the third hop is not an inefficiency to optimise away — it is the
+only hop that works.
+
+A consequence worth keeping: **the loopback server never takes an action.** It
+answers every request with the same static page and has no other endpoint. That
+is a property to defend rather than an accident of it being small — anything on
+loopback is reachable by every process on the machine and by whatever web page
+the user has open next, so an endpoint here that mutated state, read a
+repository or drove IPC would be a capability handed out to the whole world. It
+validates the `Host` header, and the route it is linking to never even reaches
+it: that rides in the URL fragment, which browsers do not send.
+
+The port is chosen by the OS (`listen(0)` on `127.0.0.1`, never `0.0.0.0`) and
+written to `gui-runtime.json` in the data directory alongside the GUI's pid, so
+the MCP server — a separate process — can find it. Readers treat that file as a
+hint and never as a fact: a crash leaves it behind, so the pid is checked with
+`process.kill(pid, 0)` before the port is believed, and it is re-read on every
+call rather than cached. An MCP server routinely outlives several GUI launches.
+
+The incoming URL is **parsed to a `Route` before anything acts on it**, never
+forwarded as a string, using the same grammar the hash router uses
+(`shared/routes.ts`). Comment bodies are agent-writable, so this parser will
+one day receive `gitwarren://review/../../../../etc/passwd`; anything it does not
+recognise degrades to the home screen. It is the same whitelist-not-filter
+reasoning as `main/attachment-protocol.ts`. Note that `gitwarren:` is registered
+twice over, for two unrelated mechanisms — an OS protocol handler and Chromium's
+`protocol.handle` for attachment images. They coexist because they answer to
+different hosts: `review` and `attachment`, each ignoring the other's.
 
 ### Who wrote what
 

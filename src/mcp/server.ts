@@ -27,6 +27,11 @@
  * between three participants rather than an undifferentiated pile of "AI".
  * The reasoning is in `identity.ts`.
  *
+ * Every review and comment payload also carries a `guiUrl`, so an agent can
+ * hand the user a clickable way into the app rather than telling them to go and
+ * find the review themselves. It is null when the GUI is not running, and the
+ * descriptions say so - see `gui-link.ts`.
+ *
  * One hard rule: stdout belongs to the protocol. Diagnostics go to stderr.
  */
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
@@ -35,11 +40,12 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { z, type ZodRawShape } from 'zod'
 import { closeDatabase } from '../core/db/client.js'
 import { getDatabasePath } from '../core/paths.js'
-import { commentsService } from '../core/services/comments.js'
+import { commentsService, type CommentLocation } from '../core/services/comments.js'
 import { repositoriesService } from '../core/services/repositories.js'
 import { reviewsService } from '../core/services/reviews.js'
 import { authorDisplayName, type CommentAuthor } from '../shared/actors.js'
 import { AppError } from '../shared/errors.js'
+import { GUI_URL_NOTE, guiLinker, type WithGuiUrl } from './gui-link.js'
 import { agentAuthor, getSessionId, getSessionLabel, setSessionLabel } from './identity.js'
 import {
   addRepositoryInputSchema,
@@ -143,6 +149,39 @@ function adoptLabel(input: { agentLabel?: string }): CommentAuthor {
   return currentAuthor()
 }
 
+/*
+ * Three shapes come back from the services and each needs a different lookup to
+ * become a link, so there are three wrappers rather than one clever one.
+ * `guiLinker()` is called per result, which reads the port file once - see
+ * `gui-link.ts` on why it is never cached longer than that.
+ */
+
+async function linkedReview<T extends { id: number }>(result: Promise<T>): Promise<WithGuiUrl<T>> {
+  const review = await result
+  return { ...review, guiUrl: guiLinker().review(review.id) }
+}
+
+async function linkedThread<T extends CommentLocation>(
+  result: Promise<T>
+): Promise<WithGuiUrl<T>> {
+  const thread = await result
+  return { ...thread, guiUrl: guiLinker().comment(thread) }
+}
+
+/**
+ * A message, linked through the thread that holds it. Editing and replying
+ * return the message alone, and a message does not know its own line.
+ */
+async function linkedComment<T extends { id: number }>(
+  result: Promise<T>
+): Promise<WithGuiUrl<T>> {
+  const comment = await result
+  return {
+    ...comment,
+    guiUrl: guiLinker().comment(commentsService.locate({ commentId: comment.id }))
+  }
+}
+
 server.registerTool(
   'list_repositories',
   {
@@ -218,11 +257,17 @@ server.registerTool(
       'List reviews, newest activity first. Filter with `repositoryId` and/or `status` ' +
       '("open" or "closed"); omit both to list every review across all tracked repositories. ' +
       'A review records the two refs being compared, not the commits they resolved to - ' +
-      'read the repository with git to see the actual changes.',
+      'read the repository with git to see the actual changes.' +
+      GUI_URL_NOTE,
     inputSchema: listReviewsInputSchema.shape,
     annotations: { readOnlyHint: true, openWorldHint: false }
   },
-  (input) => run(() => reviewsService.list(input))
+  (input) =>
+    run(async () => {
+      const links = guiLinker()
+      const reviews = await reviewsService.list(input)
+      return reviews.map((review) => ({ ...review, guiUrl: links.review(review.id) }))
+    })
 )
 
 server.registerTool(
@@ -231,11 +276,12 @@ server.registerTool(
     title: 'Get review',
     description:
       'Fetch one review by id, with the repository it belongs to attached (including the ' +
-      'repository path, so the changes can be inspected with git directly).',
+      'repository path, so the changes can be inspected with git directly).' +
+      GUI_URL_NOTE,
     inputSchema: getReviewInputSchema.shape,
     annotations: { readOnlyHint: true, openWorldHint: false }
   },
-  (input) => run(() => reviewsService.get(input))
+  (input) => run(() => linkedReview(reviewsService.get(input)))
 )
 
 server.registerTool(
@@ -248,11 +294,12 @@ server.registerTool(
       'diff is taken from their merge base, like a pull request. Both refs must exist and share ' +
       'history, or the call fails with INVALID_INPUT. `title` defaults to "<head> into <base>". ' +
       'If the head branch is checked out in a worktree, its uncommitted changes are part of the ' +
-      'review as well - a review can be opened on work that has never been committed.',
+      'review as well - a review can be opened on work that has never been committed.' +
+      GUI_URL_NOTE,
     inputSchema: createReviewInputSchema.shape,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false }
   },
-  (input) => run(() => reviewsService.create(input))
+  (input) => run(() => linkedReview(reviewsService.create(input)))
 )
 
 server.registerTool(
@@ -262,11 +309,12 @@ server.registerTool(
     description:
       'Change a review\'s title, description or endpoints, or set its `status` to "closed" or ' +
       '"open" again. Provide at least one field. New refs are validated exactly as they are on ' +
-      'creation.',
+      'creation.' +
+      GUI_URL_NOTE,
     inputSchema: updateReviewInputSchema.shape,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true }
   },
-  (input) => run(() => reviewsService.update(input))
+  (input) => run(() => linkedReview(reviewsService.update(input)))
 )
 
 server.registerTool(
@@ -331,11 +379,17 @@ server.registerTool(
       'Each one is resolved in the comment\'s `attachments` array, where `path` is a real file ' +
       'on disk: read it with your own image tools. `alt` is the description whoever attached it ' +
       'wrote, and is worth reading first - it is often enough on its own, and it is all you get ' +
-      'if you cannot see images.',
+      'if you cannot see images.' +
+      GUI_URL_NOTE,
     inputSchema: listCommentsInputSchema.shape,
     annotations: { readOnlyHint: true, openWorldHint: false }
   },
-  (input) => run(() => commentsService.listAnchored(input))
+  (input) =>
+    run(async () => {
+      const links = guiLinker()
+      const threads = await commentsService.listAnchored(input)
+      return threads.map((thread) => ({ ...thread, guiUrl: links.comment(thread) }))
+    })
 )
 
 server.registerTool(
@@ -352,11 +406,12 @@ server.registerTool(
       'The line is not required to be part of the diff: the comment is kept either way, and the ' +
       'returned thread says whether it could be anchored to a visible line. ' +
       'Comments are attributed automatically from the MCP handshake - see `agent_identity`.\n\n' +
-      ATTACHMENT_GUIDANCE,
+      ATTACHMENT_GUIDANCE +
+      GUI_URL_NOTE,
     inputSchema: withLabel(createThreadInputSchema.shape),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false }
   },
-  (input) => run(() => commentsService.createThread(input, adoptLabel(input)))
+  (input) => run(() => linkedThread(commentsService.createThread(input, adoptLabel(input))))
 )
 
 server.registerTool(
@@ -367,11 +422,12 @@ server.registerTool(
       'Add a message to an existing thread. Use this rather than opening a new thread when ' +
       'responding to something someone already raised, so the discussion stays in one place. ' +
       'Thread ids come from `list_review_comments`.\n\n' +
-      ATTACHMENT_GUIDANCE,
+      ATTACHMENT_GUIDANCE +
+      GUI_URL_NOTE,
     inputSchema: withLabel(replyToThreadInputSchema.shape),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false }
   },
-  (input) => run(() => commentsService.reply(input, adoptLabel(input)))
+  (input) => run(() => linkedComment(commentsService.reply(input, adoptLabel(input))))
 )
 
 server.registerTool(
@@ -381,11 +437,12 @@ server.registerTool(
     description:
       'Mark a discussion settled, or reopen one. Set `resolved` to true once the point has been ' +
       'addressed, false to bring it back. Resolving records who did it; it never deletes the ' +
-      'messages, which stay readable.',
+      'messages, which stay readable.' +
+      GUI_URL_NOTE,
     inputSchema: setThreadResolvedInputSchema.shape,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true }
   },
-  (input) => run(() => commentsService.setResolved(input, currentAuthor()))
+  (input) => run(() => linkedThread(commentsService.setResolved(input, currentAuthor())))
 )
 
 server.registerTool(
@@ -394,11 +451,12 @@ server.registerTool(
     title: 'Edit a comment',
     description:
       'Replace the text of one message. An agent can only edit messages written by its own tool - ' +
-      'correcting yourself is expected, rewriting someone else\'s review is not.',
+      'correcting yourself is expected, rewriting someone else\'s review is not.' +
+      GUI_URL_NOTE,
     inputSchema: updateCommentInputSchema.shape,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true }
   },
-  (input) => run(() => commentsService.update(input, currentAuthor()))
+  (input) => run(() => linkedComment(commentsService.update(input, currentAuthor())))
 )
 
 server.registerTool(

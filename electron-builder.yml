@@ -31,6 +31,17 @@ extraResources:
 # No-ops on Windows and Linux, and stands aside once CSC_LINK is set.
 afterPack: ./scripts/adhoc-sign.mjs
 
+# Registers the gitwarren:// scheme with the OS, which is what lets a link in
+# a browser raise the app. Each platform takes it from here in its own way: an
+# Info.plist CFBundleURLTypes entry on macOS, registry keys written by the NSIS
+# installer on Windows, a MimeType line in the .desktop file on Linux. The app
+# also claims the scheme at runtime (see src/main/deep-link.ts), which is what
+# makes deep links work in development, where nothing has been installed.
+protocols:
+  - name: GitWarren
+    schemes:
+      - gitwarren
+
 win:
   target:
     - target: nsis
