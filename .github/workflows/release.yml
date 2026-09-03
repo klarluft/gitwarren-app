@@ -157,11 +157,18 @@ jobs:
             exit 1
           fi
 
-          if ! openssl pkcs12 -in "$RUNNER_TEMP/csc.p12" -passin env:CSC_KEY_PASSWORD \
-               -noout 2>/dev/null; then
+          # /usr/bin/openssl, not whatever is on PATH: Keychain Access encrypts
+          # .p12 files with 40-bit RC2, which OpenSSL 3 refuses unless its
+          # legacy provider is loaded, reporting it indistinguishably from a
+          # wrong password. macOS ships LibreSSL here, which reads them and
+          # still rejects a genuinely wrong password.
+          if ! err=$(/usr/bin/openssl pkcs12 -in "$RUNNER_TEMP/csc.p12" \
+                       -passin env:CSC_KEY_PASSWORD -noout 2>&1); then
             echo "::error::CSC_LINK and CSC_KEY_PASSWORD disagree. Either the password" \
                  "is wrong, carries a trailing newline (use printf '%s', not echo), or" \
-                 "the base64 was truncated when the secret was set."
+                 "the base64 was truncated when the secret was set." \
+                 "Set both with scripts/set-signing-secrets.sh, which stores them as a" \
+                 "verified pair. openssl said: $err"
             exit 1
           fi
 

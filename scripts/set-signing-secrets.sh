@@ -9,20 +9,32 @@ set -u
 P12="${1:?usage: set-signing-secrets.sh <path to .p12>}"
 [ -f "$P12" ] || { echo "No such file: $P12" >&2; exit 1; }
 
+# Keychain Access writes .p12 files encrypted with 40-bit RC2, which OpenSSL 3
+# moved to its legacy provider and so refuses by default:
+#
+#   Algorithm (RC2-40-CBC : 0), Properties () — unsupported
+#
+# It surfaces as `Error outputting keys and certificates`, indistinguishable
+# from a wrong password. macOS ships LibreSSL at /usr/bin/openssl, which reads
+# these files and still rejects a genuinely wrong password, so prefer it over
+# whatever a Homebrew or conda install has put earlier on PATH.
+OPENSSL=/usr/bin/openssl
+[ -x "$OPENSSL" ] || OPENSSL=openssl
+
 printf 'Password for %s: ' "$(basename "$P12")"
 read -rs PW
 echo
 
 # env: reads the environment, so PW has to be exported, not just set.
 export PW
-if ! openssl pkcs12 -in "$P12" -passin env:PW -noout 2>/dev/null; then
+if ! "$OPENSSL" pkcs12 -in "$P12" -passin env:PW -noout 2>/dev/null; then
   echo "✗ That password does not open this .p12. Nothing was changed." >&2
   exit 1
 fi
 echo "✓ Password opens the certificate (${#PW} characters)."
 
 # The private key must be in there, or CI signs nothing.
-if ! openssl pkcs12 -in "$P12" -passin env:PW -nocerts -nodes 2>/dev/null |
+if ! "$OPENSSL" pkcs12 -in "$P12" -passin env:PW -nocerts -nodes 2>/dev/null |
      grep -q 'PRIVATE KEY'; then
   echo "✗ No private key in this .p12 — re-export from 'My Certificates'." >&2
   exit 1
