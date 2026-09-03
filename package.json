@@ -1,7 +1,7 @@
 {
   "name": "gitwarren",
   "productName": "GitWarren",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Desktop app for doing local-only code reviews",
   "author": {
     "name": "Klarluft B.V.",
