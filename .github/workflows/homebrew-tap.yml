@@ -1,0 +1,41 @@
+name: Homebrew tap
+
+# Tells klarluft/homebrew-tap that a release has been published, so its cask
+# can move to the new version and checksums straight away. The tap's own
+# workflow does the actual work (scripts/bump.sh over there); this one only
+# rings the bell.
+#
+# `release: published` for the same reason deploy-site.yml uses it: the
+# release starts life as a draft, and only publishing makes its assets
+# visible to the API the bump reads from.
+#
+# Needs HOMEBREW_TAP_TOKEN — a fine-grained PAT for the klarluft/homebrew-tap
+# repository with *Contents: read and write* (a repository_dispatch counts as
+# a write to contents). Without it the job is skipped rather than failed: the
+# tap also polls on a schedule and catches the release within a few hours.
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  notify:
+    name: Ask the tap to bump
+    runs-on: ubuntu-latest
+    env:
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+    steps:
+      - name: Send repository_dispatch
+        if: env.HOMEBREW_TAP_TOKEN != ''
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          gh api repos/klarluft/homebrew-tap/dispatches \
+            --method POST \
+            --field event_type=release-published \
+            --field "client_payload[tag]=$TAG"
+
+      - name: Explain the skip
+        if: env.HOMEBREW_TAP_TOKEN == ''
+        run: echo "HOMEBREW_TAP_TOKEN is not set; the tap will pick this release up on its schedule."
