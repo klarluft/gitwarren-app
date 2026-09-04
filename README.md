@@ -3,7 +3,11 @@
 # GitWarren
 
 **[gitwarren.com](https://gitwarren.com)** — the official site, with downloads for
-macOS, Windows and Linux.
+macOS, Windows and Linux. On macOS there is also a Homebrew cask:
+
+```bash
+brew install --cask klarluft/tap/gitwarren
+```
 
 A cross-platform desktop app for doing local code reviews of your own git
 repositories. Single user, single machine, no server, no account.
@@ -889,6 +893,14 @@ git push --follow-tags
 installers, and uploads them plus the manifests to a GitHub release for the
 current tag. The release is created as a **draft** — publish it in the GitHub UI
 when you are ready, and that is the moment clients begin to see the update.
+
+Publishing also fans out to two other places, both on the `release: published`
+event: `deploy-site.yml` rebuilds gitwarren.com so its download buttons point at
+the new assets, and `homebrew-tap.yml` asks
+[klarluft/homebrew-tap](https://github.com/klarluft/homebrew-tap) to move its
+cask to the new version and checksums. The tap needs a `HOMEBREW_TAP_TOKEN`
+secret for that nudge to be immediate; without one it still catches the
+release on its own schedule within a few hours.
 
 To build without publishing (for local testing):
 
