@@ -14,6 +14,7 @@ import { errorMessage } from '@/lib/errors'
 import { absoluteTime, plural, relativeTime } from '@/lib/format'
 import { CompareErrorCard, NoWorktreeNotice, WorkingTreeBanner } from './compare-notices'
 import { useReviewCommits } from './use-reviews'
+import { isSelfReview } from '@shared/schemas'
 import type { GitCommit } from '@shared/git'
 import type { Review } from '@shared/schemas'
 
@@ -43,6 +44,7 @@ export function ReviewCommitsTab({ review }: { review: Review }) {
   }
 
   const { commits, workingTree } = data
+  const selfReview = isSelfReview(review)
 
   return (
     <div className="flex flex-col gap-3">
@@ -70,11 +72,15 @@ export function ReviewCommitsTab({ review }: { review: Review }) {
           <div className="rounded-full bg-muted p-3 text-muted-foreground">
             <GitCommitHorizontal className="size-6" />
           </div>
-          <h3 className="font-medium">No commits yet</h3>
+          <h3 className="font-medium">{selfReview ? 'Nothing committed here' : 'No commits yet'}</h3>
           <p className="mx-auto max-w-sm text-sm text-muted-foreground">
             {workingTree?.isDirty
               ? 'Everything in this review is still uncommitted. The files changed tab has it.'
-              : `${review.headRef} has nothing that ${review.baseRef} does not already have.`}
+              : selfReview
+                ? // A ref against itself never has commits between its endpoints,
+                  // so "no commits" is the permanent, correct state of this tab.
+                  `This review is ${review.headRef} against itself, so it holds only uncommitted work — and there is none right now.`
+                : `${review.headRef} has nothing that ${review.baseRef} does not already have.`}
           </p>
         </Card>
       ) : (

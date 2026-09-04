@@ -50,6 +50,7 @@ import { useEditors, useReviewDiff } from './use-reviews'
 import { findAnchorFile, isInlineAnchor, resolveAnchor } from '@shared/comment-anchors'
 import { threadSnippet } from '@shared/comment-snippets'
 import type { FileDiff as FileDiffData } from '@shared/git'
+import { isSelfReview } from '@shared/schemas'
 import type { CommentThread, Review } from '@shared/schemas'
 
 /**
@@ -411,6 +412,7 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
   }
 
   const hasWorktree = data.workingTree !== null
+  const selfReview = isSelfReview(review)
 
   return (
     <div className="flex flex-col gap-3">
@@ -465,9 +467,13 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
           <label
             className="flex items-center gap-2 text-xs text-muted-foreground"
             title={
-              hasWorktree
-                ? 'Fold the head worktree’s staged, unstaged and untracked changes into the diff'
-                : `No worktree has ${review.headRef} checked out, so there is nothing uncommitted to include`
+              !hasWorktree
+                ? `No worktree has ${review.headRef} checked out, so there is nothing uncommitted to include`
+                : selfReview
+                  ? // Turning it off on a self-review leaves an empty diff; the
+                    // switch stays usable, but say so rather than let it look broken.
+                    'This review is uncommitted work only — turning this off leaves nothing to show'
+                  : 'Fold the head worktree’s staged, unstaged and untracked changes into the diff'
             }
           >
             <Switch
@@ -547,10 +553,26 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
             <FileDiff className="size-6" />
           </div>
           <h3 className="font-medium">No changes</h3>
-          <p className="mx-auto max-w-sm text-sm text-muted-foreground">
-            <span className="font-mono">{review.headRef}</span> has nothing that{' '}
-            <span className="font-mono">{review.baseRef}</span> does not already have.
-          </p>
+          {selfReview ? (
+            <p className="mx-auto max-w-sm text-sm text-muted-foreground">
+              {includeUncommitted ? (
+                <>
+                  Nothing is uncommitted on <span className="font-mono">{review.headRef}</span>{' '}
+                  right now. Edit a file and refresh — it will show up here.
+                </>
+              ) : (
+                <>
+                  This review is <span className="font-mono">{review.headRef}</span> against itself,
+                  so it holds only uncommitted work. Turn the switch back on to see it.
+                </>
+              )}
+            </p>
+          ) : (
+            <p className="mx-auto max-w-sm text-sm text-muted-foreground">
+              <span className="font-mono">{review.headRef}</span> has nothing that{' '}
+              <span className="font-mono">{review.baseRef}</span> does not already have.
+            </p>
+          )}
         </Card>
       ) : (
         // `items-start` so the tree can stick to the top of the viewport while
