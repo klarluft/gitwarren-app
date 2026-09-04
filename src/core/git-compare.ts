@@ -16,6 +16,11 @@
  * patch. Untracked files are then synthesised on top (see `diff-parser.ts`),
  * because staging them into a scratch index would mean writing to a repository
  * this app promises only to read.
+ *
+ * A consequence worth naming: when both endpoints are the *same* ref the merge
+ * base is that ref's own tip, so the diff reduces to exactly the uncommitted
+ * work in its worktree. Nothing here special-cases it - it falls out of the
+ * rules above - and reviews are allowed to be shaped that way on purpose.
  */
 import { readFile, stat } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'

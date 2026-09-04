@@ -294,7 +294,10 @@ server.registerTool(
       'diff is taken from their merge base, like a pull request. Both refs must exist and share ' +
       'history, or the call fails with INVALID_INPUT. `title` defaults to "<head> into <base>". ' +
       'If the head branch is checked out in a worktree, its uncommitted changes are part of the ' +
-      'review as well - a review can be opened on work that has never been committed.' +
+      'review as well - a review can be opened on work that has never been committed. Passing ' +
+      'the same ref as both endpoints is allowed and does exactly that: the review then holds ' +
+      'only the uncommitted work on that ref, and its title defaults to "Uncommitted work on ' +
+      '<ref>".' +
       GUI_URL_NOTE,
     inputSchema: createReviewInputSchema.shape,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false }

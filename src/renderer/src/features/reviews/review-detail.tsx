@@ -39,6 +39,7 @@ import { ReviewFilesTab } from './review-files-tab'
 import { ReviewFormDialog } from './review-form-dialog'
 import { RemoveReviewDialog } from './remove-review-dialog'
 import { useReview, useReviewCommits, useReviewMutations } from './use-reviews'
+import { isSelfReview } from '@shared/schemas'
 import type { CompareEndpoint } from '@shared/git'
 import type { Review } from '@shared/schemas'
 
@@ -178,6 +179,7 @@ export function ReviewDetail({ reviewId, tab, focus }: ReviewDetailProps) {
 
   const workingTree = commits.data?.workingTree ?? null
   const isOpen = review.status === 'open'
+  const selfReview = isSelfReview(review)
   const unresolvedThreads = threads.filter((thread) => thread.resolvedAt === null).length
 
   return (
@@ -206,9 +208,16 @@ export function ReviewDetail({ reviewId, tab, focus }: ReviewDetailProps) {
             </div>
 
             <p className="mt-1.5 flex flex-wrap items-center gap-1.5 font-mono text-xs text-muted-foreground">
-              <span className="rounded bg-muted px-1.5 py-0.5">{review.baseRef}</span>
-              <UpstreamDrift endpoint={commits.data?.base} role="base" />
-              <ArrowRight className="size-3" />
+              {/* A ref against itself is one endpoint, not two: "main → main"
+                  reads like a mistake, when it is a review of what has not been
+                  committed on main yet. */}
+              {!selfReview && (
+                <>
+                  <span className="rounded bg-muted px-1.5 py-0.5">{review.baseRef}</span>
+                  <UpstreamDrift endpoint={commits.data?.base} role="base" />
+                  <ArrowRight className="size-3" />
+                </>
+              )}
               <span className="rounded bg-muted px-1.5 py-0.5">{review.headRef}</span>
               <UpstreamDrift endpoint={commits.data?.head} role="head" />
               {workingTree?.isDirty && (

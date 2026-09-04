@@ -124,10 +124,58 @@ test('creating a review against a ref that does not exist is a field error', asy
   assert.ok(error.fieldErrors?.headRef)
 })
 
-test('a ref cannot be compared against itself', async () => {
-  await expectError('INVALID_INPUT', () =>
-    reviewsService.create({ repositoryId, baseRef: 'main', headRef: 'main' })
+test('a ref compared against itself reviews the uncommitted work on it', async () => {
+  const review = await reviewsService.create({
+    repositoryId,
+    baseRef: 'feature',
+    headRef: 'feature'
+  })
+  assert.equal(review.title, 'Uncommitted work on feature')
+
+  const diff = await reviewsService.diff({ id: review.id, includeUncommitted: true })
+  assert.equal(diff.error, null)
+  assert.equal(diff.includedUncommitted, true)
+
+  // The merge base of a ref with itself is its own tip, so nothing that has
+  // been committed shows up - b.txt and the committed half of a.txt are gone,
+  // and what is left is exactly what has not been committed yet.
+  const paths = diff.files.map((file) => file.path).sort()
+  assert.deepEqual(paths, ['a.txt', 'staged.txt', 'untracked.txt'])
+  assert.ok(diff.files.every((file) => file.hasUncommittedChanges))
+
+  const a = diff.files.find((file) => file.path === 'a.txt')
+  assert.equal(a?.additions, 1)
+  assert.ok(
+    a?.hunks.some((hunk) =>
+      hunk.lines.some((line) => line.type === 'insert' && line.content.includes('uncommitted'))
+    )
   )
+
+  // Nothing is committed between the two endpoints, by definition.
+  const commits = await reviewsService.commits({ id: review.id })
+  assert.equal(commits.error, null)
+  assert.deepEqual(commits.commits, [])
+  assert.equal(commits.workingTree?.isDirty, true)
+})
+
+test('a self-review with uncommitted work excluded is empty', async () => {
+  const review = await reviewsService.create({
+    repositoryId,
+    baseRef: 'feature',
+    headRef: 'feature'
+  })
+
+  const diff = await reviewsService.diff({ id: review.id, includeUncommitted: false })
+  assert.equal(diff.error, null)
+  assert.deepEqual(diff.files, [])
+})
+
+test('an existing review can be repointed at a single ref', async () => {
+  const id = await createReview()
+  const updated = await reviewsService.update({ id, baseRef: 'feature' })
+
+  assert.equal(updated.baseRef, 'feature')
+  assert.equal(updated.headRef, 'feature')
 })
 
 test('the commits tab lists what head added, and finds the uncommitted work', async () => {

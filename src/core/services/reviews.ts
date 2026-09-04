@@ -28,6 +28,7 @@ import { AppError } from '../../shared/errors.js'
 import { parseWithSchema as parse } from '../../shared/validation.js'
 import {
   createReviewInputSchema,
+  defaultReviewTitle,
   getReviewInputSchema,
   listReviewsInputSchema,
   removeReviewInputSchema,
@@ -154,7 +155,7 @@ export const reviewsService = {
       .insert(reviews)
       .values({
         repositoryId,
-        title: title ?? `${headRef} into ${baseRef}`,
+        title: title ?? defaultReviewTitle(baseRef, headRef),
         description: description ?? '',
         baseRef,
         headRef,
@@ -179,11 +180,6 @@ export const reviewsService = {
 
     const nextBase = baseRef ?? current.baseRef
     const nextHead = headRef ?? current.headRef
-    if (nextBase === nextHead) {
-      throw new AppError('INVALID_INPUT', 'Pick two different refs.', {
-        headRef: ['Pick two different refs - a ref compared against itself is empty.']
-      })
-    }
     if (baseRef !== undefined || headRef !== undefined) {
       await assertComparable(requireRepository(current.repositoryId).path, nextBase, nextHead)
     }

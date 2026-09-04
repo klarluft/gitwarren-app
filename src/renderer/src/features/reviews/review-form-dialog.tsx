@@ -7,7 +7,10 @@
  *
  * The endpoints default to "the trunk, and whatever you are working on" -
  * `defaultBranch` into `currentBranch` - which is the review the user almost
- * always wants and saves them two menu visits.
+ * always wants and saves them two menu visits. When those are the same branch
+ * that default stands: a ref against itself is a review of the uncommitted work
+ * on it, which is exactly what someone sitting on the trunk with a dirty tree
+ * is after.
  */
 import { useState, type FormEvent } from 'react'
 import { ArrowRight, CircleDot, Loader2 } from 'lucide-react'
@@ -27,7 +30,12 @@ import { Textarea } from '@/components/ui/textarea'
 import { errorMessage, firstFieldError } from '@/lib/errors'
 import { RefSelect } from './ref-select'
 import { useRepositoryRefs, useReviewMutations } from './use-reviews'
-import { createReviewInputSchema, updateReviewInputSchema } from '@shared/schemas'
+import {
+  createReviewInputSchema,
+  defaultReviewTitle,
+  isSelfReview,
+  updateReviewInputSchema
+} from '@shared/schemas'
 import { parseWithSchema } from '@shared/validation'
 import type { GitRef } from '@shared/git'
 import type { Review } from '@shared/schemas'
@@ -87,16 +95,11 @@ function ReviewForm({ repositoryId, review, onDone, onCreated }: ReviewFormProps
   const [error, setError] = useState<unknown>(null)
 
   const base = baseRef ?? refs?.defaultBranch ?? ''
-  const head =
-    headRef ??
-    // Don't default head to the same ref as base - that review is empty by
-    // definition, and the form would open already invalid.
-    (refs?.currentBranch && refs.currentBranch !== (refs.defaultBranch ?? '')
-      ? refs.currentBranch
-      : '')
+  const head = headRef ?? refs?.currentBranch ?? ''
 
   const availableRefs: GitRef[] = refs?.refs ?? []
   const headDetails = availableRefs.find((ref) => ref.name === head)
+  const selfReview = base !== '' && isSelfReview({ baseRef: base, headRef: head })
 
   async function submit(event: FormEvent): Promise<void> {
     event.preventDefault()
@@ -156,7 +159,8 @@ function ReviewForm({ repositoryId, review, onDone, onCreated }: ReviewFormProps
       <DialogHeader>
         <DialogTitle>{isEditing ? 'Edit review' : 'New review'}</DialogTitle>
         <DialogDescription>
-          Changes are compared from where the two refs diverged, the way a pull request is.
+          Changes are compared from where the two refs diverged, the way a pull request is. Pick
+          the same ref twice to review only what is uncommitted on it.
         </DialogDescription>
       </DialogHeader>
 
@@ -207,7 +211,38 @@ function ReviewForm({ repositoryId, review, onDone, onCreated }: ReviewFormProps
               <FieldError>{baseError ?? headError}</FieldError>
             )}
 
-            {headDetails?.hasUncommittedChanges && (
+            {/* A self-review has nothing committed in it, so what it holds is
+                worth stating before the user creates one - especially when the
+                answer right now is "nothing". */}
+            {selfReview && (
+              <p
+                className={`flex items-start gap-2 rounded-md px-3 py-2 text-xs ${
+                  headDetails?.hasUncommittedChanges
+                    ? 'bg-warning/10 text-warning'
+                    : 'bg-muted/60 text-muted-foreground'
+                }`}
+              >
+                <CircleDot className="mt-0.5 size-3.5 shrink-0" />
+                {headDetails?.hasUncommittedChanges ? (
+                  <span>
+                    This review is <span className="font-mono">{head}</span> against itself, so it
+                    holds only the uncommitted work in{' '}
+                    <span data-selectable className="font-mono">
+                      {headDetails.checkedOutAt}
+                    </span>
+                    .
+                  </span>
+                ) : (
+                  <span>
+                    This review is <span className="font-mono">{head}</span> against itself, so it
+                    holds only uncommitted work. There is none right now — it will fill in as you
+                    edit.
+                  </span>
+                )}
+              </p>
+            )}
+
+            {!selfReview && headDetails?.hasUncommittedChanges && (
               <p className="flex items-start gap-2 rounded-md bg-warning/10 px-3 py-2 text-xs text-warning">
                 <CircleDot className="mt-0.5 size-3.5 shrink-0" />
                 <span>
@@ -226,7 +261,7 @@ function ReviewForm({ repositoryId, review, onDone, onCreated }: ReviewFormProps
                 id="review-title"
                 value={title}
                 onChange={(event) => setTitle(event.target.value)}
-                placeholder={base && head ? `${head} into ${base}` : 'Describe the change'}
+                placeholder={base && head ? defaultReviewTitle(base, head) : 'Describe the change'}
                 data-invalid={titleError ? '' : undefined}
                 autoComplete="off"
               />

@@ -16,6 +16,7 @@ import { navigate } from '@/lib/router'
 import { cn } from '@/lib/utils'
 import { ReviewFormDialog } from './review-form-dialog'
 import { useReviews } from './use-reviews'
+import { isSelfReview } from '@shared/schemas'
 import type { Review, ReviewStatus } from '@shared/schemas'
 
 type Filter = 'all' | ReviewStatus
@@ -185,8 +186,13 @@ function ReviewCard({ review }: { review: Review }) {
           {review.status === 'closed' && <Badge variant="outline">Closed</Badge>}
         </div>
         <p className="mt-1 flex items-center gap-1.5 truncate font-mono text-xs text-muted-foreground">
-          <span className="truncate">{review.baseRef}</span>
-          <ArrowRight className="size-3 shrink-0" />
+          {/* One endpoint, not two, when the review is a ref against itself. */}
+          {!isSelfReview(review) && (
+            <>
+              <span className="truncate">{review.baseRef}</span>
+              <ArrowRight className="size-3 shrink-0" />
+            </>
+          )}
           <span className="truncate">{review.headRef}</span>
         </p>
       </div>

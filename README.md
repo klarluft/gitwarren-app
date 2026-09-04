@@ -213,6 +213,15 @@ diverged — rather than the literal difference between the endpoints. So commit
 that landed on `main` after you branched do not show up as reversals in your
 review. The *commits* tab lists the same range, `base..head`.
 
+### A ref against itself
+
+The two endpoints may be the same ref. That is not an empty review: the merge
+base of a ref with itself is its own tip, so the diff is exactly what the
+worktree holds that has not been committed — the review you want when you just
+wrote the code and want a second pair of eyes before it becomes a commit. Such a
+review has no commits by definition, is titled *Uncommitted work on `<ref>`* by
+default, and is drawn with one endpoint rather than an arrow between two.
+
 ### Finding uncommitted work
 
 This is the part that needs care, because **the repository row points at one

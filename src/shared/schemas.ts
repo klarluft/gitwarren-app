@@ -135,22 +135,41 @@ export const listReviewsInputSchema = z.object({
   status: reviewStatusSchema.optional()
 })
 
-export const createReviewInputSchema = z
-  .object({
-    repositoryId: repositoryIdSchema,
-    /** Defaults to "<head> into <base>", the way a repository name defaults to
-     *  its folder name. */
-    title: z.string().trim().min(1, 'Title cannot be empty.').max(MAX_TITLE_LENGTH).optional(),
-    description: z.string().max(MAX_DESCRIPTION_LENGTH).optional(),
-    /** What the changes are measured against - usually the trunk. */
-    baseRef: refSchema,
-    /** The branch under review. */
-    headRef: refSchema
-  })
-  .refine((value) => value.baseRef !== value.headRef, {
-    message: 'Pick two different refs - a ref compared against itself is empty.',
-    path: ['headRef']
-  })
+/**
+ * The two endpoints may be the *same* ref. That review is not empty: it holds
+ * whatever is uncommitted in the worktree that has the ref checked out, which
+ * is the state a reviewer most often wants a second pair of eyes on before it
+ * becomes a commit. See `isSelfReview`.
+ */
+export const createReviewInputSchema = z.object({
+  repositoryId: repositoryIdSchema,
+  /** Defaults to "<head> into <base>", or "Uncommitted work on <ref>" when the
+   *  two endpoints are the same ref. */
+  title: z.string().trim().min(1, 'Title cannot be empty.').max(MAX_TITLE_LENGTH).optional(),
+  description: z.string().max(MAX_DESCRIPTION_LENGTH).optional(),
+  /** What the changes are measured against - usually the trunk. */
+  baseRef: refSchema,
+  /** The branch under review. */
+  headRef: refSchema
+})
+
+/**
+ * Is this review a ref compared against itself?
+ *
+ * Shared rather than inlined because the answer changes copy in four places -
+ * the review header, the list row, both tabs' empty states - and they should
+ * never disagree about what the user is looking at.
+ */
+export function isSelfReview(refs: { baseRef: string; headRef: string }): boolean {
+  return refs.baseRef === refs.headRef
+}
+
+/** The title a review gets when the user did not write one. */
+export function defaultReviewTitle(baseRef: string, headRef: string): string {
+  return isSelfReview({ baseRef, headRef })
+    ? `Uncommitted work on ${headRef}`
+    : `${headRef} into ${baseRef}`
+}
 
 export const updateReviewInputSchema = z
   .object({
