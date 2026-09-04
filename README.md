@@ -52,6 +52,7 @@ Local AI agents get the same capabilities through an MCP server over stdio.
 - [Release process](#release-process)
 - [Auto-update](#auto-update)
 - [Code signing and notarization](#code-signing-and-notarization)
+- [Social preview](#social-preview)
 - [Known limitations](#known-limitations)
 - [Contributing](#contributing)
 - [License](#license)
@@ -1344,6 +1345,37 @@ Electron ships with, and macOS reports a bundle whose seal does not match as
 developer users know how to allow. Re-signing ad-hoc makes the signature
 self-consistent again, so the refusal is the honest one and the Privacy &
 Security override works.
+
+---
+
+## Social preview
+
+The card GitHub shows when this repository is unfurled — in Slack, on X, on
+LinkedIn, in iMessage — is `docs/social-preview.png`.
+
+It is **not** picked up from the repository automatically. GitHub has no API
+for it, so it is uploaded by hand, once, and then stays put:
+
+**Settings → General → Social preview → Edit → Upload an image.**
+
+GitHub asks for 1280×640 and rejects anything over 1 MB.
+
+To change it, edit the design in `scripts/build-social-preview.mjs` and
+re-render:
+
+```bash
+node scripts/build-social-preview.mjs
+```
+
+That writes every variant to `screenshots-out/` (gitignored) and copies the one
+named by `CHOSEN` to `docs/social-preview.png`. The upload is still manual.
+
+The script renders HTML in headless Chrome at 2× and downsamples, so the type
+is supersampled rather than aliased. The palette and the five vendored fonts in
+`scripts/social-preview/fonts/` are the site's, so the card and
+[gitwarren.com](https://gitwarren.com) stay the same brand. Note that the site
+builds its own Open Graph image separately, by cropping the hero screenshot —
+these two are unrelated and both need updating if the branding moves.
 
 ---
 
