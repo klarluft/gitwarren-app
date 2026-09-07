@@ -160,6 +160,62 @@ export interface FileContent {
 }
 
 /**
+ * Image formats a diff previews rather than writing off as "binary".
+ *
+ * Raster only, and deliberately so. SVG is text, so it already gets a real line
+ * diff, and rendering arbitrary agent-reachable markup as a document is a
+ * larger decision than showing a picture of a PNG.
+ */
+const IMAGE_MEDIA_TYPES: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  bmp: 'image/bmp',
+  ico: 'image/x-icon',
+  avif: 'image/avif'
+}
+
+/**
+ * The media type to preview a path as, or null when it is not an image this
+ * app will show. Decided from the extension, the way every diff viewer decides
+ * it: the layout has to be chosen before any bytes are asked for.
+ */
+export function imageMediaType(path: string): string | null {
+  const name = path.slice(path.lastIndexOf('/') + 1)
+  const dot = name.lastIndexOf('.')
+  if (dot <= 0) return null
+  return IMAGE_MEDIA_TYPES[name.slice(dot + 1).toLowerCase()] ?? null
+}
+
+/**
+ * One side's bytes of an image in a review, as a `data:` URL an `<img>` can
+ * take directly.
+ *
+ * A data URL rather than a URL into the `gitwarren:` scheme, because the
+ * alternative is a second way to read blobs out of a repository - one that
+ * would have to re-derive which review, which ref and which path from a string
+ * anything on the page could construct. The images people commit are small
+ * enough that sending them over the same review-scoped call as the diff is the
+ * cheaper trade.
+ */
+export interface FileImage {
+  path: string
+  side: DiffFileSide
+  /** Null whenever `error` is set, and only then. */
+  dataUrl: string | null
+  /** Bytes of the image itself, not of the base64 that carried it. */
+  byteSize: number
+  /** Where the bytes came from - the worktree on disk, or a committed blob. */
+  source: 'worktree' | 'commit' | null
+  error: string | null
+}
+
+/** Which end of the comparison a blob is being read from. */
+export type DiffFileSide = 'base' | 'head'
+
+/**
  * Where a local branch stands against the remote branch it tracks.
  *
  * Worth carrying because a review's endpoints are branch *names*, and a name

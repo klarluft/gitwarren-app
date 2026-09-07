@@ -29,14 +29,17 @@
  */
 import { readFile, stat } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
-import { canonicalise, isDirectory, runGit, runGitRaw } from './git-exec.js'
+import { canonicalise, isDirectory, runGit, runGitBinary, runGitRaw } from './git-exec.js'
 import { buildUntrackedFileDiff, parseUnifiedDiff } from './diff-parser.js'
 import { AppError } from '../shared/errors.js'
+import { imageMediaType } from '../shared/git.js'
 import type {
   CompareEndpoint,
   DiffChanges,
+  DiffFileSide,
   FileContent,
   FileDiff,
+  FileImage,
   GitCommit,
   GitRef,
   GitWorktree,
@@ -788,6 +791,119 @@ export async function readReviewFile(
 
   const { lines, truncated } = toLines(result.stdout)
   return { path: filePath, source: 'commit', lines, truncated, isBinary: false, error: null }
+}
+
+/**
+ * Past this an image is named but not shown. Well above anything a repository
+ * has business carrying, and low enough that base64 crossing IPC stays cheap.
+ */
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024
+
+function emptyImage(path: string, side: DiffFileSide, error: string): FileImage {
+  return { path, side, dataUrl: null, byteSize: 0, source: null, error }
+}
+
+function toImage(
+  path: string,
+  side: DiffFileSide,
+  source: 'worktree' | 'commit',
+  mediaType: string,
+  bytes: Buffer
+): FileImage {
+  if (bytes.byteLength === 0) return emptyImage(path, side, 'That file is empty.')
+  if (bytes.byteLength > MAX_IMAGE_BYTES) {
+    return emptyImage(path, side, 'This image is too large to preview.')
+  }
+  return {
+    path,
+    side,
+    dataUrl: `data:${mediaType};base64,${bytes.toString('base64')}`,
+    byteSize: bytes.byteLength,
+    source,
+    error: null
+  }
+}
+
+/**
+ * One side's bytes of an image in a review, for showing the picture instead of
+ * the words "binary file".
+ *
+ * The side is the caller's to choose, and so is the path: a renamed file is a
+ * different path on each end of the comparison, and the UI is the only place
+ * that knows which one it is asking about. Base is read at the merge base, for
+ * the same reason the diff is taken there - it is the version the head branch
+ * actually started from, not whatever the base branch has moved on to.
+ */
+export async function readReviewImage(
+  repositoryPath: string,
+  baseRef: string,
+  headRef: string,
+  filePath: string,
+  side: DiffFileSide,
+  options: ReadDiffOptions
+): Promise<FileImage> {
+  if (!isSafeRelativePath(filePath)) {
+    return emptyImage(filePath, side, 'That is not a path inside this repository.')
+  }
+
+  const mediaType = imageMediaType(filePath)
+  if (mediaType === null) {
+    return emptyImage(filePath, side, 'That file is not an image this app can show.')
+  }
+
+  const compare = await resolveCompare(repositoryPath, baseRef, headRef)
+  if (compare.error) return emptyImage(filePath, side, compare.error)
+
+  const changes = effectiveChanges(options.changes, compare)
+
+  // Same rule as the diff and as the text read: unless the patch is
+  // committed-only, its head side *is* the worktree, so an image edited but not
+  // committed has to come off disk or the preview would show the old picture
+  // next to a diff that says it changed.
+  const worktree = side === 'head' && changes !== 'committed' ? compare.headWorktree : null
+
+  if (worktree) {
+    const absolute = join(worktree.path, filePath)
+    try {
+      const info = await stat(absolute)
+      if (!info.isFile()) throw new Error('not a file')
+      if (info.size > MAX_IMAGE_BYTES) {
+        return emptyImage(filePath, side, 'This image is too large to preview.')
+      }
+      return toImage(filePath, side, 'worktree', mediaType, await readFile(absolute))
+    } catch {
+      // Not on disk - deleted in the worktree, or never written there. The
+      // committed blob below is still the truth for the committed part.
+    }
+  }
+
+  // What "before" means follows the diff exactly: the merge base for a patch
+  // about the branch, the head commit for one about the working tree only.
+  // Reading the wrong one would put a picture on screen that no line of the
+  // diff claims changed.
+  const sha =
+    side === 'head' || changes === 'uncommitted' ? compare.head.sha : compare.mergeBase
+  if (!sha) {
+    return emptyImage(
+      filePath,
+      side,
+      side === 'base' && changes !== 'uncommitted'
+        ? 'These refs have no common history to compare against.'
+        : 'The head ref does not resolve to a commit.'
+    )
+  }
+
+  // Deliberately roomier than the preview ceiling: `execFile` *throws* when the
+  // output overruns `maxBuffer`, and an oversized image deserves the sentence
+  // saying so rather than a generic git failure. `toImage` applies the real cap.
+  const result = await runGitBinary(['cat-file', 'blob', `${sha}:${filePath}`], repositoryPath, {
+    maxBuffer: MAX_IMAGE_BYTES * 2
+  })
+  if (result.code !== 0) {
+    return emptyImage(filePath, side, result.stderr.trim() || 'Could not read that file from git.')
+  }
+
+  return toImage(filePath, side, 'commit', mediaType, result.stdout)
 }
 
 /**

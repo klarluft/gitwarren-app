@@ -39,6 +39,13 @@ export const CACHE_KEYS = {
    */
   reviewFile: (reviewId: number, path: string, changes: DiffChanges) =>
     `review-file:${reviewId}:${changes}:${path}`,
+  /**
+   * One side of an image preview, keyed by the same setting for the same
+   * reason: which version of the picture is "before" depends on what the diff
+   * is made of.
+   */
+  reviewImage: (reviewId: number, path: string, side: string, changes: DiffChanges) =>
+    `review-image:${reviewId}:${changes}:${side}:${path}`,
   /** Installed code editors. Probed once per run; see `main/editors.ts`. */
   editors: 'editors',
   /**
@@ -64,6 +71,7 @@ export const CACHE_PREFIXES = {
   reviewCommits: 'review-commits:',
   reviewDiff: 'review-diff:',
   reviewFile: 'review-file:',
+  reviewImage: 'review-image:',
   reviewComments: 'review-comments:',
   reviewedFiles: 'review-reviewed:'
 } as const

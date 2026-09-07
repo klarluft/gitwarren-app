@@ -116,6 +116,52 @@ function stripPrefix(value: string): string {
   return path.replace(/^[ab]\//, '')
 }
 
+/**
+ * The two paths on a `diff --git a/x b/x` line.
+ *
+ * Normally redundant - the `---`/`+++` pair says the same thing and says it
+ * unambiguously - but a binary file has no such pair, so for a changed image
+ * this line is the *only* place its name appears in the patch. Without this a
+ * PNG arrives with an empty path.
+ *
+ * The ambiguity is real: git does not quote a name merely because it contains
+ * a space, so `a/my file.png b/my file.png` has to be split by knowing that
+ * both halves are the same path. When they are not - a rename - the extended
+ * `rename from`/`rename to` headers follow and overwrite whatever is guessed
+ * here, so an imperfect split costs nothing.
+ */
+function pathsFromGitHeader(rest: string): { oldPath: string; path: string } | null {
+  if (rest.startsWith('"')) {
+    // Quoted, which git does for control characters and (with quotePath on)
+    // non-ASCII. Each side is quoted separately, so a `" "` splits them.
+    const separator = rest.indexOf('" "')
+    if (separator === -1) return null
+    return {
+      oldPath: stripPrefix(rest.slice(0, separator + 1)),
+      path: stripPrefix(rest.slice(separator + 2))
+    }
+  }
+
+  // `a/` + path + ` b/` + path, with the same path twice: its length is what
+  // is left once the two prefixes and the separating space are taken out.
+  const length = (rest.length - 5) / 2
+  if (Number.isInteger(length) && length > 0) {
+    const candidate = rest.slice(2, 2 + length)
+    if (rest.startsWith('a/') && rest.slice(2 + length, 5 + length) === ' b/') {
+      return { oldPath: stripPrefix(`a/${candidate}`), path: stripPrefix(`b/${candidate}`) }
+    }
+  }
+
+  // Different paths on the two sides. Ambiguous in general; the first ` b/`
+  // is the best guess, and a rename header will correct it in a moment.
+  const split = rest.indexOf(' b/')
+  if (split === -1) return null
+  return {
+    oldPath: stripPrefix(rest.slice(0, split)),
+    path: stripPrefix(rest.slice(split + 1))
+  }
+}
+
 export function parseUnifiedDiff(patch: string, options: ParseDiffOptions = {}): FileDiff[] {
   const maxLines = options.maxLinesPerFile ?? DEFAULT_MAX_LINES_PER_FILE
   if (!patch.trim()) return []
@@ -138,6 +184,14 @@ export function parseUnifiedDiff(patch: string, options: ParseDiffOptions = {}):
       finishFile()
       file = emptyFile()
       hunk = null
+
+      const header = pathsFromGitHeader(line.slice('diff --git '.length))
+      if (header) {
+        file.path = header.path
+        // Only when the two sides genuinely differ, so an ordinary edit keeps
+        // the null that means "this file has always been called this".
+        if (header.oldPath && header.oldPath !== header.path) file.oldPath = header.oldPath
+      }
       continue
     }
 

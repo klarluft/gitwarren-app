@@ -124,6 +124,53 @@ test('binary files are flagged rather than parsed', () => {
   const [file] = parseUnifiedDiff(patch)
   assert.equal(file?.isBinary, true)
   assert.equal(file?.hunks.length, 0)
+  // No `---`/`+++` pair is emitted for a binary file, so the name has to come
+  // off the `diff --git` line or the file arrives nameless.
+  assert.equal(file?.path, 'logo.png')
+  assert.equal(file?.oldPath, null)
+})
+
+test('a binary path with a space in it is split on the repeated half', () => {
+  const patch = [
+    'diff --git a/art/my logo.png b/art/my logo.png',
+    'index 1234567..89abcde 100644',
+    'Binary files a/art/my logo.png and b/art/my logo.png differ',
+    ''
+  ].join('\n')
+
+  const [file] = parseUnifiedDiff(patch)
+  assert.equal(file?.path, 'art/my logo.png')
+})
+
+test('a renamed binary file takes its paths from the rename headers', () => {
+  const patch = [
+    'diff --git a/old/logo.png b/new/logo.png',
+    'similarity index 74%',
+    'rename from old/logo.png',
+    'rename to new/logo.png',
+    'index 1234567..89abcde 100644',
+    'Binary files a/old/logo.png and b/new/logo.png differ',
+    ''
+  ].join('\n')
+
+  const [file] = parseUnifiedDiff(patch)
+  assert.equal(file?.status, 'renamed')
+  assert.equal(file?.oldPath, 'old/logo.png')
+  assert.equal(file?.path, 'new/logo.png')
+})
+
+test('a deleted binary file keeps the path it used to have', () => {
+  const patch = [
+    'diff --git a/docs/banner.png b/docs/banner.png',
+    'deleted file mode 100644',
+    'index 1234567..0000000',
+    'Binary files a/docs/banner.png and /dev/null differ',
+    ''
+  ].join('\n')
+
+  const [file] = parseUnifiedDiff(patch)
+  assert.equal(file?.status, 'deleted')
+  assert.equal(file?.path, 'docs/banner.png')
 })
 
 test('several files in one patch are kept apart', () => {

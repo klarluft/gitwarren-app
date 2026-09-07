@@ -21,6 +21,7 @@ import {
   readReviewCommits,
   readReviewDiff,
   readReviewFile,
+  readReviewImage,
   resolveCompare,
   resolveReviewFilePath
 } from '../git-compare.js'
@@ -35,11 +36,12 @@ import {
   reviewCommitsInputSchema,
   reviewDiffInputSchema,
   reviewFileInputSchema,
+  reviewImageInputSchema,
   updateReviewInputSchema,
   type Review,
   type ReviewWithRepository
 } from '../../shared/schemas.js'
-import type { FileContent, ReviewCommits, ReviewDiff } from '../../shared/git.js'
+import type { FileContent, FileImage, ReviewCommits, ReviewDiff } from '../../shared/git.js'
 
 function toReview(row: ReviewRow): Review {
   return {
@@ -240,6 +242,17 @@ export const reviewsService = {
     const row = requireReview(id)
     const repository = requireRepository(row.repositoryId)
     return readReviewFile(repository.path, row.baseRef, row.headRef, path, { changes })
+  },
+
+  /**
+   * One side's bytes of an image in this review, so the diff can show the
+   * picture instead of the words "binary file".
+   */
+  async image(input: unknown): Promise<FileImage> {
+    const { id, path, side, changes } = parse(reviewImageInputSchema, input)
+    const row = requireReview(id)
+    const repository = requireRepository(row.repositoryId)
+    return readReviewImage(repository.path, row.baseRef, row.headRef, path, side, { changes })
   },
 
   /**

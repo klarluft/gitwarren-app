@@ -223,6 +223,17 @@ export const reviewFileInputSchema = z.object({
 })
 
 /**
+ * One side's bytes of an image in a review. `side` is explicit because a
+ * preview shows both ends of the change at once, and `path` goes with it - a
+ * renamed file has a different name on each side.
+ */
+export const reviewImageInputSchema = reviewFileInputSchema.extend({
+  // Spelled out rather than reusing `diffSideSchema`, which is declared further
+  // down with the comment schemas and would not exist yet at this point.
+  side: z.enum(['base', 'head'])
+})
+
+/**
  * The same file, on its way to the user's editor. `editorId` comes from
  * `system.editors()`; an unknown one falls back to the first editor found
  * rather than failing, because the alternative is a dead button.
@@ -245,6 +256,7 @@ export type RemoveReviewInput = z.input<typeof removeReviewInputSchema>
 export type ReviewCommitsInput = z.input<typeof reviewCommitsInputSchema>
 export type ReviewDiffInput = z.input<typeof reviewDiffInputSchema>
 export type ReviewFileInput = z.input<typeof reviewFileInputSchema>
+export type ReviewImageInput = z.input<typeof reviewImageInputSchema>
 export type OpenReviewFileInput = z.input<typeof openReviewFileInputSchema>
 export type RepositoryRefsInput = z.input<typeof repositoryRefsInputSchema>
 

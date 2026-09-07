@@ -51,6 +51,7 @@ import { CommentComposer } from '../comments/comment-composer'
 import { CommentThreadCard } from '../comments/comment-thread-card'
 import { DiffSnippet } from './diff-snippet'
 import { FilePath } from './file-path'
+import { ImageDiff } from './image-diff'
 import { lineDomId } from './dom-ids'
 import { useReviewFile } from './use-reviews'
 import type { CommentMutations } from '../comments/use-comments'
@@ -64,6 +65,7 @@ import {
   type GapSegment
 } from '@shared/diff-gaps'
 import { errorMessage } from '@/lib/errors'
+import { imageMediaType } from '@shared/git'
 import type { DiffChanges, DiffHunk, DiffLine, FileChangeStatus, FileDiff } from '@shared/git'
 import type { CommentThread } from '@shared/schemas'
 
@@ -406,6 +408,13 @@ export function FileDiffCard({
   const unresolvedCount = threads.filter((thread) => thread.resolvedAt === null).length
 
   const hasBody = file.hunks.length > 0
+  /**
+   * A binary file git cannot diff, but a person can still see. The card then
+   * has something worth opening even though it has no lines - which is why the
+   * fold below asks `canToggle` rather than `hasBody`.
+   */
+  const showsImage = source !== undefined && file.isBinary && imageMediaType(file.path) !== null
+  const canToggle = hasBody || showsImage
   const totalLines = text.content && !text.content.isBinary ? text.content.lines.length : null
 
   const expandControls: ExpandControls = {
@@ -434,14 +443,14 @@ export function FileDiffCard({
           <button
             type="button"
             onClick={() => setExpanded(!expanded)}
-            disabled={!hasBody}
+            disabled={!canToggle}
             aria-expanded={expanded}
             className={cn(
               'flex min-w-0 items-center gap-2 px-3 py-2 text-left transition-colors',
-              hasBody ? 'hover:bg-muted/50' : 'cursor-default'
+              canToggle ? 'hover:bg-muted/50' : 'cursor-default'
             )}
           >
-            {hasBody ? (
+            {canToggle ? (
               expanded ? (
                 <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
               ) : (
@@ -636,7 +645,11 @@ export function FileDiffCard({
         </div>
       )}
 
-      {expanded && !hasBody && file.isBinary && (
+      {expanded && showsImage && source && (
+        <ImageDiff file={file} reviewId={source.reviewId} changes={source.changes} />
+      )}
+
+      {expanded && !hasBody && file.isBinary && !showsImage && (
         <p className="border-t border-border px-3 py-3 text-xs text-muted-foreground">
           Binary file — no text diff to show.
         </p>
