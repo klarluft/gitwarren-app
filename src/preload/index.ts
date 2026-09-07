@@ -40,8 +40,11 @@ import type {
   Review,
   ReviewCommitsInput,
   ReviewDiffInput,
+  ReviewedFile,
   ReviewFileInput,
   ReviewWithRepository,
+  ListReviewedFilesInput,
+  SetFileReviewedInput,
   SetThreadResolvedInput,
   UpdateCommentInput,
   UpdateRepositoryInput,
@@ -80,7 +83,11 @@ const api: GitWarrenApi = {
     diff: (input: ReviewDiffInput) => invoke<ReviewDiff>(IPC_CHANNELS.reviewsDiff, input),
     file: (input: ReviewFileInput) => invoke<FileContent>(IPC_CHANNELS.reviewsFile, input),
     openInEditor: (input: OpenReviewFileInput) =>
-      invoke<void>(IPC_CHANNELS.reviewsOpenInEditor, input)
+      invoke<void>(IPC_CHANNELS.reviewsOpenInEditor, input),
+    reviewedFiles: (input: ListReviewedFilesInput) =>
+      invoke<ReviewedFile[]>(IPC_CHANNELS.reviewsReviewedFiles, input),
+    setFileReviewed: (input: SetFileReviewedInput) =>
+      invoke<ReviewedFile | null>(IPC_CHANNELS.reviewsSetFileReviewed, input)
   },
   comments: {
     list: (input: ListCommentsInput) => invoke<CommentThread[]>(IPC_CHANNELS.commentsList, input),

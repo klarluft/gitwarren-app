@@ -15,6 +15,7 @@ import {
   AlertCircle,
   ArrowDown,
   ArrowUp,
+  CheckCheck,
   FileDiff,
   GitCompareArrows,
   PanelLeft,
@@ -46,7 +47,8 @@ import { CompareErrorCard, NoWorktreeNotice, WorkingTreeBanner } from './compare
 import { fileDomId, lineDomId } from './dom-ids'
 import { DiffSnippet } from './diff-snippet'
 import { DiffStat, FileDiffCard, type AnchoredThread } from './diff-view'
-import { useEditors, useReviewDiff } from './use-reviews'
+import { useEditors, useReviewDiff, useReviewedFiles } from './use-reviews'
+import { fileDiffDigest } from '@shared/diff-digest'
 import { findAnchorFile, isInlineAnchor, resolveAnchor } from '@shared/comment-anchors'
 import { threadSnippet } from '@shared/comment-snippets'
 import type { FileDiff as FileDiffData } from '@shared/git'
@@ -255,6 +257,56 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
   const paths = useMemo(() => (data?.files ?? []).map((file) => file.path), [data?.files])
   const activePath = useActiveFile(paths)
 
+  /**
+   * The fingerprint of every file *as it is being shown*, which is what a
+   * reviewed mark is checked against.
+   *
+   * Computed here rather than in the main process because the diff on screen is
+   * the only thing anyone can claim to have read - and flipping "include
+   * uncommitted" produces a different one. See `shared/diff-digest.ts`.
+   */
+  const digestByPath = useMemo(
+    () => new Map((data?.files ?? []).map((file) => [file.path, fileDiffDigest(file)])),
+    [data?.files]
+  )
+
+  const { digests: reviewedDigests, setReviewed } = useReviewedFiles(review.id)
+
+  /** Marks that still describe the code on screen. */
+  const reviewedPaths = useMemo(() => {
+    const marked = new Set<string>()
+    for (const [path, digest] of digestByPath) {
+      if (reviewedDigests.get(path) === digest) marked.add(path)
+    }
+    return marked
+  }, [digestByPath, reviewedDigests])
+
+  /**
+   * Marks that no longer do: the file was read, and then it changed.
+   *
+   * Kept apart from the plain unread files rather than folded in with them,
+   * because it is the more useful of the two states - these are the files where
+   * something arrived after the reviewer had already been through them.
+   */
+  const changedSincePaths = useMemo(() => {
+    const stale = new Set<string>()
+    for (const [path, digest] of digestByPath) {
+      const stored = reviewedDigests.get(path)
+      if (stored !== undefined && stored !== digest) stale.add(path)
+    }
+    return stale
+  }, [digestByPath, reviewedDigests])
+
+  const markReviewed = useCallback(
+    (path: string, next: boolean): void => {
+      const digest = digestByPath.get(path)
+      // A file that is not in this diff cannot be marked against it.
+      if (digest === undefined) return
+      void setReviewed(path, next ? digest : null)
+    },
+    [digestByPath, setReviewed]
+  )
+
   /** What the tree shows next to a file: comments still waiting on someone. */
   const unresolvedByFile = useMemo(() => {
     const counts = new Map<string, number>()
@@ -295,37 +347,54 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
    */
   const lastStep = useRef<{ index: number; at: number } | null>(null)
 
+  /**
+   * The last card whose top edge has passed the top of the scroller is the one
+   * being read; everything after it is still below.
+   *
+   * Shared by stepping and by the reviewed shortcut, so "the file you are on"
+   * means the same thing whichever key is pressed.
+   */
+  const currentFile = useCallback((): number => {
+    let current = 0
+    let edge: number | null = null
+    for (const [index, path] of paths.entries()) {
+      const element = document.getElementById(fileDomId(path))
+      if (element === null) continue
+      edge ??= scrollParent(element).getBoundingClientRect().top
+      if (element.getBoundingClientRect().top - edge > TOP_EDGE_SLACK) break
+      current = index
+    }
+    return current
+  }, [paths])
+
   const stepFile = useCallback(
     (delta: number): void => {
       if (paths.length === 0) return
 
       const now = Date.now()
       const pending = lastStep.current
-      let current: number
-
-      if (pending !== null && now - pending.at < STEP_CHAIN_MS) {
-        current = pending.index
-      } else {
-        // The last card whose top edge has passed the top of the scroller is
-        // the one being read; everything after it is still below.
-        current = 0
-        let edge: number | null = null
-        for (const [index, path] of paths.entries()) {
-          const element = document.getElementById(fileDomId(path))
-          if (element === null) continue
-          edge ??= scrollParent(element).getBoundingClientRect().top
-          if (element.getBoundingClientRect().top - edge > TOP_EDGE_SLACK) break
-          current = index
-        }
-      }
+      const current =
+        pending !== null && now - pending.at < STEP_CHAIN_MS ? pending.index : currentFile()
 
       const next = Math.min(paths.length - 1, Math.max(0, current + delta))
       lastStep.current = { index: next, at: now }
       const path = paths[next]
       if (path !== undefined) revealElement(fileDomId(path))
     },
-    [paths]
+    [paths, currentFile]
   )
+
+  /**
+   * Tick the file being read off, or take the tick back.
+   *
+   * `v` because that is the key GitHub uses for the same gesture, and muscle
+   * memory is most of the value of a shortcut like this one.
+   */
+  const toggleCurrentReviewed = useCallback((): void => {
+    const path = paths[currentFile()]
+    if (path === undefined) return
+    markReviewed(path, !reviewedPaths.has(path))
+  }, [paths, currentFile, markReviewed, reviewedPaths])
 
   const canIncludeUncommitted = data?.workingTree != null
 
@@ -376,6 +445,19 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
           run: () => setIncludeUncommitted(!includeUncommitted)
         },
         {
+          id: 'files:reviewed',
+          label:
+            activePath !== null && reviewedPaths.has(activePath)
+              ? 'Clear the reviewed mark on this file'
+              : 'Mark this file as reviewed',
+          group: 'Files changed',
+          keys: 'v',
+          keywords: 'viewed read seen done tick check off',
+          icon: CheckCheck,
+          disabled: paths.length === 0,
+          run: toggleCurrentReviewed
+        },
+        {
           id: 'files:refresh',
           label: 'Refresh the diff',
           group: 'Files changed',
@@ -385,7 +467,18 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
           run: () => void refresh()
         }
       ],
-      [paths.length, stepFile, treeOpen, setTreeOpen, includeUncommitted, canIncludeUncommitted, refresh]
+      [
+        paths.length,
+        stepFile,
+        treeOpen,
+        setTreeOpen,
+        includeUncommitted,
+        canIncludeUncommitted,
+        refresh,
+        activePath,
+        reviewedPaths,
+        toggleCurrentReviewed
+      ]
     )
   )
 
@@ -422,6 +515,17 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
             {plural(data.files.length, 'file')} changed
           </p>
           <DiffStat additions={data.additions} deletions={data.deletions} />
+          {/* Only once there is progress to report; "0 of 12 reviewed" is a
+              statement of the obvious taking up room next to the file count. */}
+          {reviewedPaths.size > 0 && (
+            <p
+              className="flex items-center gap-1.5 text-sm text-muted-foreground"
+              title="Files you have marked as reviewed. A mark clears itself when its file changes."
+            >
+              <CheckCheck className="size-4 text-success" />
+              {reviewedPaths.size} of {data.files.length} reviewed
+            </p>
+          )}
         </div>
 
         <div className="flex items-center gap-3">
@@ -584,6 +688,8 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
                 files={data.files}
                 activePath={activePath}
                 unresolvedByFile={unresolvedByFile}
+                reviewedPaths={reviewedPaths}
+                changedSincePaths={changedSincePaths}
                 onSelect={(path) => {
                   document
                     .getElementById(fileDomId(path))
@@ -611,6 +717,11 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
                   // arriving link cannot light up the same number in every file.
                   focus={focus?.filePath === file.path ? focus : undefined}
                   marked={marked?.filePath === file.path ? marked : undefined}
+                  reviewed={{
+                    isReviewed: reviewedPaths.has(file.path),
+                    hasChangedSince: changedSincePaths.has(file.path),
+                    onChange: (next) => markReviewed(file.path, next)
+                  }}
                   comments={{
                     reviewId: review.id,
                     threads: threadsByFile.get(file.path) ?? [],

@@ -24,7 +24,7 @@
  * shown slightly out of place. A file with a collapsed body still shows its
  * comment count, so a discussion is never hidden behind a fold.
  */
-import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   Check,
   ChevronDown,
@@ -44,6 +44,7 @@ import {
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Tooltip } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { CommentComposer } from '../comments/comment-composer'
@@ -152,6 +153,27 @@ export interface DiffFileSource {
   onOpenInEditor?: (path: string, line: number) => void
 }
 
+/**
+ * The reviewer's "I have read this" mark on one file.
+ *
+ * Whether the mark still holds is decided by the caller, which is the only
+ * place that knows both what was stored and which diff is on screen - see
+ * `shared/diff-digest.ts`. The card is told the answer, not asked to work it
+ * out, so the checkbox and the file tree can never disagree.
+ */
+export interface ReviewedMark {
+  /** True while the mark matches the diff being shown. */
+  isReviewed: boolean
+  /**
+   * True when this file was ticked off against an older version of itself.
+   * The tick is gone - it has to be - but saying so is more useful than
+   * silently clearing it, because it points at the one file in the list that
+   * was read and then changed under the reviewer.
+   */
+  hasChangedSince: boolean
+  onChange: (reviewed: boolean) => void
+}
+
 export function DiffStat({ additions, deletions }: { additions: number; deletions: number }) {
   return (
     <span className="flex shrink-0 items-center gap-1.5 font-mono text-xs tabular-nums">
@@ -180,7 +202,8 @@ export function FileDiffCard({
   comments,
   source,
   focus,
-  marked
+  marked,
+  reviewed
 }: {
   file: FileDiff
   comments?: DiffComments
@@ -189,6 +212,8 @@ export function FileDiffCard({
   focus?: { side: DiffSide; line: number }
   /** The same line while it is still worth pointing at. */
   marked?: { side: DiffSide; line: number }
+  /** Omitted where there is nothing to mark against - a card shown on its own. */
+  reviewed?: ReviewedMark
 }) {
   const lineCount = file.hunks.reduce((total, hunk) => total + hunk.lines.length, 0)
   /** Null until the reviewer opens or closes the card themselves. */
@@ -200,13 +225,40 @@ export function FileDiffCard({
   /** Head-side line numbers unfolded out of the gaps between the hunks. */
   const [revealed, setRevealed] = useState<ReadonlySet<number>>(() => new Set())
 
+  const isReviewed = reviewed?.isReviewed ?? false
+
   /**
    * Derived rather than stored, so arriving at a line inside a folded file just
    * opens it - no effect, no second render, and a card the reviewer has closed
    * by hand stays closed.
    */
-  const expanded = toggled ?? (focus !== undefined || lineCount <= COLLAPSE_ABOVE_LINES)
+  const expanded =
+    toggled ??
+    // A file already ticked off arrives folded: the list of what is left to
+    // read is the point of the mark, and a read file taking up a screen of
+    // space works against it.
+    (focus !== undefined || (!isReviewed && lineCount <= COLLAPSE_ABOVE_LINES))
   const setExpanded = setToggled
+
+  /**
+   * Fold the card when the file gets ticked off, unfold it when it stops being
+   * ticked off.
+   *
+   * Driven by the mark changing rather than by the checkbox being clicked, so
+   * the keyboard shortcut in the files tab does exactly what the checkbox does
+   * - and so does the mark lapsing when a refresh brings in a new version of a
+   * file that had been read. Folding on the way in is the reason the mark is
+   * worth setting: the page shrinks to what is still unread. On the way out the
+   * card is handed back its default behaviour rather than forced open, so a
+   * file that would have arrived folded for its sheer size still does.
+   */
+  const wasReviewed = useRef(isReviewed)
+
+  useEffect(() => {
+    if (isReviewed === wasReviewed.current) return
+    wasReviewed.current = isReviewed
+    setToggled(isReviewed ? false : null)
+  }, [isReviewed])
 
   const canExpand = source !== undefined && isExpandable(file)
   const text = useReviewFile(
@@ -436,6 +488,28 @@ export function FileDiffCard({
         {file.truncated && <Badge variant="outline">clipped</Badge>}
 
         {!file.isBinary && <DiffStat additions={file.additions} deletions={file.deletions} />}
+
+        {/* Sits between the file's facts and the actions on it, because it is
+            neither: it is what the reviewer has done about this file. */}
+        {reviewed && (
+          <label
+            className="flex shrink-0 cursor-pointer select-none items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+            title={
+              reviewed.hasChangedSince
+                ? 'You marked this file reviewed, and it has changed since. Read it again to mark it.'
+                : reviewed.isReviewed
+                  ? 'Marked as reviewed. The mark clears itself if the file changes.'
+                  : 'Mark this file as reviewed. The mark clears itself if the file changes.'
+            }
+          >
+            <Checkbox checked={isReviewed} onCheckedChange={reviewed.onChange} />
+            {reviewed.hasChangedSince ? (
+              <span className="text-warning">Changed since reviewed</span>
+            ) : (
+              'Reviewed'
+            )}
+          </label>
+        )}
 
         <FileActions
           file={file}

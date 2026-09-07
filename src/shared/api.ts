@@ -30,8 +30,11 @@ import type {
   Review,
   ReviewCommitsInput,
   ReviewDiffInput,
+  ReviewedFile,
   ReviewFileInput,
   ReviewWithRepository,
+  ListReviewedFilesInput,
+  SetFileReviewedInput,
   SetThreadResolvedInput,
   UpdateCommentInput,
   UpdateRepositoryInput,
@@ -54,6 +57,8 @@ export const IPC_CHANNELS = {
   reviewsDiff: 'reviews:diff',
   reviewsFile: 'reviews:file',
   reviewsOpenInEditor: 'reviews:openInEditor',
+  reviewsReviewedFiles: 'reviews:reviewedFiles',
+  reviewsSetFileReviewed: 'reviews:setFileReviewed',
   commentsList: 'comments:list',
   commentsCreateThread: 'comments:createThread',
   commentsReply: 'comments:reply',
@@ -181,6 +186,14 @@ export interface GitWarrenApi {
     file(input: ReviewFileInput): Promise<FileContent>
     /** Open a file of this review in the reviewer's editor, at a line. */
     openInEditor(input: OpenReviewFileInput): Promise<void>
+    /**
+     * Files the reviewer has ticked off, each with the fingerprint of the diff
+     * they read. Whether a mark still applies is decided in the renderer,
+     * against the diff on screen - see `shared/diff-digest.ts`.
+     */
+    reviewedFiles(input: ListReviewedFilesInput): Promise<ReviewedFile[]>
+    /** Tick a file off against a digest, or clear the tick with a null one. */
+    setFileReviewed(input: SetFileReviewedInput): Promise<ReviewedFile | null>
   }
   /**
    * Comments carry no author field in either direction. Anything sent over this

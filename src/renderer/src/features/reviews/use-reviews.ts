@@ -13,13 +13,14 @@
  * which is honest about when the app looks at the disk.
  */
 import useSWR, { useSWRConfig } from 'swr'
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { api, CACHE_KEYS, CACHE_PREFIXES } from '@/lib/api'
 import type { EditorList } from '@shared/api'
 import type { FileContent, RepositoryRefs, ReviewCommits, ReviewDiff } from '@shared/git'
 import type {
   CreateReviewInput,
   Review,
+  ReviewedFile,
   ReviewStatus,
   ReviewWithRepository,
   UpdateReviewInput
@@ -160,6 +161,69 @@ export function useRepositoryRefs(repositoryId: number | null): ListState<Reposi
       LIVE_READ_OPTIONS
     )
   )
+}
+
+const NO_REVIEWED_FILES: ReviewedFile[] = []
+
+export interface ReviewedFilesState {
+  /**
+   * The digest stored for each ticked-off file, keyed by path.
+   *
+   * Digests rather than booleans, because a mark only counts while the file
+   * still hashes to the same value - see `shared/diff-digest.ts`. The caller
+   * compares them against the diff it is rendering, which is the only diff
+   * anyone can claim to have read.
+   */
+  digests: Map<string, string>
+  isLoading: boolean
+  /** Tick a file off against a digest, or clear the tick with a null one. */
+  setReviewed: (filePath: string, contentDigest: string | null) => Promise<void>
+}
+
+/**
+ * Which files of a review have been read, and the writer that changes it.
+ *
+ * Marking is optimistic. Ticking a file off happens in the middle of reading a
+ * diff, often from the keyboard, and waiting a round trip for the tick to
+ * appear - or worse, for the card to fold - would make the gesture feel
+ * broken. The write is one indexed upsert against a local SQLite file, so the
+ * optimistic state is almost always the state that lands; a failure rolls back
+ * and revalidates, which is the same read the screen already trusts.
+ */
+export function useReviewedFiles(reviewId: number): ReviewedFilesState {
+  const { data, isLoading, mutate } = useSWR<ReviewedFile[], unknown>(
+    CACHE_KEYS.reviewedFiles(reviewId),
+    () => api.reviews.reviewedFiles({ reviewId })
+  )
+
+  const files = data ?? NO_REVIEWED_FILES
+
+  const digests = useMemo(
+    () => new Map(files.map((file) => [file.filePath, file.contentDigest])),
+    [files]
+  )
+
+  const setReviewed = useCallback(
+    async (filePath: string, contentDigest: string | null) => {
+      const next = (current: ReviewedFile[] = NO_REVIEWED_FILES): ReviewedFile[] => {
+        const others = current.filter((file) => file.filePath !== filePath)
+        return contentDigest === null
+          ? others
+          : [...others, { reviewId, filePath, contentDigest, reviewedAt: new Date().toISOString() }]
+      }
+
+      await mutate(
+        async () => {
+          await api.reviews.setFileReviewed({ reviewId, filePath, contentDigest })
+          return next(data)
+        },
+        { optimisticData: next, revalidate: false, rollbackOnError: true }
+      )
+    },
+    [data, mutate, reviewId]
+  )
+
+  return { digests, isLoading, setReviewed }
 }
 
 export interface ReviewMutations {

@@ -12,7 +12,7 @@
  * Everything else stays in the file card.
  */
 import { useMemo, useState } from 'react'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, History } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { FileStatusIcon } from './diff-view'
 import type { FileDiff } from '@shared/git'
@@ -92,13 +92,19 @@ export interface ChangedFilesTreeProps {
   onSelect: (path: string) => void
   /** Unresolved comment count per file path. */
   unresolvedByFile: Map<string, number>
+  /** Files ticked off against the version currently on screen. */
+  reviewedPaths: ReadonlySet<string>
+  /** Files ticked off against an older version of themselves. */
+  changedSincePaths: ReadonlySet<string>
 }
 
 export function ChangedFilesTree({
   files,
   activePath,
   onSelect,
-  unresolvedByFile
+  unresolvedByFile,
+  reviewedPaths,
+  changedSincePaths
 }: ChangedFilesTreeProps) {
   const tree = useMemo(() => buildTree(files), [files])
 
@@ -112,6 +118,8 @@ export function ChangedFilesTree({
           activePath={activePath}
           onSelect={onSelect}
           unresolvedByFile={unresolvedByFile}
+          reviewedPaths={reviewedPaths}
+          changedSincePaths={changedSincePaths}
         />
       ))}
     </nav>
@@ -123,7 +131,9 @@ function TreeRows({
   depth,
   activePath,
   onSelect,
-  unresolvedByFile
+  unresolvedByFile,
+  reviewedPaths,
+  changedSincePaths
 }: {
   node: TreeNode
   depth: number
@@ -161,6 +171,8 @@ function TreeRows({
               activePath={activePath}
               onSelect={onSelect}
               unresolvedByFile={unresolvedByFile}
+              reviewedPaths={reviewedPaths}
+              changedSincePaths={changedSincePaths}
             />
           ))}
       </>
@@ -169,6 +181,8 @@ function TreeRows({
 
   const unresolved = unresolvedByFile.get(node.path) ?? 0
   const isActive = node.path === activePath
+  const isReviewed = reviewedPaths.has(node.path)
+  const hasChangedSince = changedSincePaths.has(node.path)
 
   return (
     <button
@@ -178,11 +192,25 @@ function TreeRows({
       aria-current={isActive ? 'true' : undefined}
       className={cn(
         'flex w-full items-center gap-1.5 rounded py-1 pr-1 text-left transition-colors',
-        isActive ? 'bg-accent text-accent-foreground' : 'hover:bg-muted'
+        isActive ? 'bg-accent text-accent-foreground' : 'hover:bg-muted',
+        // Read files stay legible but recede, so what is left to do stands out.
+        isReviewed && !isActive && 'text-muted-foreground'
       )}
-      title={node.path}
+      title={
+        hasChangedSince
+          ? `${node.path} - changed since you reviewed it`
+          : isReviewed
+            ? `${node.path} - reviewed`
+            : node.path
+      }
     >
-      <FileStatusIcon status={node.file.status} className="size-3 shrink-0" />
+      {isReviewed ? (
+        <Check className="size-3 shrink-0 text-success" />
+      ) : hasChangedSince ? (
+        <History className="size-3 shrink-0 text-warning" />
+      ) : (
+        <FileStatusIcon status={node.file.status} className="size-3 shrink-0" />
+      )}
       <span className="min-w-0 flex-1 truncate font-mono text-[0.6875rem]">{node.name}</span>
       {unresolved > 0 && (
         <span
