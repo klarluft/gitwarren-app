@@ -156,3 +156,70 @@ export function formatStep(step: string, platform: Platform = currentPlatform())
 export function formatBinding(binding: string, platform: Platform = currentPlatform()): string[] {
   return bindingSteps(binding).map((step) => formatStep(step, platform))
 }
+
+/**
+ * Keys that move the caret or change the text under it, whatever decorates
+ * them: ⌘← is the start of the line, ⌥← is the previous word, ⇧⌘← selects to
+ * the start of it, and a bare ← is all three's undecorated cousin. There is no
+ * modifier combination in which these belong to the app instead.
+ */
+const CARET_KEYS = new Set([
+  'arrowleft',
+  'arrowright',
+  'arrowup',
+  'arrowdown',
+  'home',
+  'end',
+  'pageup',
+  'pagedown',
+  'backspace',
+  'delete'
+])
+
+/** The clipboard and undo commands, which every field answers with `mod`. */
+const MOD_EDITING_KEYS = new Set(['a', 'c', 'v', 'x', 'z', 'y'])
+
+/**
+ * Emacs-style bindings macOS text fields answer on the literal control key -
+ * ⌃A for the start of a line, ⌃K to kill to the end of it, and the rest.
+ * They are not muscle memory for everyone, but they are the system's to give,
+ * not ours to take.
+ */
+const MAC_CTRL_EDITING_KEYS = new Set([
+  'a',
+  'b',
+  'd',
+  'e',
+  'f',
+  'h',
+  'k',
+  'n',
+  'o',
+  'p',
+  't',
+  'v',
+  'w',
+  'y'
+])
+
+/**
+ * Whether a keystroke belongs to the text field rather than to the app.
+ *
+ * The global shortcut layer stands down for these while a field has focus, so
+ * that ⌘← moves to the start of the line the way it does everywhere else on
+ * the machine, instead of navigating back and taking a half-written comment
+ * with it. Outside a text field the same keystrokes are the app's to bind.
+ */
+export function isTextEditingToken(
+  token: string,
+  platform: Platform = currentPlatform()
+): boolean {
+  const parts = normalizeStep(token).split('+')
+  const key = parts.at(-1) ?? ''
+  const modifiers = new Set(parts.slice(0, -1))
+
+  if (CARET_KEYS.has(key)) return true
+  if (modifiers.has('mod') && MOD_EDITING_KEYS.has(key)) return true
+  if (platform === 'mac' && modifiers.has('ctrl') && MAC_CTRL_EDITING_KEYS.has(key)) return true
+  return false
+}

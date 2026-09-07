@@ -12,7 +12,9 @@
  *   - Nothing fires while a text field has focus. Typing "n" into a comment
  *     must not open a dialog, and no amount of cleverness beats simply not
  *     listening. Bindings that carry the command modifier are exempt, since
- *     ⌘K is expected to work from inside a field.
+ *     ⌘K is expected to work from inside a field - but not the ones the field
+ *     itself answers: ⌘← moves to the start of a line, and a shortcut that
+ *     navigated away instead would take the half-written comment with it.
  *   - Nothing fires while a dialog, menu or select is open. Those own the
  *     keyboard until they are dismissed.
  *
@@ -21,7 +23,7 @@
  * waiting for, which turns a mystery pause into an obvious one.
  */
 import { useEffect, useRef, useState } from 'react'
-import { bindingSteps, eventToken } from './keys'
+import { bindingSteps, eventToken, isTextEditingToken } from './keys'
 
 export interface Hotkey {
   /** `mod+k`, `]`, or a chord like `g h`. */
@@ -80,7 +82,8 @@ export function useHotkeys(hotkeys: Hotkey[]): string | null {
       if (token === null) return
 
       const carriesModifier = token.includes('mod+') || token.includes('meta+')
-      if (isTypingTarget(event.target) && !carriesModifier) return
+      const appOwnsKey = carriesModifier && !isTextEditingToken(token)
+      if (isTypingTarget(event.target) && !appOwnsKey) return
       if (document.querySelector(OVERLAY_SELECTOR) !== null) return
 
       const candidates = latest.current.map((hotkey) => ({
