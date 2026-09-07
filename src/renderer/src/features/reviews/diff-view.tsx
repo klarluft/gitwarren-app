@@ -50,6 +50,7 @@ import { cn } from '@/lib/utils'
 import { CommentComposer } from '../comments/comment-composer'
 import { CommentThreadCard } from '../comments/comment-thread-card'
 import { DiffSnippet } from './diff-snippet'
+import { FilePath } from './file-path'
 import { lineDomId } from './dom-ids'
 import { useReviewFile } from './use-reviews'
 import type { CommentMutations } from '../comments/use-comments'
@@ -421,102 +422,114 @@ export function FileDiffCard({
     <Card className="overflow-hidden">
       {/* Not one big button any more: the header carries actions of its own,
           and a button inside a button is not a thing the DOM allows. */}
-      <div className="flex w-full items-center gap-2 pr-2">
-        <button
-          type="button"
-          onClick={() => setExpanded(!expanded)}
-          disabled={!hasBody}
-          aria-expanded={expanded}
-          className={cn(
-            'flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left transition-colors',
-            hasBody ? 'hover:bg-muted/50' : 'cursor-default'
-          )}
-        >
-          {hasBody ? (
-            expanded ? (
-              <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
-            ) : (
-              <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
-            )
-          ) : (
-            <span className="size-4 shrink-0" />
-          )}
-
-          <FileStatusIcon status={file.status} />
-
-          <span
-            data-selectable
-            className="min-w-0 flex-1 truncate font-mono text-xs"
-            title={file.path}
-          >
-            {file.oldPath && file.oldPath !== file.path && (
-              <span className="text-muted-foreground">{file.oldPath} → </span>
+      {/* Wraps, and the path keeps a floor of a few inches: on a narrow window
+          the badges drop to a line of their own rather than squeezing the path
+          into a column one character wide. */}
+      <div className="flex w-full flex-wrap items-center gap-1 pr-2">
+        <div className="flex min-w-0 grow basis-64 items-center gap-1">
+          {/* The toggle takes only the room the path needs rather than the whole
+              row, so the copy button can sit against the end of the path and
+              read as belonging to it. */}
+          <button
+            type="button"
+            onClick={() => setExpanded(!expanded)}
+            disabled={!hasBody}
+            aria-expanded={expanded}
+            className={cn(
+              'flex min-w-0 items-center gap-2 px-3 py-2 text-left transition-colors',
+              hasBody ? 'hover:bg-muted/50' : 'cursor-default'
             )}
-            {file.path}
-          </span>
-        </button>
+          >
+            {hasBody ? (
+              expanded ? (
+                <ChevronDown className="size-4 shrink-0 text-muted-foreground" />
+              ) : (
+                <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+              )
+            ) : (
+              <span className="size-4 shrink-0" />
+            )}
 
-        {/* Shown even while the file is folded shut, so a discussion is never
+            <FileStatusIcon status={file.status} />
+
+            <span data-selectable className="min-w-0 font-mono text-xs">
+              {file.oldPath && file.oldPath !== file.path && (
+                <span className="text-muted-foreground">
+                  <FilePath path={file.oldPath} emphasizeName={false} /> →{' '}
+                </span>
+              )}
+              <FilePath path={file.path} />
+            </span>
+          </button>
+
+          <CopyPathAction path={file.path} />
+        </div>
+
+        {/* Everything else keeps to the far end of the row, and never shrinks:
+            when the path is long it is the path that wraps, not the badges. */}
+        <div className="ml-auto flex shrink-0 items-center gap-2 py-1 pl-2">
+          {/* Shown even while the file is folded shut, so a discussion is never
             hidden by a collapse the reviewer did not think about. */}
-        {threads.length > 0 && (
-          <Badge
-            variant={unresolvedCount > 0 ? 'default' : 'outline'}
-            title={
-              unresolvedCount > 0
-                ? `${unresolvedCount} unresolved of ${threads.length}`
-                : 'All comments on this file are resolved'
-            }
-          >
-            <MessageSquare />
-            {unresolvedCount > 0 ? unresolvedCount : threads.length}
-          </Badge>
-        )}
+          {threads.length > 0 && (
+            <Badge
+              variant={unresolvedCount > 0 ? 'default' : 'outline'}
+              title={
+                unresolvedCount > 0
+                  ? `${unresolvedCount} unresolved of ${threads.length}`
+                  : 'All comments on this file are resolved'
+              }
+            >
+              <MessageSquare />
+              {unresolvedCount > 0 ? unresolvedCount : threads.length}
+            </Badge>
+          )}
 
-        {file.isUntracked && (
-          <Badge variant="warning" title="This file is not tracked by git yet">
-            <CircleDot />
-            untracked
-          </Badge>
-        )}
-        {!file.isUntracked && file.hasUncommittedChanges && (
-          <Badge variant="warning" title="Part of this change is not committed">
-            <CircleDot />
-            uncommitted
-          </Badge>
-        )}
-        {file.isBinary && <Badge variant="outline">binary</Badge>}
-        {file.truncated && <Badge variant="outline">clipped</Badge>}
+          {file.isUntracked && (
+            <Badge variant="warning" title="This file is not tracked by git yet">
+              <CircleDot />
+              untracked
+            </Badge>
+          )}
+          {!file.isUntracked && file.hasUncommittedChanges && (
+            <Badge variant="warning" title="Part of this change is not committed">
+              <CircleDot />
+              uncommitted
+            </Badge>
+          )}
+          {file.isBinary && <Badge variant="outline">binary</Badge>}
+          {file.truncated && <Badge variant="outline">clipped</Badge>}
 
-        {!file.isBinary && <DiffStat additions={file.additions} deletions={file.deletions} />}
+          {!file.isBinary && <DiffStat additions={file.additions} deletions={file.deletions} />}
 
-        {/* Sits between the file's facts and the actions on it, because it is
-            neither: it is what the reviewer has done about this file. */}
-        {reviewed && (
-          <label
-            className="flex shrink-0 cursor-pointer select-none items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
-            title={
-              reviewed.hasChangedSince
-                ? 'You marked this file reviewed, and it has changed since. Read it again to mark it.'
-                : reviewed.isReviewed
-                  ? 'Marked as reviewed. The mark clears itself if the file changes.'
-                  : 'Mark this file as reviewed. The mark clears itself if the file changes.'
-            }
-          >
-            <Checkbox checked={isReviewed} onCheckedChange={reviewed.onChange} />
-            {reviewed.hasChangedSince ? (
-              <span className="text-warning">Changed since reviewed</span>
-            ) : (
-              'Reviewed'
-            )}
-          </label>
-        )}
+          {/* Sits between the file's facts and the actions on it, because it is
+              neither: it is what the reviewer has done about this file. */}
+          {reviewed && (
+            <label
+              className="flex shrink-0 cursor-pointer select-none items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+              title={
+                reviewed.hasChangedSince
+                  ? 'You marked this file reviewed, and it has changed since. Read it again to mark it.'
+                  : reviewed.isReviewed
+                    ? 'Marked as reviewed. The mark clears itself if the file changes.'
+                    : 'Mark this file as reviewed. The mark clears itself if the file changes.'
+              }
+            >
+              <Checkbox checked={isReviewed} onCheckedChange={reviewed.onChange} />
+              {reviewed.hasChangedSince ? (
+                <span className="text-warning">Changed since reviewed</span>
+              ) : (
+                'Reviewed'
+              )}
+            </label>
+          )}
 
-        <FileActions
-          file={file}
-          source={source}
-          canExpand={gaps.length > 0}
-          onExpandAll={expandEverything}
-        />
+          <FileActions
+            file={file}
+            source={source}
+            canExpand={gaps.length > 0}
+            onExpandAll={expandEverything}
+          />
+        </div>
       </div>
 
       {expanded && orphans.length > 0 && comments && (
@@ -631,7 +644,34 @@ export function FileDiffCard({
   )
 }
 
-/** Copy the path, open the file, unfold the whole thing. */
+/**
+ * Copy the path to the clipboard.
+ *
+ * It sits against the end of the path rather than in the row of actions on the
+ * far side of the header, because "copy" on its own says nothing about what
+ * gets copied - next to the thing it copies, it needs no explaining.
+ */
+function CopyPathAction({ path }: { path: string }) {
+  const [copied, setCopied] = useState(false)
+
+  async function copyPath(): Promise<void> {
+    await navigator.clipboard.writeText(path)
+    setCopied(true)
+    // Long enough to be read, short enough that the button is itself again
+    // before the reviewer next looks at it.
+    window.setTimeout(() => setCopied(false), 1500)
+  }
+
+  return (
+    <IconAction
+      label={copied ? 'Path copied' : 'Copy path'}
+      onClick={() => void copyPath()}
+      icon={copied ? <Check className="text-success" /> : <Copy />}
+    />
+  )
+}
+
+/** Open the file, unfold the whole thing. */
 function FileActions({
   file,
   source,
@@ -643,16 +683,6 @@ function FileActions({
   canExpand: boolean
   onExpandAll: () => void
 }) {
-  const [copied, setCopied] = useState(false)
-
-  async function copyPath(): Promise<void> {
-    await navigator.clipboard.writeText(file.path)
-    setCopied(true)
-    // Long enough to be read, short enough that the button is itself again
-    // before the reviewer next looks at it.
-    window.setTimeout(() => setCopied(false), 1500)
-  }
-
   const canOpen = source?.onOpenInEditor !== undefined && file.status !== 'deleted'
 
   return (
@@ -664,11 +694,6 @@ function FileActions({
           icon={<UnfoldVertical />}
         />
       )}
-      <IconAction
-        label={copied ? 'Path copied' : 'Copy path'}
-        onClick={() => void copyPath()}
-        icon={copied ? <Check className="text-success" /> : <Copy />}
-      />
       {canOpen && (
         <IconAction
           label={

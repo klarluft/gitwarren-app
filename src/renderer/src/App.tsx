@@ -1,9 +1,9 @@
 /**
  * The app shell and its three screens.
  *
- * Routing is a hash and a switch (see `lib/router`). The review screen is given
- * a wider column than the others, because a diff needs the room and the rest of
- * the app reads better narrow.
+ * Routing is a hash and a switch (see `lib/router`). The screens are given
+ * different amounts of the window - see `reviewWidth` - because a diff needs
+ * the room and the rest of the app reads better narrow.
  */
 import { useRef } from 'react'
 // `?inline` rather than a bundled file URL: the packaged renderer is loaded
@@ -21,8 +21,22 @@ import { CommandRegistryProvider } from './features/commands/command-registry'
 import { RepositoryDetail } from './features/repositories/repository-detail'
 import { RepositoryList } from './features/repositories/repository-list'
 import { ReviewDetail } from './features/reviews/review-detail'
-import { useRoute } from './lib/router'
+import { useRoute, type ReviewTab } from './lib/router'
 import { cn } from './lib/utils'
+
+/**
+ * How much of the window a review is allowed to use.
+ *
+ * The diff gets the room and the reading tabs do not, because they want
+ * different things. A diff is code plus two gutters plus a file tree, and on a
+ * narrow column every second line wraps or scrolls sideways; prose and comment
+ * threads stretched across a wide monitor are simply hard to read. The ceiling
+ * on the diff is there for the same reason - past about this width a line of
+ * code has more empty space after it than characters in it.
+ */
+function reviewWidth(tab: ReviewTab): string {
+  return tab === 'files' ? 'max-w-[110rem]' : 'max-w-5xl'
+}
 
 export function App() {
   const route = useRoute()
@@ -49,7 +63,7 @@ export function App() {
             tabIndex={-1}
             className={cn(
               'mx-auto w-full flex-1 overflow-y-auto px-6 pb-10 outline-none',
-              route.name === 'review' ? 'max-w-5xl' : 'max-w-3xl'
+              route.name === 'review' ? reviewWidth(route.tab) : 'max-w-3xl'
             )}
           >
             <div className="mb-6">
