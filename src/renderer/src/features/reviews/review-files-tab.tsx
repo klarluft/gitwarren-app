@@ -5,10 +5,10 @@
  * than differences base picked up in the meantime - the same thing a pull
  * request shows.
  *
- * The "include uncommitted changes" switch is view state, not part of the
- * review. Whether you want to read the branch as it stands on disk or as it
- * would arrive if pushed is a question you ask per visit, and each answer is
- * cached under its own SWR key so flipping back is instant.
+ * Which changes are shown is view state, not part of the review. Whether you
+ * want the branch as it stands on disk, as it would arrive if pushed, or just
+ * the edit you are making right now is a question you ask per visit, and each
+ * answer is cached under its own SWR key so switching back is instant.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
@@ -32,7 +32,6 @@ import {
   SelectValue
 } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Switch } from '@/components/ui/switch'
 import { api } from '@/lib/api'
 import { errorMessage } from '@/lib/errors'
 import { plural } from '@/lib/format'
@@ -51,7 +50,7 @@ import { useEditors, useReviewDiff, useReviewedFiles } from './use-reviews'
 import { fileDiffDigest } from '@shared/diff-digest'
 import { findAnchorFile, isInlineAnchor, resolveAnchor } from '@shared/comment-anchors'
 import { threadSnippet } from '@shared/comment-snippets'
-import type { FileDiff as FileDiffData } from '@shared/git'
+import type { DiffChanges, FileDiff as FileDiffData } from '@shared/git'
 import { isSelfReview } from '@shared/schemas'
 import type { CommentThread, Review } from '@shared/schemas'
 
@@ -67,6 +66,36 @@ import type { CommentThread, Review } from '@shared/schemas'
  * below the height of any card to be unambiguous, and it does.
  */
 const TOP_EDGE_SLACK = 24
+
+/**
+ * The three views of a review's changes, in the order `u` steps through them.
+ *
+ * `all` first because it is the default and the one most visits want; then the
+ * narrow view, which is the one you reach for repeatedly while making a small
+ * edit on a long branch; then the committed-only view, which is the rarest.
+ */
+const CHANGES_CYCLE = ['all', 'uncommitted', 'committed'] as const
+
+/** Left to right in the toggle: widening from the commits to the working tree. */
+const CHANGES_OPTIONS = ['committed', 'all', 'uncommitted'] as const satisfies readonly DiffChanges[]
+
+const CHANGES_LABELS: Record<DiffChanges, string> = {
+  committed: 'Committed',
+  all: 'All',
+  uncommitted: 'Uncommitted'
+}
+
+/** Said in full wherever there is room for it - a tooltip, a command palette row. */
+const CHANGES_DESCRIPTIONS: Record<DiffChanges, string> = {
+  committed: 'Only what is committed on the head branch',
+  all: 'Committed work with the worktree’s uncommitted changes folded in',
+  uncommitted: 'Only the uncommitted changes in the worktree, against the head commit'
+}
+
+function nextChangesAfter(current: DiffChanges): DiffChanges {
+  const index = CHANGES_CYCLE.indexOf(current)
+  return CHANGES_CYCLE[(index + 1) % CHANGES_CYCLE.length] ?? 'all'
+}
 
 /**
  * The element a card actually scrolls inside.
@@ -101,9 +130,9 @@ const STEP_CHAIN_MS = 800
  * Place every line comment against the diff that is actually on screen.
  *
  * This runs here rather than in the main process on purpose. The reviewer can
- * flip "include uncommitted" at any moment, which produces a genuinely
- * different diff with different line numbers, and a comment resolved against
- * the other one would be pinned to a line the reader is not looking at. Doing
+ * switch which changes are shown at any moment, and each of those is a
+ * genuinely different diff with different line numbers; a comment resolved
+ * against another one would be pinned to a line the reader is not seeing. Doing
  * it against the rendered diff makes that impossible by construction - and it
  * reuses the same `resolveAnchor` the MCP server runs, so an agent and the
  * screen never disagree about where a comment sits.
@@ -231,14 +260,11 @@ function useFocusScroll(focus: DiffFocus | undefined, ready: boolean): DiffFocus
 }
 
 export function ReviewFilesTab({ review, focus }: { review: Review; focus?: DiffFocus }) {
-  const [includeUncommitted, setIncludeUncommitted] = useState(true)
+  const [changes, setChanges] = useState<DiffChanges>('all')
   const [treeOpen, setTreeOpen] = useStoredFlag('files-tree', true)
   const [editorId, setEditorId] = useStoredPreference('editor', null)
   const [openError, setOpenError] = useState<unknown>(null)
-  const { data, error, isLoading, isRefreshing, refresh } = useReviewDiff(
-    review.id,
-    includeUncommitted
-  )
+  const { data, error, isLoading, isRefreshing, refresh } = useReviewDiff(review.id, changes)
   const { threads } = useReviewComments(review.id)
   const mutations = useCommentMutations(review.id)
   const editors = useEditors()
@@ -262,8 +288,8 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
    * reviewed mark is checked against.
    *
    * Computed here rather than in the main process because the diff on screen is
-   * the only thing anyone can claim to have read - and flipping "include
-   * uncommitted" produces a different one. See `shared/diff-digest.ts`.
+   * the only thing anyone can claim to have read - and each view of the changes
+   * produces a different one. See `shared/diff-digest.ts`.
    */
   const digestByPath = useMemo(
     () => new Map((data?.files ?? []).map((file) => [file.path, fileDiffDigest(file)])),
@@ -324,13 +350,13 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
         .openInEditor({
           id: review.id,
           path,
-          includeUncommitted,
+          changes,
           line,
           ...(editorId === null ? {} : { editorId })
         })
         .catch(setOpenError)
     },
-    [review.id, includeUncommitted, editorId]
+    [review.id, changes, editorId]
   )
 
   const marked = useFocusScroll(focus, !isLoading && data !== undefined)
@@ -396,7 +422,8 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
     markReviewed(path, !reviewedPaths.has(path))
   }, [paths, currentFile, markReviewed, reviewedPaths])
 
-  const canIncludeUncommitted = data?.workingTree != null
+  const canReadWorktree = data?.workingTree != null
+  const nextChanges = nextChangesAfter(changes)
 
   useRegisterCommands(
     useMemo<Command[]>(
@@ -433,16 +460,15 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
         },
         {
           id: 'files:uncommitted',
-          label: includeUncommitted
-            ? 'Exclude uncommitted changes'
-            : 'Include uncommitted changes',
+          label: `Show ${CHANGES_LABELS[nextChanges].toLowerCase()} changes`,
           group: 'Files changed',
           keys: 'u',
-          keywords: 'working tree dirty staged unstaged untracked',
+          keywords: 'working tree dirty staged unstaged untracked committed only',
           icon: GitCompareArrows,
-          // Nothing to fold in when no worktree has this branch checked out.
-          disabled: !canIncludeUncommitted,
-          run: () => setIncludeUncommitted(!includeUncommitted)
+          // Two of the three views need a worktree; without one there is only
+          // the committed diff, and stepping between identical views is noise.
+          disabled: !canReadWorktree,
+          run: () => setChanges(nextChanges)
         },
         {
           id: 'files:reviewed',
@@ -472,8 +498,8 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
         stepFile,
         treeOpen,
         setTreeOpen,
-        includeUncommitted,
-        canIncludeUncommitted,
+        nextChanges,
+        canReadWorktree,
         refresh,
         activePath,
         reviewedPaths,
@@ -568,25 +594,13 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
             </Select>
           )}
 
-          <label
-            className="flex items-center gap-2 text-xs text-muted-foreground"
-            title={
-              !hasWorktree
-                ? `No worktree has ${review.headRef} checked out, so there is nothing uncommitted to include`
-                : selfReview
-                  ? // Turning it off on a self-review leaves an empty diff; the
-                    // switch stays usable, but say so rather than let it look broken.
-                    'This review is uncommitted work only — turning this off leaves nothing to show'
-                  : 'Fold the head worktree’s staged, unstaged and untracked changes into the diff'
-            }
-          >
-            <Switch
-              checked={includeUncommitted}
-              onCheckedChange={setIncludeUncommitted}
-              disabled={!hasWorktree}
-            />
-            Include uncommitted
-          </label>
+          <ChangesToggle
+            changes={changes}
+            onChange={setChanges}
+            hasWorktree={hasWorktree}
+            headRef={review.headRef}
+            selfReview={selfReview}
+          />
 
           <Button variant="ghost" size="sm" onClick={() => void refresh()} title="Re-read from disk">
             <RefreshCw className={isRefreshing ? 'animate-spin' : undefined} />
@@ -595,13 +609,19 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
         </div>
       </div>
 
-      {includeUncommitted && data.workingTree?.isDirty && (
+      {changes !== 'committed' && data.workingTree?.isDirty && (
         <WorkingTreeBanner workingTree={data.workingTree} />
       )}
       {!hasWorktree && <NoWorktreeNotice headRef={review.headRef} />}
-      {hasWorktree && !includeUncommitted && data.workingTree?.isDirty && (
+      {changes === 'uncommitted' && hasWorktree && (
         <p className="rounded-lg border border-border bg-muted/40 px-4 py-3 text-xs text-muted-foreground">
-          Uncommitted changes are being left out of this diff. Turn the switch back on to include
+          Measured against <span className="font-mono">{review.headRef}</span>, so everything
+          already committed on the branch is hidden.
+        </p>
+      )}
+      {changes === 'committed' && hasWorktree && data.workingTree?.isDirty && (
+        <p className="rounded-lg border border-border bg-muted/40 px-4 py-3 text-xs text-muted-foreground">
+          Uncommitted changes are being left out of this diff. Switch to All or Uncommitted to see
           them.
         </p>
       )}
@@ -657,26 +677,31 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
             <FileDiff className="size-6" />
           </div>
           <h3 className="font-medium">No changes</h3>
-          {selfReview ? (
-            <p className="mx-auto max-w-sm text-sm text-muted-foreground">
-              {includeUncommitted ? (
-                <>
-                  Nothing is uncommitted on <span className="font-mono">{review.headRef}</span>{' '}
-                  right now. Edit a file and refresh — it will show up here.
-                </>
-              ) : (
-                <>
-                  This review is <span className="font-mono">{review.headRef}</span> against itself,
-                  so it holds only uncommitted work. Turn the switch back on to see it.
-                </>
-              )}
-            </p>
-          ) : (
-            <p className="mx-auto max-w-sm text-sm text-muted-foreground">
-              <span className="font-mono">{review.headRef}</span> has nothing that{' '}
-              <span className="font-mono">{review.baseRef}</span> does not already have.
-            </p>
-          )}
+          <p className="mx-auto max-w-sm text-sm text-muted-foreground">
+            {changes === 'uncommitted' && !hasWorktree ? (
+              <>
+                No worktree has <span className="font-mono">{review.headRef}</span> checked out, so
+                there is no uncommitted work to show.
+              </>
+            ) : changes === 'uncommitted' || (selfReview && changes === 'all') ? (
+              // A self-review has no committed range at all, so "all" and
+              // "uncommitted" are the same view of it and read the same way.
+              <>
+                Nothing is uncommitted on <span className="font-mono">{review.headRef}</span> right
+                now. Edit a file and refresh — it will show up here.
+              </>
+            ) : selfReview ? (
+              <>
+                This review is <span className="font-mono">{review.headRef}</span> against itself, so
+                it holds only uncommitted work. Switch to All or Uncommitted to see it.
+              </>
+            ) : (
+              <>
+                <span className="font-mono">{review.headRef}</span> has nothing that{' '}
+                <span className="font-mono">{review.baseRef}</span> does not already have.
+              </>
+            )}
+          </p>
         </Card>
       ) : (
         // `items-start` so the tree can stick to the top of the viewport while
@@ -711,10 +736,10 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
                 className="scroll-mt-2"
               >
                 <FileDiffCard
-                  // Remounted when the switch flips: that is a different diff
+                  // Remounted when the view changes: that is a different diff
                   // with different line numbers, so anything unfolded against
                   // the old one has to go.
-                  key={includeUncommitted ? 'with-uncommitted' : 'committed-only'}
+                  key={changes}
                   file={file}
                   // Only the card that owns the line hears about it, so one
                   // arriving link cannot light up the same number in every file.
@@ -728,11 +753,12 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
                   comments={{
                     reviewId: review.id,
                     threads: threadsByFile.get(file.path) ?? [],
-                    mutations
+                    mutations,
+                    changes
                   }}
                   source={{
                     reviewId: review.id,
-                    includeUncommitted,
+                    changes,
                     editorId,
                     editorLabel:
                       editors?.editors.find(
@@ -752,6 +778,72 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
           {errorMessage(openError)}
         </p>
       )}
+    </div>
+  )
+}
+
+/**
+ * Which of the three views of the changes is on screen.
+ *
+ * A segmented control rather than the switch this replaced: the three views are
+ * one question with three answers, and a switch can only ask a question with
+ * two. All three stay visible so the narrow view is discoverable - the whole
+ * point of it is that you reach for it mid-edit, without having gone looking
+ * through a menu first.
+ *
+ * With no worktree holding the head there is only ever the committed diff, so
+ * the other two are disabled rather than hidden: a control that changes shape
+ * between reviews is harder to learn than one that greys out and says why.
+ */
+function ChangesToggle({
+  changes,
+  onChange,
+  hasWorktree,
+  headRef,
+  selfReview
+}: {
+  changes: DiffChanges
+  onChange: (next: DiffChanges) => void
+  hasWorktree: boolean
+  headRef: string
+  selfReview: boolean
+}) {
+  return (
+    <div
+      role="group"
+      aria-label="Which changes to show"
+      className="flex items-center rounded-md border border-border p-0.5"
+    >
+      {CHANGES_OPTIONS.map((option) => {
+        const needsWorktree = option !== 'committed'
+        const disabled = needsWorktree && !hasWorktree
+        // A self-review's committed range is empty by construction, so say that
+        // rather than let the button look broken when it shows nothing.
+        const title = disabled
+          ? `No worktree has ${headRef} checked out, so there is nothing uncommitted to show`
+          : option === 'committed' && selfReview
+            ? `This review is ${headRef} against itself, so it holds no committed changes`
+            : CHANGES_DESCRIPTIONS[option]
+
+        return (
+          <button
+            key={option}
+            type="button"
+            onClick={() => onChange(option)}
+            disabled={disabled}
+            aria-pressed={changes === option}
+            title={title}
+            className={
+              'rounded px-2 py-1 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-40 ' +
+              (changes === option
+                ? 'bg-accent font-medium text-accent-foreground'
+                : 'text-muted-foreground hover:text-foreground')
+            }
+          >
+            {CHANGES_LABELS[option]}
+          </button>
+        )
+      })}
     </div>
   )
 }

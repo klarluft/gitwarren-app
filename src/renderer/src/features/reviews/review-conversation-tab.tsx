@@ -81,7 +81,7 @@ export function ReviewConversationTab({ review, onEdit }: ReviewConversationTabP
   const mutations = useCommentMutations(review.id)
 
   // Matches the Files changed tab's default, so the two share one cached diff.
-  const { data: diff, isLoading: diffLoading } = useReviewDiff(review.id, true)
+  const { data: diff, isLoading: diffLoading } = useReviewDiff(review.id, 'all')
 
   const timeline = useMemo(() => buildTimeline(threads, diff?.files), [threads, diff?.files])
 

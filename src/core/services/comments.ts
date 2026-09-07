@@ -36,6 +36,7 @@ import {
   type AnchorState,
   type DiffSide
 } from '../../shared/comment-anchors.js'
+import type { DiffChanges } from '../../shared/git.js'
 import { contextForRange, snippetAt } from '../../shared/comment-snippets.js'
 import { parseWithSchema as parse } from '../../shared/validation.js'
 import {
@@ -251,11 +252,10 @@ async function captureAnchor(
   filePath: string,
   side: DiffSide,
   line: number,
-  startLine: number | null
+  startLine: number | null,
+  changes: DiffChanges
 ): Promise<{ anchorText: string | null; anchorSha: string | null; snapshot: AnchorSnapshot | null }> {
-  const diff = await readReviewDiff(repositoryPath, review.baseRef, review.headRef, {
-    includeUncommitted: true
-  })
+  const diff = await readReviewDiff(repositoryPath, review.baseRef, review.headRef, { changes })
 
   const file = findAnchorFile(diff.files, filePath)
   const found = file?.hunks
@@ -355,7 +355,7 @@ export const commentsService = {
 
     const repository = requireRepository(review.repositoryId)
     const diff = await readReviewDiff(repository.path, review.baseRef, review.headRef, {
-      includeUncommitted: true
+      changes: 'all'
     })
 
     return threads.map((thread) => {
@@ -388,7 +388,8 @@ export const commentsService = {
       filePath,
       side,
       line,
-      startLine: requestedStart
+      startLine: requestedStart,
+      changes
     } = parse(createThreadInputSchema, input)
     const review = requireReview(reviewId)
     const repositoryPath = requireRepository(review.repositoryId).path
@@ -407,7 +408,15 @@ export const commentsService = {
     let anchorSha: string | null = null
     let anchorSnapshot: string | null = null
     if (filePath !== undefined && line !== undefined) {
-      const captured = await captureAnchor(repositoryPath, review, filePath, side, line, startLine)
+      const captured = await captureAnchor(
+        repositoryPath,
+        review,
+        filePath,
+        side,
+        line,
+        startLine,
+        changes
+      )
       anchorText = captured.anchorText
       anchorSha = captured.anchorSha
       anchorSnapshot = captured.snapshot === null ? null : JSON.stringify(captured.snapshot)

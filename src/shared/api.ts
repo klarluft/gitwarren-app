@@ -180,8 +180,8 @@ export interface GitWarrenApi {
     diff(input: ReviewDiffInput): Promise<ReviewDiff>
     /**
      * One file's head-side text, whole. This is what lets the diff show the
-     * lines between its hunks; `includeUncommitted` must match the diff on
-     * screen so the expanded context comes from the same version of the file.
+     * lines between its hunks; `changes` must match the diff on screen so the
+     * expanded context comes from the same version of the file.
      */
     file(input: ReviewFileInput): Promise<FileContent>
     /** Open a file of this review in the reviewer's editor, at a line. */

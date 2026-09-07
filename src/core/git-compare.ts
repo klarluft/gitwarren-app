@@ -21,6 +21,11 @@
  * base is that ref's own tip, so the diff reduces to exactly the uncommitted
  * work in its worktree. Nothing here special-cases it - it falls out of the
  * rules above - and reviews are allowed to be shaped that way on purpose.
+ *
+ * `DiffChanges` makes that view available without repointing a review at
+ * itself: diffing against the head commit instead of the merge base narrows any
+ * review down to the edit currently in the worktree, which is what you want
+ * while making a small change on top of a long branch.
  */
 import { readFile, stat } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
@@ -29,6 +34,7 @@ import { buildUntrackedFileDiff, parseUnifiedDiff } from './diff-parser.js'
 import { AppError } from '../shared/errors.js'
 import type {
   CompareEndpoint,
+  DiffChanges,
   FileContent,
   FileDiff,
   GitCommit,
@@ -542,10 +548,32 @@ export async function readReviewCommits(
 
 export interface ReadDiffOptions {
   /**
-   * Fold the head worktree's uncommitted work into the patch. Ignored when no
-   * worktree has the head branch checked out - there is nothing to fold in.
+   * Which changes the patch is made of - see `DiffChanges`. Asking for anything
+   * that needs the working tree when no worktree has the head branch checked
+   * out degrades to `committed` (`all`) or to nothing at all (`uncommitted`).
    */
-  includeUncommitted: boolean
+  changes: DiffChanges
+}
+
+/**
+ * What can actually be read, given where the head is - or is not - checked out.
+ *
+ * Split out because three call sites have to agree on it: the diff, the
+ * whole-file read that expands it, and the path handed to an editor. If they
+ * disagreed the expanded context would come from a different version of the
+ * file than the hunks it sits between.
+ */
+function effectiveChanges(
+  requested: DiffChanges,
+  compare: Pick<ReviewCompare, 'headWorktree' | 'workingTree'>
+): DiffChanges {
+  if (requested === 'committed') return 'committed'
+  const hasWorktree = compare.headWorktree !== null && compare.workingTree !== null
+  if (hasWorktree) return requested
+  // Nothing uncommitted to fold in: the whole-branch diff is still the honest
+  // answer for `all`, but `uncommitted` asked for the working tree specifically
+  // and must not quietly widen back out to the branch.
+  return requested === 'all' ? 'committed' : 'uncommitted'
 }
 
 export async function readReviewDiff(
@@ -555,17 +583,38 @@ export async function readReviewDiff(
   options: ReadDiffOptions
 ): Promise<ReviewDiff> {
   const compare = await resolveCompare(repositoryPath, baseRef, headRef)
-  const empty = { files: [], additions: 0, deletions: 0, includedUncommitted: false, truncated: false }
-  if (compare.error || !compare.mergeBase || !compare.head.sha) return { ...compare, ...empty }
+  const changes = effectiveChanges(options.changes, compare)
+  const empty = { files: [], additions: 0, deletions: 0, changes, truncated: false }
 
-  const includeUncommitted =
-    options.includeUncommitted && compare.headWorktree !== null && compare.workingTree !== null
+  if (!compare.head.sha) return { ...compare, ...empty }
+  // Only a diff measured against the base needs the merge base - and needs both
+  // endpoints to have resolved. Uncommitted work is measured against the head
+  // commit, so this function still reads it when the base ref cannot be
+  // resolved. (The review screen has its own opinion about showing a review
+  // whose endpoint is broken; that is not this function's call to make.)
+  if (changes !== 'uncommitted' && (compare.error || !compare.mergeBase)) {
+    return { ...compare, ...empty }
+  }
+  if (changes === 'uncommitted' && compare.workingTree === null) {
+    return { ...compare, ...empty }
+  }
 
-  // Inside the head's worktree, `git diff <merge-base>` with no second endpoint
-  // compares against the working tree, so committed and uncommitted changes
-  // arrive as one patch. With an explicit second endpoint it stays committed-only.
-  const cwd = includeUncommitted ? (compare.headWorktree as { path: string }).path : repositoryPath
-  const range = includeUncommitted ? [compare.mergeBase] : [compare.mergeBase, compare.head.sha]
+  // Non-null whenever `changes` is not `committed`: that is what
+  // `effectiveChanges` checked, and a bare worktree has no working tree to read.
+  const worktreePath = compare.workingTree?.worktreePath ?? repositoryPath
+
+  // Inside the head's worktree, `git diff <commit>` with no second endpoint
+  // compares against the working tree. Against the merge base that folds the
+  // branch's commits and its uncommitted work into one patch; against the head
+  // commit it leaves exactly the uncommitted work. With an explicit second
+  // endpoint nothing from the working tree is involved at all.
+  const cwd = changes === 'committed' ? repositoryPath : worktreePath
+  const range =
+    changes === 'committed'
+      ? [compare.mergeBase as string, compare.head.sha]
+      : changes === 'all'
+        ? [compare.mergeBase as string]
+        : [compare.head.sha]
 
   const result = await runGitRaw(
     [
@@ -589,14 +638,14 @@ export async function readReviewDiff(
 
   const files = parseUnifiedDiff(result.stdout)
 
-  if (includeUncommitted) {
+  if (changes !== 'committed') {
     files.push(...(await readUntrackedFiles(cwd)))
   }
 
   // Badge the files whose change is not (entirely) committed anywhere yet.
   const dirtyPaths = new Set(compare.workingTree?.paths ?? [])
   for (const file of files) {
-    if (!includeUncommitted) continue
+    if (changes === 'committed') continue
     if (file.isUntracked || dirtyPaths.has(file.path) || (file.oldPath !== null && dirtyPaths.has(file.oldPath))) {
       file.hasUncommittedChanges = true
     }
@@ -609,7 +658,7 @@ export async function readReviewDiff(
     files,
     additions: files.reduce((total, file) => total + file.additions, 0),
     deletions: files.reduce((total, file) => total + file.deletions, 0),
-    includedUncommitted: includeUncommitted,
+    changes,
     truncated: files.some((file) => file.truncated)
   }
 }
@@ -699,11 +748,11 @@ export async function readReviewFile(
   const compare = await resolveCompare(repositoryPath, baseRef, headRef)
   if (compare.error) return emptyContent(filePath, compare.error)
 
-  // Same rule as the diff: with uncommitted work folded in, the head side *is*
-  // the worktree, so the file has to be read from disk or the expanded context
-  // would not line up with the hunks around it.
+  // Same rule as the diff: with the working tree involved at all, the head side
+  // *is* the worktree, so the file has to be read from disk or the expanded
+  // context would not line up with the hunks around it.
   const worktree =
-    options.includeUncommitted && compare.workingTree !== null ? compare.headWorktree : null
+    effectiveChanges(options.changes, compare) === 'committed' ? null : compare.headWorktree
 
   if (worktree) {
     const absolute = join(worktree.path, filePath)
@@ -762,7 +811,7 @@ export async function resolveReviewFilePath(
   }
 
   const compare = await resolveCompare(repositoryPath, baseRef, headRef)
-  const worktree = options.includeUncommitted ? compare.headWorktree : null
+  const worktree = options.changes === 'committed' ? null : compare.headWorktree
   const roots = [...new Set([worktree?.path, compare.headWorktree?.path, repositoryPath])].filter(
     (root): root is string => typeof root === 'string'
   )

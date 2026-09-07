@@ -214,12 +214,31 @@ export interface ReviewCommits extends ReviewCompare {
   truncated: boolean
 }
 
+/**
+ * Which changes a diff is made of.
+ *
+ * - `committed` - the merge-base diff of the two refs and nothing else.
+ * - `all` - that, with the head worktree's uncommitted work folded in.
+ * - `uncommitted` - *only* what is uncommitted in the head worktree, measured
+ *   against the head commit rather than against the base ref. On a long-lived
+ *   branch that is the small edit being made right now, without the rest of the
+ *   branch in the way; it is what a review of a ref against itself shows, but
+ *   available without repointing the review's endpoints.
+ *
+ * `uncommitted` needs a worktree with the head checked out. Without one there
+ * is nothing to show, and the diff comes back empty rather than quietly
+ * widening back out to the whole branch.
+ */
+export type DiffChanges = 'committed' | 'all' | 'uncommitted'
+
 export interface ReviewDiff extends ReviewCompare {
   files: FileDiff[]
   additions: number
   deletions: number
-  /** Whether uncommitted work was actually folded into this diff. */
-  includedUncommitted: boolean
+  /** What this diff ended up being made of - see `DiffChanges`. Not always
+   *  what was asked for: with no head worktree there is nothing to fold in, so
+   *  `all` reports `committed`. */
+  changes: DiffChanges
   /** True when at least one file's patch was clipped. */
   truncated: boolean
 }
