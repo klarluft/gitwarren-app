@@ -58,7 +58,10 @@ export function ReviewFormDialog({
 }: ReviewFormDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      {/* Wider than the other dialogs on purpose: the two ref fields sit side
+          by side, and at `max-w-lg` each one is too narrow to show a branch
+          name of any realistic length. */}
+      <DialogContent className="max-w-2xl">
         {open && (
           <ReviewForm
             key={review?.id ?? 'new'}

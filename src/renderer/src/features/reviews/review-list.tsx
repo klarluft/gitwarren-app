@@ -189,11 +189,18 @@ function ReviewCard({ review }: { review: Review }) {
           {/* One endpoint, not two, when the review is a ref against itself. */}
           {!isSelfReview(review) && (
             <>
-              <span className="truncate">{review.baseRef}</span>
+              {/* The row is a navigation target, so the refs cannot be copied
+                  from here - that lives on the review itself. A `title` at
+                  least means a name the card cut off is still readable. */}
+              <span className="truncate" title={review.baseRef}>
+                {review.baseRef}
+              </span>
               <ArrowRight className="size-3 shrink-0" />
             </>
           )}
-          <span className="truncate">{review.headRef}</span>
+          <span className="truncate" title={review.headRef}>
+            {review.headRef}
+          </span>
         </p>
       </div>
 
