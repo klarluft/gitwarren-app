@@ -31,6 +31,8 @@
     "src/renderer/src/lib/fuzzy.ts",
     "src/renderer/src/lib/__tests__/keys.test.ts",
     "src/renderer/src/lib/__tests__/fuzzy.test.ts",
+    "src/renderer/src/features/reviews/diff-search.ts",
+    "src/renderer/src/features/reviews/__tests__/diff-search.test.ts",
     "electron.vite.config.ts",
     "vite.mcp.config.ts",
     "drizzle.config.ts",
