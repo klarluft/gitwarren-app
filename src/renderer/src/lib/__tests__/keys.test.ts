@@ -7,7 +7,14 @@
  */
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { bindingSteps, eventToken, formatBinding, formatStep, normalizeStep } from '../keys.js'
+import {
+  bindingSteps,
+  eventToken,
+  formatBinding,
+  formatStep,
+  isTextEditingToken,
+  normalizeStep
+} from '../keys.js'
 
 function press(
   key: string,
@@ -64,4 +71,49 @@ test('renders Mac symbols run together and other platforms with pluses', () => {
 
 test('a chord renders as one step per key', () => {
   assert.deepEqual(formatBinding('g h', 'mac'), ['G', 'H'])
+})
+
+test('caret keys belong to the text field under every modifier', () => {
+  const owned = [
+    'arrowleft',
+    'mod+arrowleft',
+    'mod+arrowright',
+    'alt+arrowleft',
+    'mod+shift+arrowleft',
+    'mod+arrowup',
+    'home',
+    'mod+end',
+    'backspace',
+    'alt+backspace',
+    'mod+delete',
+    'pageup'
+  ]
+  for (const token of owned) {
+    assert.equal(isTextEditingToken(token, 'mac'), true, token)
+  }
+})
+
+test('clipboard and undo belong to the text field on either platform', () => {
+  for (const platform of ['mac', 'other'] as const) {
+    for (const key of ['a', 'c', 'v', 'x', 'z', 'y']) {
+      assert.equal(isTextEditingToken('mod+' + key, platform), true, 'mod+' + key)
+    }
+    assert.equal(isTextEditingToken('mod+shift+z', platform), true)
+  }
+})
+
+test('the emacs bindings belong to the text field only on macOS', () => {
+  assert.equal(isTextEditingToken('ctrl+a', 'mac'), true)
+  assert.equal(isTextEditingToken('ctrl+k', 'mac'), true)
+  assert.equal(isTextEditingToken('ctrl+e', 'mac'), true)
+  // Off a Mac the same physical key reads as `mod`, and a literal control
+  // press is not a text command anywhere else.
+  assert.equal(isTextEditingToken('ctrl+a', 'other'), false)
+})
+
+test('the app keeps the shortcuts a text field has no use for', () => {
+  const free = ['mod+k', 'mod+[', 'mod+]', 'mod+enter', 'mod+b', 'mod+i', 'g', '?']
+  for (const token of free) {
+    assert.equal(isTextEditingToken(token, 'mac'), false, token)
+  }
 })
