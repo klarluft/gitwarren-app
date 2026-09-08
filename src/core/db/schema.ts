@@ -6,7 +6,7 @@
  * a branch name that stopped being true ten minutes ago.
  */
 import { sql } from 'drizzle-orm'
-import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
 
 export const repositories = sqliteTable(
   'repositories',
@@ -253,3 +253,42 @@ export const attachments = sqliteTable('attachments', {
 
 export type AttachmentRow = typeof attachments.$inferSelect
 export type NewAttachmentRow = typeof attachments.$inferInsert
+
+/**
+ * "I have read this file" - one row per file a reviewer has ticked off.
+ *
+ * The tick is not a boolean. A file marked reviewed and then changed has to
+ * lose its mark, or the list would quietly claim someone had read code that
+ * did not exist when they looked. `contentDigest` is what makes that automatic:
+ * it is a fingerprint of the diff as it was on screen at the moment of the
+ * tick (see `shared/diff-digest.ts`), and the mark counts only while the file
+ * still hashes to the same value. Rows are therefore left in place when a file
+ * changes rather than deleted - re-reading the new version is one write, and a
+ * mark that comes back if the change is reverted is the behaviour people
+ * already expect from GitHub's "Viewed".
+ *
+ * Kept out of the reviews table, and out of localStorage: it is per review and
+ * unbounded, and it is a real record of work done - the sort of thing that
+ * should survive a machine, not a browser profile.
+ */
+export const reviewedFiles = sqliteTable(
+  'reviewed_files',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    /** As everywhere else: the review going takes its marks with it. */
+    reviewId: integer('review_id')
+      .notNull()
+      .references(() => reviews.id, { onDelete: 'cascade' }),
+    /** Head-side path, the same key the diff and the file tree are keyed by. */
+    filePath: text('file_path').notNull(),
+    /** Fingerprint of the diff that was read. See the note above. */
+    contentDigest: text('content_digest').notNull(),
+    reviewedAt: text('reviewed_at')
+      .notNull()
+      .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`)
+  },
+  (table) => [uniqueIndex('reviewed_files_path_idx').on(table.reviewId, table.filePath)]
+)
+
+export type ReviewedFileRow = typeof reviewedFiles.$inferSelect
+export type NewReviewedFileRow = typeof reviewedFiles.$inferInsert

@@ -11,6 +11,7 @@
  * UI and the agent surface from drifting apart.
  */
 import { z } from 'zod'
+import { DIGEST_MAX_LENGTH } from './diff-digest.js'
 import type { DiffLine } from './git.js'
 
 export const MAX_NAME_LENGTH = 120
@@ -240,6 +241,44 @@ export type ReviewDiffInput = z.input<typeof reviewDiffInputSchema>
 export type ReviewFileInput = z.input<typeof reviewFileInputSchema>
 export type OpenReviewFileInput = z.input<typeof openReviewFileInputSchema>
 export type RepositoryRefsInput = z.input<typeof repositoryRefsInputSchema>
+
+/* -------------------------------------------------------------------------- */
+/* Reviewed files                                                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A file the reviewer has ticked off, and the fingerprint of what they read.
+ *
+ * The digest is handed back to the UI rather than compared in the service on
+ * purpose. Only the renderer knows which diff is actually on screen - the
+ * "include uncommitted" switch changes it - and a mark checked against any
+ * other version of the file would be answering a question nobody asked.
+ */
+export const reviewedFileSchema = z.object({
+  reviewId: reviewIdSchema,
+  filePath: z.string(),
+  contentDigest: z.string(),
+  reviewedAt: z.string()
+})
+
+export const listReviewedFilesInputSchema = z.object({ reviewId: reviewIdSchema })
+
+/**
+ * Tick a file off, or take the tick back.
+ *
+ * One nullable field rather than a `reviewed` boolean beside an optional
+ * digest, because those two can contradict each other and this cannot: a
+ * digest is a mark on that exact diff, and null is no mark at all.
+ */
+export const setFileReviewedInputSchema = z.object({
+  reviewId: reviewIdSchema,
+  filePath: z.string().min(1).max(4096),
+  contentDigest: z.string().min(1).max(DIGEST_MAX_LENGTH).nullable()
+})
+
+export type ReviewedFile = z.infer<typeof reviewedFileSchema>
+export type ListReviewedFilesInput = z.input<typeof listReviewedFilesInputSchema>
+export type SetFileReviewedInput = z.input<typeof setFileReviewedInputSchema>
 
 /* -------------------------------------------------------------------------- */
 /* Comments                                                                   */

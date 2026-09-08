@@ -48,7 +48,13 @@ export const CACHE_KEYS = {
    * resolution differs between them, and that is computed in the component
    * from whichever diff it is showing.
    */
-  reviewComments: (reviewId: number) => `review-comments:${reviewId}`
+  reviewComments: (reviewId: number) => `review-comments:${reviewId}`,
+  /**
+   * Reviewed marks, keyed per review for the same reason as comments: they are
+   * a plain database read, and which of them still count is worked out in the
+   * component from whichever diff it is showing.
+   */
+  reviewedFiles: (reviewId: number) => `review-reviewed:${reviewId}`
 } as const
 
 /** Prefixes used by the family-wide invalidation above. */
@@ -58,5 +64,6 @@ export const CACHE_PREFIXES = {
   reviewCommits: 'review-commits:',
   reviewDiff: 'review-diff:',
   reviewFile: 'review-file:',
-  reviewComments: 'review-comments:'
+  reviewComments: 'review-comments:',
+  reviewedFiles: 'review-reviewed:'
 } as const

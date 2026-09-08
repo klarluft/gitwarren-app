@@ -11,6 +11,7 @@ import { BrowserWindow, dialog, ipcMain, shell, app } from 'electron'
 import { attachmentsService } from '../core/services/attachments.js'
 import { commentsService } from '../core/services/comments.js'
 import { repositoriesService } from '../core/services/repositories.js'
+import { reviewedFilesService } from '../core/services/reviewed-files.js'
 import { reviewsService } from '../core/services/reviews.js'
 import { getDataDirectory, getDatabasePath } from '../core/paths.js'
 import { HUMAN_AUTHOR } from '../shared/actors.js'
@@ -73,6 +74,13 @@ export function registerIpcHandlers(): void {
     const absolute = await reviewsService.absolutePath(input)
     await openInEditor(absolute, line, editorId)
   })
+
+  // Reviewed marks are a record of what the person at the keyboard has read,
+  // so they are reachable from the UI and from nowhere else. There is
+  // deliberately no MCP tool for them: an agent claiming a human has reviewed
+  // a file would make the one honest signal on the screen worthless.
+  handle(IPC_CHANNELS.reviewsReviewedFiles, (input) => reviewedFilesService.list(input))
+  handle(IPC_CHANNELS.reviewsSetFileReviewed, (input) => reviewedFilesService.setReviewed(input))
 
   // Every comment write passes HUMAN_AUTHOR, and there is no way to reach these
   // channels except by typing into the app - the renderer has no other route to

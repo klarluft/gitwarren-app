@@ -323,6 +323,35 @@ decides where the hidden runs are and which line number each unfolded line gets;
 it is pure, and unit-tested against the shapes that get this wrong — a diff that
 does not start at line 1, and git's off-by-one convention for an empty range.
 
+### Marking a file reviewed
+
+Each file header carries a **Reviewed** checkbox, and `v` ticks off whichever
+file you are on. A ticked file folds away, the file tree marks it and dims it,
+and the header counts how many of them are done — so a long diff shrinks to what
+is still unread as you work through it.
+
+The mark has to stop being true when the file changes, or the list would claim
+someone had read code that did not exist when they looked at it. So what is
+stored is not a flag but a digest of the diff that was on screen at the time
+(`shared/diff-digest.ts`, a cyrb53 fingerprint of the path, the change status
+and every line of every hunk). A mark counts only while the file still hashes to
+the same value; when it does not, the tick clears itself and the file is
+labelled **Changed since reviewed** — which is more useful than silently
+unticking it, because it points at the one file that moved after being read.
+
+Two consequences fall out of that rather than needing code of their own. Flipping
+*include uncommitted* is a different diff, so a file read in one setting is not
+ticked in the other. And reverting a change restores the mark, because the file
+hashes the same way it did before.
+
+The comparison runs in the renderer, against the diff being rendered, and the
+main process only stores digests: the "include uncommitted" switch means one
+review has two diffs at once, and a mark resolved against the one you are not
+looking at would be answering a question nobody asked. The rows live in
+`reviewed_files`, keyed by review and path, and go with the review when it is
+deleted. There is no MCP tool for them — an agent claiming a human has read a
+file would make the only honest signal on the screen worthless.
+
 ### Opening a file in an editor
 
 `system.editors()` probes for VS Code, Cursor, Windsurf, Zed, Sublime Text and
