@@ -52,7 +52,7 @@ import { CommentThreadCard } from '../comments/comment-thread-card'
 import { DiffSnippet } from './diff-snippet'
 import { FilePath } from './file-path'
 import { ImageDiff } from './image-diff'
-import { lineDomId } from './dom-ids'
+import { ACTIVE_MATCH_ID, lineDomId } from './dom-ids'
 import { useReviewFile } from './use-reviews'
 import type { CommentMutations } from '../comments/use-comments'
 import { threadSnippet } from '@shared/comment-snippets'
@@ -65,6 +65,7 @@ import {
   type GapSegment
 } from '@shared/diff-gaps'
 import { errorMessage } from '@/lib/errors'
+import { matchOffsets, rowPosition, type DiffSearch } from './diff-search'
 import { imageMediaType } from '@shared/git'
 import type { DiffChanges, DiffHunk, DiffLine, FileChangeStatus, FileDiff } from '@shared/git'
 import type { CommentThread } from '@shared/schemas'
@@ -211,7 +212,8 @@ export function FileDiffCard({
   source,
   focus,
   marked,
-  reviewed
+  reviewed,
+  search
 }: {
   file: FileDiff
   comments?: DiffComments
@@ -222,6 +224,8 @@ export function FileDiffCard({
   marked?: { side: DiffSide; line: number }
   /** Omitted where there is nothing to mark against - a card shown on its own. */
   reviewed?: ReviewedMark
+  /** The find running over the whole diff, as it applies to this file. */
+  search?: DiffSearch
 }) {
   const lineCount = file.hunks.reduce((total, hunk) => total + hunk.lines.length, 0)
   /** Null until the reviewer opens or closes the card themselves. */
@@ -241,11 +245,16 @@ export function FileDiffCard({
    * by hand stays closed.
    */
   const expanded =
-    toggled ??
-    // A file already ticked off arrives folded: the list of what is left to
-    // read is the point of the mark, and a read file taking up a screen of
-    // space works against it.
-    (focus !== undefined || (!isReviewed && lineCount <= COLLAPSE_ABOVE_LINES))
+    // A hit the reader is being walked to wins over a card they closed by hand,
+    // or ticked off: "12 matches" that stops on a file showing nothing would be
+    // a lie. It is only for as long as the hit is the current one - move on, and
+    // the card goes back to however the reader left it.
+    search?.active != null ||
+    (toggled ??
+      // A file already ticked off arrives folded: the list of what is left to
+      // read is the point of the mark, and a read file taking up a screen of
+      // space works against it.
+      (focus !== undefined || (!isReviewed && lineCount <= COLLAPSE_ABOVE_LINES)))
   const setExpanded = setToggled
 
   /**
@@ -401,7 +410,8 @@ export function FileDiffCard({
       : composingOn,
     covered,
     marked: marked ?? null,
-    filePath: file.path
+    filePath: file.path,
+    search: search ?? null
   }
 
   const orphans = threads.filter((thread) => thread.anchor.line === null)
@@ -958,6 +968,8 @@ interface RowContext {
   /** The line arrived at from a conversation thread, marked briefly. */
   marked: { side: DiffSide; line: number } | null
   filePath: string
+  /** The find in progress, so a row can pick its own hits out. */
+  search: DiffSearch | null
 }
 
 function HunkRows({
@@ -991,15 +1003,12 @@ function LineRow({
   selection,
   covered,
   marked,
-  filePath
+  filePath,
+  search
 }: { line: DiffLine } & RowContext) {
-  /**
-   * Which side a comment on this row belongs to. Head where the line still
-   * exists, base for a line the change deleted - the same choice GitHub makes,
-   * and the only one that lets a reviewer remark on removed code at all.
-   */
-  const side: DiffSide = line.newNumber !== null ? 'head' : 'base'
-  const number = side === 'head' ? line.newNumber : line.oldNumber
+  // Which side a comment on this row belongs to, and the number it carries
+  // there. Shared with the search, so a hit is addressed to the row it is on.
+  const { side, number } = rowPosition(line)
 
   const threads = number === null ? [] : (placed.get(`${side}:${number}`) ?? [])
   // The composer opens under the *last* line of the range, where the eye is
@@ -1095,7 +1104,18 @@ function LineRow({
           <span aria-hidden className="select-none opacity-60">
             {line.type === 'insert' ? '+' : line.type === 'delete' ? '-' : ' '}
           </span>
-          {line.content}
+          <LineText
+            content={line.content}
+            query={search?.query ?? null}
+            activeOccurrence={
+              number !== null &&
+              search?.active != null &&
+              search.active.side === side &&
+              search.active.line === number
+                ? search.active.occurrence
+                : null
+            }
+          />
         </span>
       </div>
 
@@ -1149,6 +1169,55 @@ function LineRow({
       )}
     </>
   )
+}
+
+/**
+ * One row's code, with the search hits picked out of it.
+ *
+ * The scan happens here, per rendered row, rather than being handed down from
+ * the search: only the rows actually on screen pay for it, and a file the
+ * reader never opened costs nothing. `matchOffsets` is the same function the
+ * counter walks, so what is marked and what is counted cannot drift.
+ */
+function LineText({
+  content,
+  query,
+  activeOccurrence
+}: {
+  content: string
+  query: string | null
+  /** Index of the hit *in this row* that the reader is being pointed at. */
+  activeOccurrence: number | null
+}) {
+  const offsets = query === null ? [] : matchOffsets(content, query)
+  if (query === null || offsets.length === 0) return <>{content}</>
+
+  const parts: ReactNode[] = []
+  let cursor = 0
+
+  for (const [index, offset] of offsets.entries()) {
+    if (offset > cursor) parts.push(content.slice(cursor, offset))
+    const end = offset + query.length
+    const isActive = index === activeOccurrence
+    parts.push(
+      <mark
+        key={offset}
+        id={isActive ? ACTIVE_MATCH_ID : undefined}
+        className={cn(
+          'rounded-[2px] text-inherit',
+          // The current hit is the one the page just scrolled to, so it has to
+          // be findable at a glance among the others on the same screen.
+          isActive ? 'bg-warning/60 shadow-[0_0_0_1px_var(--color-warning)]' : 'bg-warning/25'
+        )}
+      >
+        {content.slice(offset, end)}
+      </mark>
+    )
+    cursor = end
+  }
+
+  if (cursor < content.length) parts.push(content.slice(cursor))
+  return <>{parts}</>
 }
 
 function Gutter({ value }: { value: number | null }) {

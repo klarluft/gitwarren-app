@@ -16,11 +16,15 @@ import {
   ArrowDown,
   ArrowUp,
   CheckCheck,
+  ChevronDown,
+  ChevronUp,
   FileDiff,
   GitCompareArrows,
   PanelLeft,
   PanelLeftClose,
-  RefreshCw
+  RefreshCw,
+  Search,
+  X
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -34,6 +38,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { api } from '@/lib/api'
 import { errorMessage } from '@/lib/errors'
+import { formatStep } from '@/lib/keys'
 import { plural } from '@/lib/format'
 import { useStoredFlag, useStoredPreference } from '@/lib/preferences'
 import { revealElement } from '@/lib/reveal'
@@ -42,6 +47,7 @@ import type { DiffFocus } from '@/lib/router'
 import { CommentThreadCard } from '../comments/comment-thread-card'
 import { useCommentMutations, useReviewComments } from '../comments/use-comments'
 import { ChangedFilesTree } from './changed-files-tree'
+import { DiffFindBar, useDiffFind } from './diff-find-bar'
 import { CompareErrorCard, NoWorktreeNotice, WorkingTreeBanner } from './compare-notices'
 import { fileDomId, lineDomId } from './dom-ids'
 import { DiffSnippet } from './diff-snippet'
@@ -280,8 +286,12 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
     return [...threadsByFile].filter(([path]) => !present.has(path))
   }, [data?.files, threadsByFile])
 
-  const paths = useMemo(() => (data?.files ?? []).map((file) => file.path), [data?.files])
+  // One array identity per diff, so the search below is not re-run against a
+  // freshly built list on every keystroke elsewhere on the screen.
+  const files = useMemo(() => data?.files ?? [], [data?.files])
+  const paths = useMemo(() => files.map((file) => file.path), [files])
   const activePath = useActiveFile(paths)
+  const find = useDiffFind(files)
 
   /**
    * The fingerprint of every file *as it is being shown*, which is what a
@@ -484,6 +494,54 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
           run: toggleCurrentReviewed
         },
         {
+          id: 'files:find',
+          label: 'Find in the diff',
+          group: 'Files changed',
+          keys: 'mod+f',
+          keywords: 'search text highlight grep locate',
+          icon: Search,
+          disabled: paths.length === 0,
+          run: find.show
+        },
+        // Only while the bar is up. The help sheet lists what works here, and
+        // "next match" with nothing being searched for is not one of them.
+        ...(find.open
+          ? [
+              {
+                id: 'files:find-next',
+                label: 'Next match',
+                group: 'Files changed',
+                keys: 'mod+g',
+                keywords: 'search find again forward',
+                icon: ChevronDown,
+                disabled: find.matches.length === 0,
+                run: () => find.step(1)
+              } satisfies Command,
+              {
+                id: 'files:find-previous',
+                label: 'Previous match',
+                group: 'Files changed',
+                keys: 'mod+shift+g',
+                keywords: 'search find again back',
+                icon: ChevronUp,
+                disabled: find.matches.length === 0,
+                run: () => find.step(-1)
+              } satisfies Command,
+              {
+                id: 'files:find-close',
+                label: 'Close the find bar',
+                group: 'Files changed',
+                keys: 'escape',
+                icon: X,
+                // Escape is answered by the field itself while it has the
+                // focus; this is for the reader who has clicked back into the
+                // diff and still expects it to put the search away.
+                hidden: true,
+                run: find.close
+              } satisfies Command
+            ]
+          : []),
+        {
           id: 'files:refresh',
           label: 'Refresh the diff',
           group: 'Files changed',
@@ -503,7 +561,8 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
         refresh,
         activePath,
         reviewedPaths,
-        toggleCurrentReviewed
+        toggleCurrentReviewed,
+        find
       ]
     )
   )
@@ -559,6 +618,19 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
             <Button
               variant="ghost"
               size="sm"
+              onClick={find.show}
+              title={`Find in the diff (${formatStep('mod+f')})`}
+              aria-expanded={find.open}
+            >
+              <Search />
+              Find
+            </Button>
+          )}
+
+          {data.files.length > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => setTreeOpen(!treeOpen)}
               title={treeOpen ? 'Hide the file list' : 'Show the file list'}
               aria-pressed={treeOpen}
@@ -608,6 +680,8 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
           </Button>
         </div>
       </div>
+
+      {find.open && <DiffFindBar find={find} />}
 
       {changes !== 'committed' && data.workingTree?.isDirty && (
         <WorkingTreeBanner workingTree={data.workingTree} />
@@ -744,6 +818,7 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
                   // Only the card that owns the line hears about it, so one
                   // arriving link cannot light up the same number in every file.
                   focus={focus?.filePath === file.path ? focus : undefined}
+                  search={find.searchFor(file.path)}
                   marked={marked?.filePath === file.path ? marked : undefined}
                   reviewed={{
                     isReviewed: reviewedPaths.has(file.path),
