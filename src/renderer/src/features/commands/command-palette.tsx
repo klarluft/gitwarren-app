@@ -25,6 +25,7 @@ import {
 } from 'react'
 import useSWR, { useSWRConfig } from 'swr'
 import { CornerDownLeft, FileDiff, FolderGit2, GitPullRequestArrow, Search } from 'lucide-react'
+import { HighlightedText } from '@/components/highlighted-text'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { Kbd } from '@/components/ui/kbd'
 import { api, CACHE_KEYS } from '@/lib/api'
@@ -445,7 +446,7 @@ function Row({
     >
       {Icon && <Icon className="size-4 shrink-0 text-muted-foreground" />}
       <span className="min-w-0 flex-1 truncate">
-        <Highlighted text={item.label} indices={entry.match.indices} />
+        <HighlightedText text={item.label} indices={entry.match.indices} />
       </span>
       {item.hint !== undefined && (
         <span className="max-w-[45%] shrink-0 truncate font-mono text-xs text-muted-foreground">
@@ -457,34 +458,5 @@ function Row({
         <CornerDownLeft className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
       )}
     </div>
-  )
-}
-
-/** The label with the characters the query actually hit picked out. */
-function Highlighted({ text, indices }: { text: string; indices: number[] }) {
-  if (indices.length === 0) return <>{text}</>
-
-  const hit = new Set(indices)
-  const parts: { text: string; match: boolean }[] = []
-
-  for (let position = 0; position < text.length; position += 1) {
-    const match = hit.has(position)
-    const last = parts.at(-1)
-    if (last && last.match === match) last.text += text[position]
-    else parts.push({ text: text[position] as string, match })
-  }
-
-  return (
-    <>
-      {parts.map((part, partIndex) =>
-        part.match ? (
-          <mark key={partIndex} className="bg-transparent font-semibold text-foreground">
-            {part.text}
-          </mark>
-        ) : (
-          <span key={partIndex}>{part.text}</span>
-        )
-      )}
-    </>
   )
 }

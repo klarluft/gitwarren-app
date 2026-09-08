@@ -33,6 +33,7 @@ import { plural } from '@/lib/format'
 import { useRegisterCommands, type Command } from '@/features/commands/command-registry'
 import { navigate, replace, REVIEW_TABS, type DiffFocus, type ReviewTab } from '@/lib/router'
 import { useReviewComments } from '../comments/use-comments'
+import { RefChip } from './ref-chip'
 import { ReviewCommitsTab } from './review-commits-tab'
 import { ReviewConversationTab } from './review-conversation-tab'
 import { ReviewFilesTab } from './review-files-tab'
@@ -213,12 +214,12 @@ export function ReviewDetail({ reviewId, tab, focus }: ReviewDetailProps) {
                   committed on main yet. */}
               {!selfReview && (
                 <>
-                  <span className="rounded bg-muted px-1.5 py-0.5">{review.baseRef}</span>
+                  <RefChip name={review.baseRef} role="base ref" />
                   <UpstreamDrift endpoint={commits.data?.base} role="base" />
                   <ArrowRight className="size-3" />
                 </>
               )}
-              <span className="rounded bg-muted px-1.5 py-0.5">{review.headRef}</span>
+              <RefChip name={review.headRef} role={selfReview ? 'ref' : 'compare ref'} />
               <UpstreamDrift endpoint={commits.data?.head} role="head" />
               {workingTree?.isDirty && (
                 <Badge
