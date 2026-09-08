@@ -64,6 +64,7 @@ export function registerIpcHandlers(): void {
   handle(IPC_CHANNELS.reviewsCommits, (input) => reviewsService.commits(input))
   handle(IPC_CHANNELS.reviewsDiff, (input) => reviewsService.diff(input))
   handle(IPC_CHANNELS.reviewsFile, (input) => reviewsService.file(input))
+  handle(IPC_CHANNELS.reviewsImage, (input) => reviewsService.image(input))
 
   // Two steps rather than one service call: *which* file on disk is review
   // knowledge and belongs in the service, while launching an application is a

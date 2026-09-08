@@ -114,6 +114,54 @@ export async function runGitRaw(
   }
 }
 
+export interface GitBinaryResult {
+  stdout: Buffer
+  stderr: string
+  code: number
+}
+
+/**
+ * Like `runGitRaw`, but hands back the bytes.
+ *
+ * Needed for exactly one thing: reading an image blob out of the object
+ * database. Decoding a PNG as UTF-8 and re-encoding it does not round-trip, so
+ * the string-returning variants cannot be used for content that is not text.
+ */
+export async function runGitBinary(
+  args: string[],
+  cwd: string,
+  options: RunGitOptions = {}
+): Promise<GitBinaryResult> {
+  try {
+    const { stdout, stderr } = await execFileAsync('git', args, {
+      cwd,
+      timeout: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      maxBuffer: options.maxBuffer ?? DEFAULT_MAX_BUFFER,
+      windowsHide: true,
+      encoding: 'buffer',
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0' }
+    })
+    return { stdout, stderr: stderr.toString('utf8'), code: 0 }
+  } catch (error) {
+    const err = error as NodeJS.ErrnoException & {
+      stdout?: Buffer
+      stderr?: Buffer
+      code?: unknown
+    }
+    if (err.code === 'ENOENT') {
+      throw new AppError(
+        'GIT_UNAVAILABLE',
+        'Could not run `git`. Make sure git is installed and available on your PATH.'
+      )
+    }
+    return {
+      stdout: err.stdout ?? Buffer.alloc(0),
+      stderr: err.stderr?.toString('utf8') ?? '',
+      code: typeof err.code === 'number' ? err.code : 1
+    }
+  }
+}
+
 export async function isDirectory(path: string): Promise<boolean> {
   try {
     return (await stat(path)).isDirectory()

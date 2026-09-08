@@ -7,7 +7,7 @@
  * this file is transport, not behaviour.
  */
 import type { SerializedAppError } from './errors.js'
-import type { FileContent, RepositoryRefs, ReviewCommits, ReviewDiff } from './git.js'
+import type { FileContent, FileImage, RepositoryRefs, ReviewCommits, ReviewDiff } from './git.js'
 import type {
   AddRepositoryInput,
   Attachment,
@@ -32,6 +32,7 @@ import type {
   ReviewDiffInput,
   ReviewedFile,
   ReviewFileInput,
+  ReviewImageInput,
   ReviewWithRepository,
   ListReviewedFilesInput,
   SetFileReviewedInput,
@@ -56,6 +57,7 @@ export const IPC_CHANNELS = {
   reviewsCommits: 'reviews:commits',
   reviewsDiff: 'reviews:diff',
   reviewsFile: 'reviews:file',
+  reviewsImage: 'reviews:image',
   reviewsOpenInEditor: 'reviews:openInEditor',
   reviewsReviewedFiles: 'reviews:reviewedFiles',
   reviewsSetFileReviewed: 'reviews:setFileReviewed',
@@ -184,6 +186,11 @@ export interface GitWarrenApi {
      * expanded context comes from the same version of the file.
      */
     file(input: ReviewFileInput): Promise<FileContent>
+    /**
+     * One side's bytes of an image in this review, as a `data:` URL. Asked for
+     * a side at a time, because a change to a picture is two pictures.
+     */
+    image(input: ReviewImageInput): Promise<FileImage>
     /** Open a file of this review in the reviewer's editor, at a line. */
     openInEditor(input: OpenReviewFileInput): Promise<void>
     /**

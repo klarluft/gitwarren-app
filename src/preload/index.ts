@@ -17,7 +17,13 @@ import {
   type IpcResult,
   type UpdateStatus
 } from '../shared/api.js'
-import type { FileContent, RepositoryRefs, ReviewCommits, ReviewDiff } from '../shared/git.js'
+import type {
+  FileContent,
+  FileImage,
+  RepositoryRefs,
+  ReviewCommits,
+  ReviewDiff
+} from '../shared/git.js'
 import type {
   AddRepositoryInput,
   Attachment,
@@ -42,6 +48,7 @@ import type {
   ReviewDiffInput,
   ReviewedFile,
   ReviewFileInput,
+  ReviewImageInput,
   ReviewWithRepository,
   ListReviewedFilesInput,
   SetFileReviewedInput,
@@ -82,6 +89,7 @@ const api: GitWarrenApi = {
       invoke<ReviewCommits>(IPC_CHANNELS.reviewsCommits, input),
     diff: (input: ReviewDiffInput) => invoke<ReviewDiff>(IPC_CHANNELS.reviewsDiff, input),
     file: (input: ReviewFileInput) => invoke<FileContent>(IPC_CHANNELS.reviewsFile, input),
+    image: (input: ReviewImageInput) => invoke<FileImage>(IPC_CHANNELS.reviewsImage, input),
     openInEditor: (input: OpenReviewFileInput) =>
       invoke<void>(IPC_CHANNELS.reviewsOpenInEditor, input),
     reviewedFiles: (input: ListReviewedFilesInput) =>

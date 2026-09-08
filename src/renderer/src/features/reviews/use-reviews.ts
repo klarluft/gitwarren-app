@@ -18,7 +18,9 @@ import { api, CACHE_KEYS, CACHE_PREFIXES } from '@/lib/api'
 import type { EditorList } from '@shared/api'
 import type {
   DiffChanges,
+  DiffFileSide,
   FileContent,
+  FileImage,
   RepositoryRefs,
   ReviewCommits,
   ReviewDiff
@@ -143,6 +145,29 @@ export function useReviewFile(
     requested,
     load: useCallback(() => setRequested(true), [])
   }
+}
+
+/**
+ * One side of an image in the diff, as a `data:` URL.
+ *
+ * Read as soon as it is asked for, unlike the text of a file: the caller is a
+ * preview that is already on screen, so there is nothing to defer. A null path
+ * means this side of the change has no image at all - a new file has no base,
+ * a deleted one has no head - and skips the read entirely.
+ */
+export function useReviewImage(
+  reviewId: number,
+  path: string | null,
+  side: DiffFileSide,
+  changes: DiffChanges
+): { image: FileImage | undefined; error: unknown; isLoading: boolean } {
+  const result = useSWR<FileImage, unknown>(
+    path === null ? null : CACHE_KEYS.reviewImage(reviewId, path, side, changes),
+    () => api.reviews.image({ id: reviewId, path: path as string, side, changes }),
+    LIVE_READ_OPTIONS
+  )
+
+  return { image: result.data, error: result.error, isLoading: result.isLoading }
 }
 
 /**
