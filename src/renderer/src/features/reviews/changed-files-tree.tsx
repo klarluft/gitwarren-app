@@ -15,6 +15,7 @@ import { useMemo, useState } from 'react'
 import { Check, ChevronDown, ChevronRight, History } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { FileStatusIcon } from './diff-view'
+import { FilePath } from './file-path'
 import type { FileDiff } from '@shared/git'
 
 interface FileNode {
@@ -151,16 +152,16 @@ function TreeRows({
           onClick={() => setOpen((current) => !current)}
           aria-expanded={open}
           style={indent}
-          className="flex w-full items-center gap-1 rounded py-1 pr-1 text-left text-muted-foreground hover:bg-muted"
+          className="flex w-full items-start gap-1 rounded py-1 pr-1 text-left text-muted-foreground hover:bg-muted"
         >
           {open ? (
-            <ChevronDown className="size-3 shrink-0" />
+            <ChevronDown className="mt-0.5 size-3 shrink-0" />
           ) : (
-            <ChevronRight className="size-3 shrink-0" />
+            <ChevronRight className="mt-0.5 size-3 shrink-0" />
           )}
-          <span className="truncate" title={node.path}>
-            {node.name}
-          </span>
+          {/* Wraps rather than truncates, like every other path in the app:
+              a folded chain of directories is often longer than the column. */}
+          <FilePath path={node.name} emphasizeName={false} className="min-w-0" />
         </button>
         {open &&
           node.children.map((child) => (
@@ -191,7 +192,7 @@ function TreeRows({
       style={indent}
       aria-current={isActive ? 'true' : undefined}
       className={cn(
-        'flex w-full items-center gap-1.5 rounded py-1 pr-1 text-left transition-colors',
+        'flex w-full items-start gap-1.5 rounded py-1 pr-1 text-left transition-colors',
         isActive ? 'bg-accent text-accent-foreground' : 'hover:bg-muted',
         // Read files stay legible but recede, so what is left to do stands out.
         isReviewed && !isActive && 'text-muted-foreground'
@@ -205,13 +206,15 @@ function TreeRows({
       }
     >
       {isReviewed ? (
-        <Check className="size-3 shrink-0 text-success" />
+        <Check className="mt-0.5 size-3 shrink-0 text-success" />
       ) : hasChangedSince ? (
-        <History className="size-3 shrink-0 text-warning" />
+        <History className="mt-0.5 size-3 shrink-0 text-warning" />
       ) : (
-        <FileStatusIcon status={node.file.status} className="size-3 shrink-0" />
+        <FileStatusIcon status={node.file.status} className="mt-0.5 size-3 shrink-0" />
       )}
-      <span className="min-w-0 flex-1 truncate font-mono text-[0.6875rem]">{node.name}</span>
+      {/* The whole name, wrapped if it has to be. A file list that cannot tell
+          you which file a row is is not doing the one job it has. */}
+      <span className="min-w-0 flex-1 break-words font-mono text-[0.6875rem]">{node.name}</span>
       {unresolved > 0 && (
         <span
           className="shrink-0 rounded-full bg-primary px-1 text-[0.5625rem] font-semibold leading-4 text-primary-foreground"
@@ -221,7 +224,7 @@ function TreeRows({
         </span>
       )}
       {!node.file.isBinary && (
-        <span className="shrink-0 font-mono text-[0.625rem] tabular-nums">
+        <span className="mt-px shrink-0 font-mono text-[0.625rem] tabular-nums">
           <span className="text-success">+{node.file.additions}</span>{' '}
           <span className="text-destructive">−{node.file.deletions}</span>
         </span>

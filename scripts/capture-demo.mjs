@@ -33,9 +33,11 @@ const OUT_DIR = process.env.SHOT_DIR ?? 'screenshots-out'
 /**
  * Two sizes, and the reasoning behind both.
  *
- * `wide` is 1200x800. The review screen caps its content at `max-w-5xl`
- * (1024px), so a wider frame buys empty gutters rather than more app; 3:2 is
- * also the shape a desktop window actually is, which keeps the hero honest.
+ * `wide` is 1200x800. The reading tabs cap their content at `max-w-5xl`
+ * (1024px), so a wider frame buys them empty gutters rather than more app; 3:2
+ * is also the shape a desktop window actually is, which keeps the hero honest.
+ * The files tab does go wider than this on a wide window - see `reviewWidth` in
+ * `App.tsx` - so a diff shot here is a narrower window, not the ceiling.
  *
  * `narrow` is 760x900 - portrait, for the point in a responsive layout where a
  * 1200px-wide image would shrink to unreadable. Cropping a tall slice keeps the

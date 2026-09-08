@@ -21,6 +21,7 @@
 import { ChevronRight, FileCode } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
+import { FilePath } from './file-path'
 import type { AnchorState, DiffSide } from '@shared/comment-anchors'
 import type { DiffLine } from '@shared/git'
 
@@ -84,9 +85,8 @@ export function DiffSnippet({
         )}
       >
         <FileCode className="size-4 shrink-0 text-muted-foreground" />
-        <span className="min-w-0 flex-1 truncate font-mono text-xs" data-selectable>
-          {filePath}
-        </span>
+        <FilePath path={filePath} className="min-w-0 flex-1 font-mono text-xs" />
+
         {lineLabel && (
           <span className="shrink-0 font-mono text-xs text-muted-foreground">{lineLabel}</span>
         )}

@@ -683,7 +683,10 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
         // the diff beside it scrolls; a stretched column would never stick.
         <div className="flex items-start gap-4">
           {treeOpen && (
-            <aside className="sticky top-2 max-h-[calc(100vh-6rem)] w-56 shrink-0 overflow-y-auto rounded-lg border border-border bg-card/50 px-1">
+            // Wider where there is room for it: on a wide window the diff has
+            // width to spare, and every column the tree gains is a file name
+            // that fits on one line instead of wrapping onto two.
+            <aside className="sticky top-2 max-h-[calc(100vh-6rem)] w-56 shrink-0 overflow-y-auto rounded-lg border border-border bg-card/50 px-1 xl:w-64 2xl:w-72">
               <ChangedFilesTree
                 files={data.files}
                 activePath={activePath}
