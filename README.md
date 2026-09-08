@@ -244,6 +244,22 @@ Given the head's worktree, the diff is `git diff <merge-base>` run **inside it**
 with no second endpoint — which compares the merge base against the working tree,
 so committed, staged and unstaged changes all arrive in one patch.
 
+The files-changed tab offers three views of that, and the difference between
+them is only which commit the diff is taken against:
+
+| View | Command | What you see |
+| --- | --- | --- |
+| Committed | `git diff <merge-base> <head>` | the branch as it would arrive if pushed |
+| All | `git diff <merge-base>` in the worktree | that, plus everything uncommitted |
+| Uncommitted | `git diff <head>` in the worktree | only the edit being made right now |
+
+The third exists for the case where you are making a small change on top of a
+long-lived branch and want to see just that change. It is the same view a review
+of a ref against itself gives — the merge base of a ref with itself *is* its own
+tip — reached without repointing the review's endpoints and back again. It needs
+a worktree holding the head; without one it shows nothing rather than silently
+widening back out to the whole branch.
+
 Untracked files are handled separately: they are listed with
 `git ls-files --others --exclude-standard` (so `.gitignore` still applies) and
 rendered as whole-file additions. The tempting alternative — staging them into a
@@ -316,9 +332,9 @@ The unfolding costs one read of the whole file, taken the first time the
 reviewer asks and reused for every later expansion of the same file. It is
 deliberately not a line-range API: a range per click would be a git process per
 click, and reading the file once is also the only way to know where it *ends*,
-which no hunk header can say. The read follows the "include uncommitted" switch,
-because context taken from the other version of the file would not line up with
-the hunks it sits between. `src/shared/diff-gaps.ts` holds the arithmetic that
+which no hunk header can say. The read follows whichever view of the changes is
+on screen, because context taken from another version of the file would not line
+up with the hunks it sits between. `src/shared/diff-gaps.ts` holds the arithmetic that
 decides where the hidden runs are and which line number each unfolded line gets;
 it is pure, and unit-tested against the shapes that get this wrong — a diff that
 does not start at line 1, and git's off-by-one convention for an empty range.
@@ -762,8 +778,8 @@ the nearest to the original position wins; a near miss inside the right file
 beats losing the comment.
 
 The same function runs in both surfaces. The renderer anchors against the diff
-already on screen — which matters, because the *include uncommitted* switch
-produces a genuinely different diff with different line numbers — and
+already on screen — which matters, because each view of the changes is a
+genuinely different diff with different line numbers — and
 `list_review_comments` anchors against a diff it reads itself, so an agent and
 the screen never disagree about where a comment sits.
 

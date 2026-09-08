@@ -6,6 +6,7 @@
  * README on why this app talks over IPC rather than a local HTTP server.
  */
 import type { GitWarrenApi } from '@shared/api'
+import type { DiffChanges } from '@shared/git'
 
 if (typeof window.gitwarren === 'undefined') {
   throw new Error(
@@ -31,14 +32,13 @@ export const CACHE_KEYS = {
     `reviews:${repositoryId ?? 'all'}:${status ?? 'any'}`,
   review: (reviewId: number) => `review:${reviewId}`,
   reviewCommits: (reviewId: number) => `review-commits:${reviewId}`,
-  reviewDiff: (reviewId: number, includeUncommitted: boolean) =>
-    `review-diff:${reviewId}:${includeUncommitted ? 'with-uncommitted' : 'committed-only'}`,
+  reviewDiff: (reviewId: number, changes: DiffChanges) => `review-diff:${reviewId}:${changes}`,
   /**
-   * Keyed by the same switch as the diff: expanded context read from the other
+   * Keyed by the same setting as the diff: expanded context read from another
    * version of the file would not line up with the hunks it sits between.
    */
-  reviewFile: (reviewId: number, path: string, includeUncommitted: boolean) =>
-    `review-file:${reviewId}:${includeUncommitted ? 'with-uncommitted' : 'committed-only'}:${path}`,
+  reviewFile: (reviewId: number, path: string, changes: DiffChanges) =>
+    `review-file:${reviewId}:${changes}:${path}`,
   /** Installed code editors. Probed once per run; see `main/editors.ts`. */
   editors: 'editors',
   /**

@@ -64,7 +64,7 @@ import {
   type GapSegment
 } from '@shared/diff-gaps'
 import { errorMessage } from '@/lib/errors'
-import type { DiffHunk, DiffLine, FileChangeStatus, FileDiff } from '@shared/git'
+import type { DiffChanges, DiffHunk, DiffLine, FileChangeStatus, FileDiff } from '@shared/git'
 import type { CommentThread } from '@shared/schemas'
 
 /** Files longer than this arrive collapsed; see the note above. */
@@ -134,19 +134,24 @@ export interface DiffComments {
   /** Only the threads for the file being rendered. */
   threads: AnchoredThread[]
   mutations: CommentMutations
+  /**
+   * The view the line numbers on screen came from, sent with a new thread so
+   * its anchor is captured from the diff the commenter was actually reading.
+   */
+  changes: DiffChanges
 }
 
 /**
  * What the card needs to read more of the file than the patch contains, and to
  * hand it to an editor.
  *
- * `includeUncommitted` has to be the setting the diff on screen was read with:
- * unfolded context from the other version of the file would not line up with
- * the hunks it sits between.
+ * `changes` has to be the setting the diff on screen was read with: unfolded
+ * context from another version of the file would not line up with the hunks it
+ * sits between.
  */
 export interface DiffFileSource {
   reviewId: number
-  includeUncommitted: boolean
+  changes: DiffChanges
   /** Editor to open in, from `system.editors()`. Null uses the default. */
   editorId?: string | null
   /** Named in the button's tooltip, so the click holds no surprises. */
@@ -262,11 +267,7 @@ export function FileDiffCard({
   }, [isReviewed])
 
   const canExpand = source !== undefined && isExpandable(file)
-  const text = useReviewFile(
-    canExpand ? source.reviewId : null,
-    file.path,
-    source?.includeUncommitted ?? true
-  )
+  const text = useReviewFile(canExpand ? source.reviewId : null, file.path, source?.changes ?? 'all')
 
   const reveal = useCallback(
     (from: number, to: number) => {
@@ -1121,6 +1122,7 @@ function LineRow({
                     filePath,
                     side,
                     line: number,
+                    changes: comments.changes,
                     ...(composingOn.startLine < number
                       ? { startLine: composingOn.startLine }
                       : {})

@@ -16,7 +16,13 @@ import useSWR, { useSWRConfig } from 'swr'
 import { useCallback, useMemo, useState } from 'react'
 import { api, CACHE_KEYS, CACHE_PREFIXES } from '@/lib/api'
 import type { EditorList } from '@shared/api'
-import type { FileContent, RepositoryRefs, ReviewCommits, ReviewDiff } from '@shared/git'
+import type {
+  DiffChanges,
+  FileContent,
+  RepositoryRefs,
+  ReviewCommits,
+  ReviewDiff
+} from '@shared/git'
 import type {
   CreateReviewInput,
   Review,
@@ -90,11 +96,11 @@ export function useReviewCommits(reviewId: number): ListState<ReviewCommits> {
   )
 }
 
-export function useReviewDiff(reviewId: number, includeUncommitted: boolean): ListState<ReviewDiff> {
+export function useReviewDiff(reviewId: number, changes: DiffChanges): ListState<ReviewDiff> {
   return toState(
     useSWR<ReviewDiff, unknown>(
-      CACHE_KEYS.reviewDiff(reviewId, includeUncommitted),
-      () => api.reviews.diff({ id: reviewId, includeUncommitted }),
+      CACHE_KEYS.reviewDiff(reviewId, changes),
+      () => api.reviews.diff({ id: reviewId, changes }),
       LIVE_READ_OPTIONS
     )
   )
@@ -121,14 +127,12 @@ export function useReviewFile(
   /** Null for a file that cannot be expanded at all - binary, deleted, clipped. */
   reviewId: number | null,
   path: string,
-  includeUncommitted: boolean
+  changes: DiffChanges
 ): FileContentState {
   const [requested, setRequested] = useState(false)
   const result = useSWR<FileContent, unknown>(
-    requested && reviewId !== null
-      ? CACHE_KEYS.reviewFile(reviewId, path, includeUncommitted)
-      : null,
-    () => api.reviews.file({ id: reviewId as number, path, includeUncommitted }),
+    requested && reviewId !== null ? CACHE_KEYS.reviewFile(reviewId, path, changes) : null,
+    () => api.reviews.file({ id: reviewId as number, path, changes }),
     LIVE_READ_OPTIONS
   )
 

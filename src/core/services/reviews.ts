@@ -220,26 +220,26 @@ export const reviewsService = {
     return readReviewCommits(repository.path, row.baseRef, row.headRef)
   },
 
-  /** The merge-base diff, optionally including uncommitted work. */
+  /** The diff, made of whichever changes `changes` asks for. */
   async diff(input: unknown): Promise<ReviewDiff> {
-    const { id, includeUncommitted } = parse(reviewDiffInputSchema, input)
+    const { id, changes } = parse(reviewDiffInputSchema, input)
     const row = requireReview(id)
     const repository = requireRepository(row.repositoryId)
-    return readReviewDiff(repository.path, row.baseRef, row.headRef, { includeUncommitted })
+    return readReviewDiff(repository.path, row.baseRef, row.headRef, { changes })
   },
 
   /**
    * One file's head-side text, so the UI can expand the lines the diff hid.
    *
    * Read against the same version of the file the diff was taken from, which is
-   * what `includeUncommitted` selects - expanded context from the other version
-   * would silently disagree with the hunks it sits between.
+   * what `changes` selects - expanded context from the other version would
+   * silently disagree with the hunks it sits between.
    */
   async file(input: unknown): Promise<FileContent> {
-    const { id, path, includeUncommitted } = parse(reviewFileInputSchema, input)
+    const { id, path, changes } = parse(reviewFileInputSchema, input)
     const row = requireReview(id)
     const repository = requireRepository(row.repositoryId)
-    return readReviewFile(repository.path, row.baseRef, row.headRef, path, { includeUncommitted })
+    return readReviewFile(repository.path, row.baseRef, row.headRef, path, { changes })
   },
 
   /**
@@ -250,12 +250,10 @@ export const reviewsService = {
    * checked out somewhere other than the repository path.
    */
   async absolutePath(input: unknown): Promise<string> {
-    const { id, path, includeUncommitted } = parse(reviewFileInputSchema, input)
+    const { id, path, changes } = parse(reviewFileInputSchema, input)
     const row = requireReview(id)
     const repository = requireRepository(row.repositoryId)
-    return resolveReviewFilePath(repository.path, row.baseRef, row.headRef, path, {
-      includeUncommitted
-    })
+    return resolveReviewFilePath(repository.path, row.baseRef, row.headRef, path, { changes })
   }
 }
 

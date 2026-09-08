@@ -132,9 +132,9 @@ test('a ref compared against itself reviews the uncommitted work on it', async (
   })
   assert.equal(review.title, 'Uncommitted work on feature')
 
-  const diff = await reviewsService.diff({ id: review.id, includeUncommitted: true })
+  const diff = await reviewsService.diff({ id: review.id, changes: 'all' })
   assert.equal(diff.error, null)
-  assert.equal(diff.includedUncommitted, true)
+  assert.equal(diff.changes, 'all')
 
   // The merge base of a ref with itself is its own tip, so nothing that has
   // been committed shows up - b.txt and the committed half of a.txt are gone,
@@ -165,7 +165,7 @@ test('a self-review with uncommitted work excluded is empty', async () => {
     headRef: 'feature'
   })
 
-  const diff = await reviewsService.diff({ id: review.id, includeUncommitted: false })
+  const diff = await reviewsService.diff({ id: review.id, changes: 'committed' })
   assert.equal(diff.error, null)
   assert.deepEqual(diff.files, [])
 })
@@ -202,10 +202,10 @@ test('the commits tab lists what head added, and finds the uncommitted work', as
 
 test('the diff folds uncommitted work in, and leaves ignored files out', async () => {
   const id = await createReview()
-  const diff = await reviewsService.diff({ id, includeUncommitted: true })
+  const diff = await reviewsService.diff({ id, changes: 'all' })
 
   assert.equal(diff.error, null)
-  assert.equal(diff.includedUncommitted, true)
+  assert.equal(diff.changes, 'all')
 
   const paths = diff.files.map((file) => file.path).sort()
   assert.deepEqual(paths, ['a.txt', 'b.txt', 'staged.txt', 'untracked.txt'])
@@ -234,9 +234,9 @@ test('the diff folds uncommitted work in, and leaves ignored files out', async (
 
 test('uncommitted work can be excluded, leaving the committed diff', async () => {
   const id = await createReview()
-  const diff = await reviewsService.diff({ id, includeUncommitted: false })
+  const diff = await reviewsService.diff({ id, changes: 'committed' })
 
-  assert.equal(diff.includedUncommitted, false)
+  assert.equal(diff.changes, 'committed')
   const paths = diff.files.map((file) => file.path).sort()
   assert.deepEqual(paths, ['a.txt', 'b.txt'])
 
@@ -252,9 +252,55 @@ test('uncommitted work can be excluded, leaving the committed diff', async () =>
   assert.equal(diff.workingTree?.isDirty, true)
 })
 
+test('the diff can be narrowed to only the uncommitted work on the branch', async () => {
+  const id = await createReview()
+  const diff = await reviewsService.diff({ id, changes: 'uncommitted' })
+
+  assert.equal(diff.error, null)
+  assert.equal(diff.changes, 'uncommitted')
+
+  // b.txt is committed on feature and is therefore *not* here, even though it
+  // is part of what this review is about. That is the whole point: what is on
+  // screen is the edit being made right now, not the branch it sits on.
+  const paths = diff.files.map((file) => file.path).sort()
+  assert.deepEqual(paths, ['a.txt', 'staged.txt', 'untracked.txt'])
+  assert.ok(diff.files.every((file) => file.hasUncommittedChanges))
+
+  const a = diff.files.find((file) => file.path === 'a.txt')
+  // Only the uncommitted line, not the committed edit that made TWO uppercase.
+  assert.equal(a?.additions, 1)
+  assert.equal(a?.deletions, 0)
+  assert.ok(
+    a?.hunks.some((hunk) =>
+      hunk.lines.some((line) => line.type === 'insert' && line.content.includes('uncommitted'))
+    )
+  )
+
+  // Same view a self-review gives, reached without repointing the endpoints.
+  const self = await reviewsService.create({
+    repositoryId,
+    baseRef: 'feature',
+    headRef: 'feature'
+  })
+  const selfDiff = await reviewsService.diff({ id: self.id, changes: 'all' })
+  assert.deepEqual(
+    selfDiff.files.map((file) => file.path).sort(),
+    paths
+  )
+})
+
+test('narrowing to uncommitted work reads files from the worktree', async () => {
+  const id = await createReview()
+  const content = await reviewsService.file({ id, path: 'a.txt', changes: 'uncommitted' })
+
+  assert.equal(content.error, null)
+  assert.equal(content.source, 'worktree')
+  assert.deepEqual(content.lines, ['one', 'TWO', 'three', 'four (uncommitted)'])
+})
+
 test('a file can be read whole, from the worktree, to expand the diff', async () => {
   const id = await createReview()
-  const content = await reviewsService.file({ id, path: 'a.txt', includeUncommitted: true })
+  const content = await reviewsService.file({ id, path: 'a.txt', changes: 'all' })
 
   assert.equal(content.error, null)
   assert.equal(content.source, 'worktree')
@@ -266,7 +312,7 @@ test('a file can be read whole, from the worktree, to expand the diff', async ()
 
 test('excluding uncommitted work reads the committed blob instead', async () => {
   const id = await createReview()
-  const content = await reviewsService.file({ id, path: 'a.txt', includeUncommitted: false })
+  const content = await reviewsService.file({ id, path: 'a.txt', changes: 'committed' })
 
   assert.equal(content.error, null)
   assert.equal(content.source, 'commit')

@@ -12,7 +12,7 @@
  */
 import { z } from 'zod'
 import { DIGEST_MAX_LENGTH } from './diff-digest.js'
-import type { DiffLine } from './git.js'
+import type { DiffChanges, DiffLine } from './git.js'
 
 export const MAX_NAME_LENGTH = 120
 
@@ -195,25 +195,31 @@ export const getReviewInputSchema = z.object({ id: reviewIdSchema })
 export const removeReviewInputSchema = z.object({ id: reviewIdSchema })
 export const reviewCommitsInputSchema = z.object({ id: reviewIdSchema })
 
+/**
+ * Which changes to read - see `DiffChanges`. `all` by default: reviewing work
+ * before it is committed is the reason this app exists.
+ *
+ * Listed as a constant rather than inline so the enum and the type it mirrors
+ * are checked against each other at compile time.
+ */
+const DIFF_CHANGES = ['committed', 'all', 'uncommitted'] as const satisfies readonly DiffChanges[]
+
+export const diffChangesSchema = z.enum(DIFF_CHANGES).optional().default('all')
+
 export const reviewDiffInputSchema = z.object({
   id: reviewIdSchema,
-  /**
-   * Fold the head worktree's uncommitted work into the diff. On by default:
-   * reviewing work before it is committed is the reason this app exists. Has no
-   * effect when no worktree has the head branch checked out.
-   */
-  includeUncommitted: z.boolean().optional().default(true)
+  changes: diffChangesSchema
 })
 
 /**
  * One file of a review, read whole so the diff can be expanded past its hunks.
- * `includeUncommitted` has to match the diff on screen, or the expanded context
- * would come from a different version of the file than the hunks around it.
+ * `changes` has to match the diff on screen, or the expanded context would come
+ * from a different version of the file than the hunks around it.
  */
 export const reviewFileInputSchema = z.object({
   id: reviewIdSchema,
   path: z.string().min(1).max(4096),
-  includeUncommitted: z.boolean().optional().default(true)
+  changes: diffChangesSchema
 })
 
 /**
@@ -467,7 +473,14 @@ export const createThreadInputSchema = z
      * a single line. Omit for one line. Must be on the same side and no later
      * than `line`.
      */
-    startLine: z.number().int().positive().optional()
+    startLine: z.number().int().positive().optional(),
+    /**
+     * Which diff the line numbers were read off - see `DiffChanges`. The base
+     * side of a `uncommitted` diff numbers the head commit, not the merge base,
+     * so the anchor has to be captured from the same diff the commenter was
+     * looking at or it would be taken from a different line entirely.
+     */
+    changes: diffChangesSchema
   })
   .refine((value) => (value.filePath === undefined) === (value.line === undefined), {
     message: 'A line comment needs both a file and a line number.',

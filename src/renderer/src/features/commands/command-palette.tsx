@@ -90,8 +90,8 @@ function toPaletteItem(command: Command): PaletteItem {
 /**
  * The changed files of the open review, if some tab has already read them.
  *
- * Both settings of "include uncommitted" are checked because either may be the
- * one on screen, and a file list is a file list - the switch changes the line
+ * Every setting of "changes shown" is checked because any of them may be the
+ * one on screen, and a file list is a file list - the setting changes the line
  * numbers, not which files are in play.
  */
 function useCachedDiffFiles(reviewId: number | null): string[] {
@@ -99,8 +99,8 @@ function useCachedDiffFiles(reviewId: number | null): string[] {
 
   return useMemo(() => {
     if (reviewId === null) return []
-    for (const includeUncommitted of [true, false]) {
-      const entry = cache.get(CACHE_KEYS.reviewDiff(reviewId, includeUncommitted)) as
+    for (const changes of ['all', 'uncommitted', 'committed'] as const) {
+      const entry = cache.get(CACHE_KEYS.reviewDiff(reviewId, changes)) as
         | { data?: ReviewDiff }
         | undefined
       const files = entry?.data?.files
