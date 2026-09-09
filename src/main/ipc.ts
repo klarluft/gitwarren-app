@@ -28,14 +28,23 @@ import { listEditors, openInEditor } from './editors.js'
 import { getMcpLaunchInfo } from './mcp-launch.js'
 import { checkForUpdates, getUpdateStatus, quitAndInstall } from './updater.js'
 
+const TRACE_IPC = process.env.GITWARREN_TRACE_IPC === '1'
+
 /**
  * Wraps a handler so thrown errors arrive in the renderer as structured data
  * rather than as Electron's flattened "Error invoking remote method" string.
  */
 function handle<T>(channel: string, handler: (payload: unknown) => Promise<T> | T): void {
   ipcMain.handle(channel, async (_event, payload: unknown): Promise<IpcResult<T>> => {
+    // Set GITWARREN_TRACE_IPC=1 to see every call with its duration. The point
+    // is to count round trips per screen before the core moves behind a
+    // network carrier - see docs/across-hosts.md, spike S5 - where each one
+    // stops being free.
+    const startedAt = TRACE_IPC ? performance.now() : 0
     try {
-      return { ok: true, data: await handler(payload) }
+      const data = await handler(payload)
+      if (TRACE_IPC) console.error(`[ipc] ${channel} ${(performance.now() - startedAt).toFixed(1)}ms`)
+      return { ok: true, data }
     } catch (error) {
       const appError = AppError.from(error)
       if (appError.code === 'INTERNAL') {
