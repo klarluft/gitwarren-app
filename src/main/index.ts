@@ -173,7 +173,7 @@ function openWindow(): void {
 /**
  * `GitWarren --serve`: the daemon, in this process, instead of a GUI.
  *
- * The same `runDaemon` that `out/daemon/serve.cjs` runs, so there is one
+ * The same `runDaemon` that `out/daemon/gitwarren.cjs` runs, so there is one
  * implementation rather than two that have to agree. What this mode is *for* is
  * a machine that has the app installed and is being reached from elsewhere -
  * M4 spawns exactly this over `ssh` when the far end turns out to have a full

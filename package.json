@@ -42,13 +42,13 @@
     "test": "node scripts/run-tests.mjs",
     "db:generate": "drizzle-kit generate",
     "mcp:dev": "tsx src/mcp/server.ts",
-    "serve:dev": "tsx src/daemon/serve.ts --stdio",
+    "serve:dev": "tsx src/cli/gitwarren.ts serve --stdio",
     "package": "npm run build && electron-builder --publish never",
     "package:dir": "npm run build && electron-builder --dir --publish never",
     "release": "npm run build && electron-builder --publish always",
     "postinstall": "electron-builder install-app-deps",
     "build:web": "vite build --config vite.web.config.ts",
-    "listen:dev": "tsx src/daemon/serve.ts --listen"
+    "listen:dev": "tsx src/cli/gitwarren.ts serve --listen"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",

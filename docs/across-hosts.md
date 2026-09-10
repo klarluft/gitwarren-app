@@ -965,7 +965,8 @@ Brings the WebSocket carrier forward.
   are absent; open-in-editor uses `vscode://file/…:line` links or the daemon
   spawning `code --goto` locally; reveal-in-Finder hidden.
 - **Distribution.** The self-contained tarball from S3 for macOS and Linux; a
-  Homebrew *formula* (the cask stays for the app); `npx gitwarren`. Commands:
+  Homebrew *formula* (the cask stays for the app, so the formula's token is
+  `gitwarren-cli` and the binary is `gitwarren`); `npx gitwarren`. Commands:
   `gitwarren serve`, `gitwarren open`, `gitwarren service install` (LaunchAgent
   / `systemd --user` / at-logon task) so it starts at login like the tray app.
 - **Agent setup, one sentence.** The Agent Access page (in both shells) leads
@@ -993,6 +994,7 @@ each mergeable on its own:
    *(done — see below.)*
 3. **The `gitwarren` CLI and distribution.** `serve`, `open`,
    `service install`; the S3 tarball, a Homebrew formula, `npx gitwarren`.
+   *(done — see below.)*
 4. **The Agent Access page**, one-sentence prompt leading.
 5. **The responsive pass.**
 
@@ -1116,6 +1118,156 @@ It belongs with M6, where a file crosses the tailnet and the cost is visible.
 Drag-and-drop and paste already worked in a tab and needed only the carrier fix;
 what M3.2 added is the file *input*, so the composer's attach button means the
 same thing in both shells.
+
+**M3.3, done on the Mac, 10 September.** The thing there was no *program* for
+until now. The daemon has been runnable since M2 and the web view since M3.1,
+but a person had no name to type, and every sentence written in M3.1 and M3.2
+that names `gitwarren service install` was, until this change, a sentence about
+something that did not exist. This is the change that makes them true.
+
+**One bundle, not two.** `src/daemon/serve.ts` became `src/cli/gitwarren.ts`,
+and `out/daemon/serve.cjs` became `out/daemon/gitwarren.cjs`. The process entry
+moved up a layer rather than being duplicated: `serve`, `open` and
+`service install` share the core, the database and `core/paths.ts`, and a second
+entry point would have put a second copy of all of it in a 40 MB tarball to save
+nothing. `daemon/daemon.ts` went back to being only the daemon, which is what
+its own header asks for, and `main/index.ts` still imports `runDaemon` from
+source — so `GitWarren --serve` is the same daemon it always was.
+
+`gitwarren serve` with no flag means `--listen`. `runDaemon` still requires one
+of the two, which is right for a function whose callers are all programs; the
+default is filled in by the router, at the layer that knows a human typed this.
+Nobody types a command to get a pipe they are not holding, and M3's verify
+sentence says `gitwarren serve` rather than `gitwarren serve --listen`.
+
+**`open` carries the token, and nothing is pasted through.** It reads the
+0600 `web-token` the serving process published, works out the mount from the
+runtime file — `/` for a daemon, `/app/` for the app — and hands the whole URL
+to the desktop. A link argument is *parsed to a `Route` and written back out*
+rather than concatenated, which is the rule M3.1 arrived at the hard way; here
+it also means a command an agent may well be the one running cannot be talked
+into asking the operating system to open an arbitrary string. It starts nothing:
+a server that is not up is reported, and the refusal names both `gitwarren serve`
+and `gitwarren service install`.
+
+**`service install` writes two files and registers one item.** The launchers
+first — `~/.gitwarren/bin/gitwarren` and `gitwarren-mcp`, at the paths the Agent
+Access panel already prints and M4 already plans to spawn — then a LaunchAgent,
+a `systemd --user` unit or an at-logon Scheduled Task, each naming the *launcher*
+rather than a node binary and a bundle. `--no-login-item` stops after the
+launchers, which is what a VPS wants.
+
+Nothing restarts a dead daemon, and that is a decision rather than an omission.
+`serve --listen` has a refusal it is *meant* to exit on, and under `KeepAlive`
+or `Restart=` that refusal becomes a process respawning every ten seconds for as
+long as the user has GitWarren open. This was watched happening the right way
+instead: with the app's own `serve` holding the directory, the LaunchAgent
+started, wrote *"this machine's GitWarren is already being served… A data
+directory has one owner"* to its log, exited 1 and stayed stopped.
+
+**Four tarballs now, not two, and they carry the renderer.** macOS was added
+because M3's verify sentence begins "on a Mac with no GitWarren.app, `brew
+install` the formula", and a formula cannot pour a tarball that does not exist.
+`out/web` was added because `serve --listen` has nothing to serve without it —
+S3's tarball predated the web view entirely. Windows is deliberately absent: a
+`.tar.gz` is not how anything is installed there, and both audiences are served
+by the app and by `npx`.
+
+**A Homebrew formula, hashed in the run that uploads what it names.**
+`packaging/homebrew/gitwarren-cli.rb` is a template;
+`scripts/build-homebrew-formula.mjs` fills in the version and four checksums
+from tarballs that exist and fails on any that do not, and the release attaches
+the result as `gitwarren-cli.rb` for the tap to copy. A tap that hashes the
+release itself hashes it at a second time, against assets it has to hope are
+final, and gets that wrong as `SHA256 mismatch` on a stranger's machine. The
+token is `gitwarren-cli` and not `gitwarren`: the cask already owns that token,
+and a formula sharing it would quietly turn the documented way to install the
+app into a way to install the command line. The *binary* is `gitwarren` in all
+three distributions.
+
+**`npx gitwarren` ships no interpreter.** Someone typing `npx` has proved they
+have Node, so the npm package declares `better-sqlite3` as an ordinary
+dependency and lets npm deliver the prebuild — 724 KB against the tarball's 40
+MB, and the Windows answer without a fourth build target. The root
+`package.json` is not published and could not be: it is `private`, it describes
+an Electron app, and its `postinstall` rebuilds native modules against Electron's
+headers.
+
+Verified on this Mac and in a bare `ubuntu:24.04` arm64 container, against
+scratch data directories, with a repository and a review seeded over the CLI's
+own stdio carrier. `gitwarren serve` printed its URL; `gitwarren open --print`
+produced the byte-identical URL from the token file; Chrome opened it and the
+token was gone from the address bar by the time the page painted, the review's
+description and composer rendered over the socket, and `shell.capabilities` read
+`{pickDirectory: false, revealPath: false, openAtLogin: false}` — M3.2's flags,
+in the shell that has none of them. A `guiUrl` fragment landed straight on
+`#/reviews/1/files` with the diff already there. The LaunchAgent, once nothing
+else held the directory, served on its own and `gitwarren open` found *its*
+token. The macOS tarball was unpacked into a Homebrew-shaped prefix with a
+symlink in `bin` and used with nothing of the checkout in reach; the Linux one
+answered the protocol and MCP `initialize` in a container with no Node at all.
+No console errors and no failed requests in any browser run beyond Chrome's own
+`favicon.ico` probe, which is still M3.5's.
+
+Then the same scratch directory with the real app in front of it, because the
+`gui` half of `open` is the half no headless test can reach. `gitwarren open`
+switched to `/app/` on its own, carrying the token `web-view.ts` had just minted
+- and that URL painted review 1 in Chrome with *zero* failed requests, since the
+app's mount has a favicon to answer with where the daemon's root does not. The
+Electron window itself reported `{pickDirectory: true, revealPath: true,
+openAtLogin: true}`, the exact mirror of the browser's three, which is M3.2's
+flag surviving the entry point being renamed underneath it. `service status`
+named the owner as `GitWarren.app`, and `gitwarren serve` beside it refused with
+M3.1's sentence rather than fighting for the port.
+
+**A login item is a process with no working directory.** The bug worth keeping.
+The first version of the launcher carried whatever `GITWARREN_*` variables the
+installing process had been given, on the reasoning that only a packaging
+decision would set one. True, and beside the point: `resolveMigrationsFolder`
+and `resolveWebRoot` both fall back to walking up from `process.cwd()`, and
+launchd starts a job in `/`. A launcher written from a checkout — where nothing
+sets either variable, because walking up from the repository root finds both —
+produced, at the next login, in a log file:
+
+```
+Error: Could not find the drizzle migrations folder. Looked in:
+  /drizzle
+```
+
+Nothing was wrong with the launcher, the plist or the daemon. What was wrong is
+that the question *where are the migrations* was left to be asked again later,
+by a process that had lost the only context able to answer it. Both are now
+resolved at install time and written in as absolute paths — which is exactly
+what the tarball's `sh` preamble had always done for its own layout, and the
+same decision generalised. The plist's `StandardErrorPath` is why this was a
+sentence in a file rather than a silence.
+
+**Two smaller traps, both cheap to keep.** `dirname "$0"` is the directory of
+the *name a script was invoked by*, and `sh` does not resolve a symlink to get
+it — so a Homebrew install, which is a symlink in `bin` pointing into a Cellar,
+would have computed its root as `/opt/homebrew` and found no `lib`, no `drizzle`
+and no `web`. The tarball's launchers follow the link one hop at a time before
+computing anything (`readlink` without `-f`, which BSD only grew recently). And
+`npm publish out/npm` does not publish a directory: npm reads a bare `<a>/<b>`
+as a GitHub shorthand and goes looking for a repository, reporting it as *"An
+unknown git error occurred"* with no mention of the directory it walked past.
+It needs `./out/npm`, in the workflow and in the README both.
+
+**Not done in M3.3, and why.** The daemon tarballs are not signed or notarised.
+On macOS a `brew install` from a formula does not quarantine what it pours, so
+Gatekeeper is not in the path today — but a user who downloads the same tarball
+from a browser would meet it, and the honest fix is to notarise the bundled Node
+and the two launchers, which is a signing-identity question rather than a
+packaging one and belongs with the release work. `npm publish` is wired but
+inert: it skips without an `NPM_TOKEN`, the name `gitwarren` is unregistered as
+of today, and publishing under it is a decision to take deliberately rather than
+as a side effect of the first tag after this merges. Nothing here is signed with
+provenance either — `--provenance` needs `id-token: write` on the release job,
+and widening that workflow's token is its own change. Windows' Scheduled Task
+path is written and typed but has only been exercised on macOS and Linux;
+`schtasks` is the one branch here no test on this machine can reach, the same
+shape as the Windows launcher-banner bug M2 shipped, so it should be run on the
+PC before the milestone is called done.
 
 ### M4 — SSH hosts
 
@@ -1312,6 +1464,6 @@ least one alternative.
 | Which GUI a link opens | M2, M6 | Loopback resolves on the clicker's machine; tailnet URL for the phone. |
 | Attachments across hosts | M3, M4 | Ingest on the host; HTTP for the web view, the carrier for the app. |
 | Version skew between hosts | M4 | The GUI installs the daemon version it wants; protocol version in the handshake; unknown fields ignored. |
-| Daemon process on headless hosts | M2, M3, M4 | Bundle in M2, service install in M3, spawned on demand over SSH in M4. |
-| Users who will not run Electron | M3 | The same renderer served by the local daemon; brew formula and npm. |
+| Daemon process on headless hosts | M2, M3, M4 | Bundle in M2, `gitwarren service install` in M3.3, spawned on demand over SSH in M4. |
+| Users who will not run Electron | M3 | The same renderer served by the local daemon; the `gitwarren-cli` formula, `npx gitwarren` and the tarball, all from M3.3. |
 | MCP setup per harness and on remote hosts | M2, M3, M4 | Stable launcher path plus a one-sentence prompt the agent applies to its own config. |

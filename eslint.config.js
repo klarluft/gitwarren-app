@@ -51,9 +51,11 @@ export default tseslint.config(
     rules: { '@typescript-eslint/no-floating-promises': 'off' }
   },
 
-  // Build scripts and config files run outside the typed program.
+  // Build scripts, config files and the published npm launcher run outside the
+  // typed program. `packaging/npm/bin` is shipped as-is rather than built, so
+  // it is source in a directory tsc has no reason to know about.
   {
-    files: ['*.config.{js,ts}', 'eslint.config.js', 'scripts/**/*.mjs'],
+    files: ['*.config.{js,ts}', 'eslint.config.js', 'scripts/**/*.mjs', 'packaging/**/*.mjs'],
     ...tseslint.configs.disableTypeChecked,
     languageOptions: {
       globals: globals.node,

@@ -15,7 +15,14 @@ import { WS_PURE_JS } from './vite.ws-define.js'
 const { version } = JSON.parse(readFileSync(resolve('package.json'), 'utf8')) as { version: string }
 
 /**
- * Build for the headless daemon.
+ * Build for the headless daemon - which since M3.3 is the whole `gitwarren`
+ * CLI, entered at `src/cli/gitwarren.ts` and emitted as `gitwarren.cjs`.
+ *
+ * One bundle rather than two. `serve`, `open` and `service install` share the
+ * core, the database and `core/paths.ts`, and a second entry point would put a
+ * second copy of all of it in a tarball to save nothing. The directory is still
+ * `out/daemon` because that is what a machine with no screen gets, and because
+ * `daemon/listen.ts` finds the web build as its sibling.
  *
  * The same shape as `vite.mcp.config.ts`, for the same reasons, and that is
  * worth stating rather than leaving to be inferred: CommonJS because it is
@@ -58,11 +65,11 @@ export default defineConfig({
     ssr: true,
     minify: false,
     rollupOptions: {
-      input: resolve('src/daemon/serve.ts'),
+      input: resolve('src/cli/gitwarren.ts'),
       external: ['better-sqlite3', /^node:/],
       output: {
         format: 'cjs',
-        entryFileNames: 'serve.cjs',
+        entryFileNames: 'gitwarren.cjs',
         inlineDynamicImports: true
       }
     }

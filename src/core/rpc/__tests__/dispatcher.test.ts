@@ -10,7 +10,7 @@
  * M2 is the first time that promise is cashed. The whole file now runs twice:
  * once through `dispatch` and `handleRequest` as a function call, and once
  * through the newline-delimited JSON carrier in `rpc/stdio.ts` - the same code
- * `out/daemon/serve.cjs` runs, over a stream, with every message serialised and
+ * `out/daemon/gitwarren.cjs` runs, over a stream, with every message serialised and
  * parsed. A carrier that passes here is a carrier that cannot have its own
  * opinion about what a review is, which is the property the arrangement exists
  * to hold.

@@ -9,6 +9,17 @@ macOS, Windows and Linux. On macOS there is also a Homebrew cask:
 brew install --cask klarluft/tap/gitwarren
 ```
 
+There is a command line too, which serves the same review UI in a browser
+instead of an Electron window — for a machine that will not have the app on it,
+or one with no screen at all:
+
+```bash
+npx gitwarren serve                       # anywhere Node is
+brew install klarluft/tap/gitwarren-cli   # macOS and Linux, brings its own Node
+```
+
+See [The `gitwarren` command line](#the-gitwarren-command-line).
+
 A cross-platform desktop app for doing local code reviews of your own git
 repositories. Single user, single machine, no server, no account.
 
@@ -47,6 +58,7 @@ Local AI agents get the same capabilities through an MCP server over stdio.
 - [Data storage](#data-storage)
 - [Database migrations](#database-migrations)
 - [Agent access (MCP)](#agent-access-mcp)
+- [The `gitwarren` command line](#the-gitwarren-command-line)
 - [Linking the user back into the app](#linking-the-user-back-into-the-app)
 - [Images in comments](#images-in-comments)
 - [Release process](#release-process)
@@ -984,6 +996,81 @@ same database independently, and an agent gets a working `guiUrl` either way.
 
 ---
 
+## The `gitwarren` command line
+
+The same GitWarren, with a browser tab for a shell. One binary, three
+subcommands, and no Electron anywhere in it.
+
+```bash
+gitwarren serve                 # serve the web view on 127.0.0.1 and print its URL
+gitwarren serve --stdio         # answer GitWarren's protocol on stdin/stdout
+gitwarren open [link]           # open this machine's GitWarren in a browser
+gitwarren service install       # write the launchers, and start at login
+gitwarren service uninstall     # remove the login item
+gitwarren service status        # what is registered, and what is running
+```
+
+It exists for two audiences that the app cannot serve. Someone who will not
+install an Electron app gets the identical renderer in a tab — every line is
+shared, the shell is not. And a machine with no screen at all — a VPS, a WSL
+distro, a box an agent works on — gets the daemon and the MCP server, which is
+what M4 and M5 in [docs/across-hosts.md](docs/across-hosts.md) build on.
+
+### Three ways to install it
+
+| | |
+| --- | --- |
+| `npx gitwarren` | Uses the Node you already have; `better-sqlite3` arrives as an ordinary dependency. The Windows answer, and about 700 KB. |
+| `brew install klarluft/tap/gitwarren-cli` | Pours the self-contained tarball. Brings its own Node, so nothing on the machine can upgrade out from under the native addon. |
+| The release tarball | `gitwarren-daemon-<v>-<target>.tar.gz`, unpacked anywhere. What M4 installs on a remote host. |
+
+The formula is `gitwarren-cli` and the cask stays `gitwarren`. The tokens differ
+so `brew install klarluft/tap/gitwarren` keeps meaning the app; the *binary* is
+called `gitwarren` in all three.
+
+### The token, and why nothing is copied
+
+`gitwarren serve` binds `127.0.0.1` only and mints a token for that launch,
+which it writes to `web-token` in the data directory at mode 0600 and prints in
+the URL. `gitwarren open` reads that file and hands the whole URL to the
+browser, which swaps it for a `SameSite=Strict` cookie on the first request. A
+token is never copied by a person, never persisted across a launch, and
+revoking it is quitting the process. See `src/core/web/token.ts`.
+
+`gitwarren open` also takes a link — either a `gitwarren://` deep link or the
+`http://127.0.0.1:41427/#h=…` URL an agent hands out — and lands on that review
+rather than the home screen. The argument is parsed to a route and written back
+out from that, so nothing typed on a command line is pasted into a URL that is
+then handed to the operating system.
+
+### `service install`
+
+Two things, and only the second is about logging in:
+
+1. **The launchers.** `~/.gitwarren/bin/gitwarren` and `~/.gitwarren/bin/gitwarren-mcp`,
+   at the paths the rest of GitWarren already names — the Agent Access panel
+   prints the second as a command to paste, and M4 spawns the first over ssh as
+   `~/.gitwarren/bin/gitwarren serve --stdio`. Rerunning after an update points
+   them at the install that ran last.
+2. **The login item.** A LaunchAgent on macOS, a `systemd --user` unit on Linux,
+   an at-logon Scheduled Task on Windows — each running `gitwarren serve
+   --listen`. `--no-login-item` writes the launchers and stops, which is what a
+   headless host wants.
+
+Nothing restarts a dead daemon, deliberately. `serve --listen` has a refusal it
+is *meant* to exit on — a data directory has one owner, so it stands aside when
+the app is running — and under launchd's `KeepAlive` or systemd's `Restart=`
+that refusal becomes a process respawning every ten seconds for as long as
+GitWarren is open. See `src/cli/units.ts`.
+
+The launcher scripts name absolute paths for the migrations folder and the web
+build rather than inheriting them. Both have a fallback relative to the working
+directory, and a login item does not have one — launchd starts a job in `/`.
+That is resolved once, at install time, while the answer is still knowable; see
+`src/cli/install.ts`.
+
+---
+
 ## Release process
 
 Artifacts and the update manifest are published to **GitHub Releases**
@@ -1032,7 +1119,9 @@ npm run package:dir    # unpacked app only, much faster
 | Windows | `GitWarren-<v>-x64.exe`, `-arm64.exe` (NSIS), `.blockmap` each, `latest.yml` |
 | macOS | `-arm64.dmg`, `-x64.dmg`, `-arm64.zip`, `-x64.zip`, `.blockmap` each, `latest-mac.yml` |
 | Linux | `-x86_64.AppImage`, `-arm64.AppImage`, `latest-linux.yml`, `latest-linux-arm64.yml` |
-| Any host | `gitwarren-daemon-<v>-linux-x64.tar.gz`, `-linux-arm64.tar.gz` |
+| Any host | `gitwarren-daemon-<v>-{linux,darwin}-{x64,arm64}.tar.gz` |
+| Homebrew | `gitwarren-cli.rb`, the formula with this release's four checksums |
+| npm | `gitwarren@<v>`, published from `out/npm` when `NPM_TOKEN` is set |
 
 The `.blockmap` files are what make updates differential: electron-updater
 compares block hashes with the installed version and downloads only the changed
@@ -1043,17 +1132,30 @@ Dropping that target still produces a working installer but silently breaks
 auto-update.
 
 The **daemon tarballs** are not installers and electron-updater ignores them.
-Each carries a Node binary, the daemon and MCP bundles, the one matching
-`better_sqlite3.node` and the migrations — about 44 MB, and enough to run
-GitWarren's core on a Linux box with nothing installed on it. They are built by
+Each carries a Node binary, the CLI and MCP bundles, the one matching
+`better_sqlite3.node`, the migrations and the web build — about 40 MB, and
+enough to run GitWarren on a box with nothing installed on it. They are built by
 the `daemon` job in `release.yml` from `scripts/build-daemon-tarball.mjs`, on
-one runner for both architectures, and nothing in them is compiled.
+one runner for all four targets, and nothing in them is compiled: better-sqlite3
+ships a prebuild for each, and the Node binaries are downloaded.
+
+There is no Windows tarball, on purpose. A `.tar.gz` is not how anything is
+installed there, and both audiences are already served — a desktop user installs
+the app, and someone who wants the command line has `npx gitwarren`.
 
 Their **file names are a contract**. A GitWarren installing a daemon on a
-remote host runs `uname -sm` there, maps the answer to `linux-x64` or
-`linux-arm64`, and fetches `gitwarren-daemon-<version>-<target>.tar.gz` from
-the release by URL — one request, no listing and no search. Renaming them
-breaks that.
+remote host runs `uname -sm` there, maps the answer to one of the four targets,
+and fetches `gitwarren-daemon-<version>-<target>.tar.gz` from the release by URL
+— one request, no listing and no search. The Homebrew formula names the same
+URLs. Renaming them breaks both.
+
+The **Homebrew formula** is rendered by `scripts/build-homebrew-formula.mjs`
+from `packaging/homebrew/gitwarren-cli.rb` in the same job that builds the
+tarballs, hashing the exact files it is about to upload, and attached to the
+release as `gitwarren-cli.rb`. The tap copies that file rather than computing
+anything of its own — a tap that hashed the release separately could hash it
+before an asset was re-uploaded, and the result is `SHA256 mismatch` on a user's
+machine with nothing on either end to say why.
 
 Cross-building for every platform from one machine is not reliable (Windows
 code signing and macOS notarization both need their own host). Run the release

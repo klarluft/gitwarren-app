@@ -249,18 +249,24 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
-  # The self-contained daemon, for hosts that have no GitWarren and no Node —
-  # a VPS, a WSL distro, someone else's Linux box. Proved in spike S3; see
-  # scripts/build-daemon-tarball.mjs for what goes in one.
+  # The self-contained GitWarren, for hosts that have no GitWarren and no Node —
+  # a VPS, a WSL distro, someone else's Linux box — and, since M3.3, for a Mac
+  # whose owner wants the command line rather than a menu bar icon. Proved in
+  # spike S3; see scripts/build-daemon-tarball.mjs for what goes in one.
   #
-  # A job of its own rather than a fourth entry in the matrix above, because it
+  # A job of its own rather than more entries in the matrix above, because it
   # shares almost nothing with the platform builds: no electron-builder, no
-  # code signing, no update manifest, and one runner produces *both*
-  # architectures — better-sqlite3 ships prebuilds for each, so nothing is
-  # compiled and nothing needs a matching host. Putting it in the matrix would
-  # mean an `if:` on every signing step.
+  # code signing, no update manifest, and one runner produces *every*
+  # architecture — better-sqlite3 ships prebuilds for each and the Node binaries
+  # are downloaded, so nothing is compiled and nothing needs a matching host.
+  # Putting it in the matrix would mean an `if:` on every signing step.
+  #
+  # It also produces the two things that point at those tarballs: the Homebrew
+  # formula, hashed from the files this run is about to upload, and the npm
+  # package. See scripts/build-homebrew-formula.mjs on why the formula is
+  # written here rather than in the tap.
   daemon:
-    name: Daemon tarballs (linux x64 + arm64)
+    name: Daemon tarballs, formula and npm package
     needs: draft
     runs-on: ubuntu-latest
     # Same reasoning as the matrix: a failure here should not throw away
@@ -279,15 +285,28 @@ jobs:
 
       - run: npm ci
 
-      # Both bundles, and only the bundles — the renderer and the Electron main
-      # process have no business in a tarball for a machine with no screen.
+      # The two bundles and the web build — the Electron main process has no
+      # business in a tarball for a machine with no screen, but the renderer
+      # does now: `gitwarren serve` serves it, which is what M3 is for.
       - run: npm run build:mcp
       - run: npm run build:daemon
+      - run: npm run build:web
 
       - name: Build the tarballs
         run: |
           node scripts/build-daemon-tarball.mjs linux-x64
           node scripts/build-daemon-tarball.mjs linux-arm64
+          node scripts/build-daemon-tarball.mjs darwin-x64
+          node scripts/build-daemon-tarball.mjs darwin-arm64
+
+      # After all four, and it fails if any is missing: a formula published with
+      # one checksum left unfilled is a `SHA256 mismatch` on the one
+      # architecture nobody tested.
+      - name: Build the Homebrew formula
+        run: node scripts/build-homebrew-formula.mjs
+
+      - name: Build the npm package
+        run: node scripts/build-npm-package.mjs
 
       # Into the same draft the platform jobs upload into. `--clobber` so that
       # re-running against an existing tag replaces the assets rather than
@@ -296,13 +315,50 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.event.inputs.tag || github.ref_name }}
-        run: gh release upload "$TAG" out/daemon-tarball/*.tar.gz --clobber
+        run: |
+          gh release upload "$TAG" out/daemon-tarball/*.tar.gz --clobber
+          gh release upload "$TAG" out/daemon-tarball/gitwarren-cli.rb --clobber
+
+      # Skipped rather than failed without a token, like homebrew-tap.yml: a
+      # release that produced every asset and did not publish to npm is a
+      # `npm publish out/npm` away from being finished, and failing the job
+      # would suggest the artifacts are suspect when they are not.
+      #
+      # `--provenance` needs the `id-token: write` permission on this job, which
+      # is deliberately not granted: this workflow already has `contents: write`
+      # at the top, and widening a release workflow's token to sign statements
+      # about itself is a decision to take on its own rather than as a footnote
+      # to packaging. Without it npm publishes the tarball unattested, which is
+      # what every release before this one did too.
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "NPM_TOKEN is not set; skipping. Publish by hand with: npm publish ./out/npm"
+            exit 0
+          fi
+          echo "//registry.npmjs.org/:_authToken=\${NODE_AUTH_TOKEN}" > ~/.npmrc
+          # A prerelease tag must not become `npm install gitwarren`'s default.
+          # `0.1.7-beta.1` goes out as `next`; a plain `v0.1.7` as `latest`.
+          #
+          # `./out/npm`, never `out/npm`: npm reads a bare `<a>/<b>` as a GitHub
+          # shorthand and tries to clone a repository of that name, reporting it
+          # as "An unknown git error occurred" with no mention of the directory
+          # it walked straight past.
+          case "$TAG" in
+            *-*) npm publish ./out/npm --tag next ;;
+            *)   npm publish ./out/npm ;;
+          esac
 
       - name: Upload as a workflow artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: daemon-tarballs
-          path: out/daemon-tarball/*.tar.gz
+          path: |
+            out/daemon-tarball/*.tar.gz
+            out/daemon-tarball/gitwarren-cli.rb
           if-no-files-found: ignore
           retention-days: 14
