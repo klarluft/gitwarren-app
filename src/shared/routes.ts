@@ -55,6 +55,7 @@ export interface HostScoped {
 
 export type Route =
   | ({ name: 'repositories' } & HostScoped)
+  | ({ name: 'agent' } & HostScoped)
   | ({ name: 'repository'; repositoryId: number } & HostScoped)
   | ({ name: 'review'; reviewId: number; tab: ReviewTab; focus?: DiffFocus } & HostScoped)
 
@@ -65,6 +66,18 @@ export const HOME: Route = { name: 'repositories' }
 
 /** The segment that introduces a host. Short because it prefixes every link. */
 const HOST_SEGMENT = 'h'
+
+/**
+ * The Agent Access page.
+ *
+ * A location rather than a disclosure on the home screen, because from M3 there
+ * are two shells and from M4 there is one of these per host: `#/h/<id>/agent` is
+ * how you say "the setup instructions for *that* machine", and there has to be
+ * a way to say it before there is a second machine to say it about. It is also
+ * the one screen whose whole purpose is to be sent to someone - or opened in a
+ * browser next to the agent being configured - and a URL is how that is done.
+ */
+const AGENT_SEGMENT = 'agent'
 
 /**
  * `#/h/<instance>`, or nothing at all for a local route.
@@ -82,6 +95,8 @@ export function hrefFor(route: Route): string {
   switch (route.name) {
     case 'repositories':
       return `#/${prefix}`
+    case 'agent':
+      return `#/${prefix}${AGENT_SEGMENT}`
     case 'repository':
       return `#/${prefix}repositories/${route.repositoryId}`
     case 'review': {
@@ -144,6 +159,8 @@ export function parseRoute(hash: string): Route {
   // A host with nothing after it is that host's repository list, which is a
   // real location and the right place for a truncated link to land.
   if (segments.length === 0) return host === undefined ? HOME : { name: 'repositories', host }
+
+  if (segments[0] === AGENT_SEGMENT) return { name: 'agent', ...scope }
 
   if (segments[0] === 'repositories' && segments[1]) {
     const repositoryId = Number(segments[1])

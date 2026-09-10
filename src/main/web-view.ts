@@ -44,7 +44,7 @@ function webRoot(): string {
 /**
  * The URL that opens the web view in a browser, token and all.
  *
- * Null when there is no web build to open. Read by the Agent Access panel in
+ * Null when there is no web build to open. Read by the Agent Access page in
  * M3.4; for now it is what the console line below prints, which is how the
  * milestone is verified.
  */

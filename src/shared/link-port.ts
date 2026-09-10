@@ -22,7 +22,7 @@
  * When something else holds it, the app starts anyway and links are still
  * emitted. They are the same on every machine, so a link printed on another
  * host must not depend on this one's luck; what the user gets is a warning in
- * the Agent Access panel naming the port, not a different link.
+ * the Agent Access page naming the port, not a different link.
  *
  * No Node, no Electron: the renderer, the main process, the daemon and the MCP
  * server all read this, for the same reason `routes.ts` is written the way it

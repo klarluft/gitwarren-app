@@ -138,3 +138,20 @@ test('a repository id that is really a host segment is not confused for one', ()
     focus: { filePath: 'h', side: 'head', line: 2 }
   })
 })
+
+test('the Agent Access page is a location, locally and on a host', () => {
+  assert.deepEqual(parseRoute('#/agent'), { name: 'agent' })
+  assert.deepEqual(parseRoute(`#/h/${HOST}/agent`), { name: 'agent', host: HOST })
+
+  // Round trip, because M3.1's doubled `#` was a link that parsed to something
+  // completely plausible rather than to nothing.
+  assert.deepEqual(parseRoute(hrefFor({ name: 'agent' })), { name: 'agent' })
+  assert.deepEqual(parseRoute(hrefFor({ name: 'agent', host: HOST })), {
+    name: 'agent',
+    host: HOST
+  })
+})
+
+test('a stale link deeper than the agent page still lands on it', () => {
+  assert.deepEqual(parseRoute('#/agent/anything'), { name: 'agent' })
+})

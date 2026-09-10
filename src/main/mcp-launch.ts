@@ -157,7 +157,7 @@ function launcherScript(): string {
  * changes, and is free to avoid.
  *
  * Failure is returned rather than thrown. An agent that cannot be set up is a
- * real problem to show in the Agent Access panel, and not a reason for the app
+ * real problem to show in the Agent Access page, and not a reason for the app
  * to refuse to start.
  */
 export function ensureMcpLauncher(): { path: string; error?: string } {
@@ -191,35 +191,60 @@ export function ensureMcpLauncher(): { path: string; error?: string } {
 }
 
 /**
+ * Why the command above will not work yet, in this install's own words.
+ *
+ * The Agent Access page prints whatever comes back here and invents nothing of
+ * its own, which is the only arrangement that survives two shells: a checkout
+ * that has not been built and a machine with no app at all are both `available:
+ * false`, and the remedy - `npm run build` here, `gitwarren service install` in
+ * `daemon/listen.ts` - is known to the install and to nothing above it. Before
+ * M3.4 the page carried the app's answer hard-coded, which meant a browser tab
+ * on a fresh machine was told to run a build script it has no checkout for.
+ */
+function launchNote(scriptExists: boolean, error: string | undefined): string | undefined {
+  if (error !== undefined) {
+    return (
+      `GitWarren could not write its launcher to ${getMcpLauncherPath()} (${error}). Use the ` +
+      `direct command under "Configure by hand" instead - it works, but it points inside this ` +
+      `install and will need updating if GitWarren moves.`
+    )
+  }
+
+  if (!scriptExists) {
+    return (
+      `GitWarren's MCP server has not been built yet, so the command the prompt names does ` +
+      `not exist. Run \`npm run build\` - a packaged GitWarren ships with it already built.`
+    )
+  }
+
+  return undefined
+}
+
+/**
  * What to tell an agent.
  *
  * The command is the launcher, with no arguments and no environment, because
  * that is the whole point of it: the sentence a user pastes into an agent has
  * to be short enough to be pasted and stable enough to be worth remembering.
  * The underlying binary and script are still reported, for the Agent Access
- * panel to show and for anyone who would rather configure it by hand.
+ * page to show and for anyone who would rather configure it by hand.
  */
 export function getMcpLaunchInfo(): McpLaunchInfo {
   const script = scriptPath()
   const { path, error } = ensureMcpLauncher()
+  const scriptExists = existsSync(script)
+  const note = launchNote(scriptExists, error)
 
   return {
     command: path,
     args: [],
     env: {},
-    available: existsSync(script) && error === undefined,
+    available: scriptExists && error === undefined,
     // Stable everywhere now, AppImage included - that is what the launcher is
     // for. The field stays because M4 gains a case the launcher cannot fix: a
     // remote host whose daemon has not been installed yet.
     stable: true,
     direct: { command: process.execPath, args: [script], env: { ELECTRON_RUN_AS_NODE: '1' } },
-    ...(error === undefined
-      ? {}
-      : {
-          note:
-            `GitWarren could not write its launcher to ${path} (${error}). Use the direct ` +
-            `command below instead - it works, but it points inside this install and will ` +
-            `need updating if GitWarren moves.`
-        })
+    ...(note === undefined ? {} : { note })
   }
 }

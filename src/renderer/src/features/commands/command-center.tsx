@@ -7,7 +7,7 @@
  * declare commands and this binds whatever is currently declared.
  */
 import { useCallback, useMemo, useState, type RefObject } from 'react'
-import { ArrowLeft, ArrowRight, ArrowUpToLine, Home, Keyboard, Search } from 'lucide-react'
+import { ArrowLeft, ArrowRight, ArrowUpToLine, Home, Keyboard, Plug, Search } from 'lucide-react'
 import { formatStep } from '@/lib/keys'
 import { useHotkeys, type Hotkey } from '@/lib/hotkeys'
 import { goBack, navigate } from '@/lib/router'
@@ -85,6 +85,15 @@ export function CommandCenter({ scroller }: { scroller: RefObject<HTMLElement | 
         keywords: 'home start',
         icon: Home,
         run: () => navigate({ name: 'repositories' })
+      },
+      {
+        id: 'nav:agent',
+        label: 'Go to agent access',
+        group: 'Navigate',
+        keys: 'g a',
+        keywords: 'mcp setup prompt claude codex cursor configure',
+        icon: Plug,
+        run: () => navigate({ name: 'agent' })
       },
       {
         id: 'nav:back',

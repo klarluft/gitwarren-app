@@ -281,7 +281,7 @@ Record the outcome under each one.
 
 - **Question.** Pick a port outside common ranges, check it is free by default
   on macOS, Windows and Ubuntu, and define behaviour when it is taken (the
-  Agent Access panel warns; links are still emitted).
+  Agent Access page warns; links are still emitted).
 - **Output.** One constant in `src/shared/` and a sentence for the README.
 - **Outcome.** *Port 41427.* Chosen
   because it is outside every default ephemeral range (Windows and macOS use
@@ -590,7 +590,7 @@ against SQLite.
   because links are now minted against the constant whoever reads them, and
   falling back would mean handing out URLs that point at whatever else took the
   port. When it is taken the app starts anyway, logs which port and why, writes
-  `linkPort: null`, and the Agent Access panel says so. Checked by holding the
+  `linkPort: null`, and the Agent Access page says so. Checked by holding the
   port from another process and starting the app against it.
 
   The instance id moved into the deep link's authority -
@@ -607,7 +607,7 @@ against SQLite.
   contents would change, so it survives an update and a move. `getMcpLaunchInfo`
   reports it as the command with no arguments and no environment, which is what
   makes the one-sentence agent prompt in [Agent setup](#agent-setup) possible -
-  it is now what the Agent Access panel leads with, snippet behind a disclosure.
+  it is now what the Agent Access page leads with, snippets behind a disclosure.
 
   The AppImage caveat is retired. An AppImage's only stable path is the
   `.AppImage` file, which the runtime exports as `APPIMAGE`, so the launcher
@@ -905,7 +905,7 @@ each mergeable on its own:
 3. **The `gitwarren` CLI and distribution.** `serve`, `open`,
    `service install`; the S3 tarball, a Homebrew formula, `npx gitwarren`.
    *(done — see below.)*
-4. **The Agent Access page**, one-sentence prompt leading.
+4. **The Agent Access page**, one-sentence prompt leading. *(done — see below.)*
 5. **The responsive pass.**
 
 **M3.1, done on the Mac, 10 September.** One handler (`core/web/handler.ts`)
@@ -1179,6 +1179,98 @@ path is written and typed but has only been exercised on macOS and Linux;
 shape as the Windows launcher-banner bug M2 shipped, so it should be run on the
 PC before the milestone is called done.
 
+**M3.4, done on the Mac, 10 September.** The screen that hands GitWarren to an
+agent. Most of the words were already right — M2 wrote the sentence and put it
+above the snippet — so this change is mostly about where they live and who they
+are true for.
+
+**A location, not a disclosure.** `#/agent`, in the route grammar
+(`shared/routes.ts`) with the host segment every other route takes, rendered by
+`renderer/features/agent/agent-access-page.tsx`; what is left on the home screen
+is a card that opens it. Two things asked for this and neither is cosmetic. In a
+browser a URL is how you put a page in front of somebody — including the person
+sitting at the machine being configured, who now gets sent a link rather than
+told to scroll and click a chevron. And M4 has one of these per host: `#/h/<id>/
+agent` is how you say "the setup for *that* machine", and the segment had to
+exist before there was a second machine to point it at. `g a` opens it from the
+palette.
+
+**Three formats, one launcher path.** `shared/agent-setup.ts` holds the prompt
+and the by-hand snippets, and `gitwarren agent-setup` reads the same module — so
+the sentence a user copies out of a window and the sentence printed on a VPS
+with no window cannot drift. The snippets are generated rather than written out:
+`mcpServers` for Claude Code, Cursor, Windsurf and Gemini CLI; `servers` for VS
+Code; `[mcp_servers.gitwarren]` for Codex. There is exactly one place a command
+can now be wrong.
+
+The TOML one has a test of its own, because it is the format that can be wrong
+*quietly*. A Windows launcher path is `C:\Users\...\gitwarren-mcp.cmd`, and a
+backslash inside a TOML basic string begins an escape — pasted raw, `\U` is a
+real escape and the file parses into a **different path** rather than into an
+error. Every backslash is doubled, and the test asserts no lone one survives.
+
+**`gitwarren agent-setup`.** The prompt on stdout, the state of the machine on
+stderr — so `gitwarren agent-setup | pbcopy` copies the sentence and not a
+warning about the launcher. `--manual` adds the three formats. It installs
+nothing: `service install` writes the launcher and this prints where it is,
+which is the same line `open` draws.
+
+**The page stopped inventing remedies.** This is the bug M3.3 pointed at. The
+panel carried its own sentence for `available: false` — *"Run `npm run build`
+first"* — written when the app was the only shell there was. Since M3.3 a
+browser tab on a machine with no checkout can reach this page, and it was being
+told to run a build script for a repository it does not have, *underneath*
+`listen.ts`'s own perfectly good note naming `gitwarren service install`: two
+warnings, one of them nonsense. The remedy now comes from the install and the
+page prints it and nothing of its own — `main/mcp-launch.ts` grew the note it
+was missing, so both shells answer the same question in their own words. Notes
+name commands in backticks, which a terminal renders and a window did not, so
+the page turns them into code spans on the way in.
+
+**A refused clipboard is not a dead button.** `navigator.clipboard.writeText`
+rejects when the document is not focused or the permission is not given, and a
+button that only sets `copied` on success leaves the user pressing it at a page
+that does nothing — on the one screen whose entire purpose is a copy. A failure
+now selects the text instead and says so, which is what the person was about to
+do by hand.
+
+**The renderer has not been styled in a browser since M3.1.** The find that
+matters, and it was found by looking at a screenshot rather than at the DOM.
+Tailwind v4 detects its own sources by walking from the repository root and
+skipping whatever `.gitignore` skips — correct in a checkout, silently wrong in
+a worktree under `.claude/worktrees/`, which this repository ignores. The scan
+found no `.tsx` at all, emitted the theme layer and stopped: a 6 KB stylesheet,
+a successful build, no warning anywhere, and a web view with no borders, no
+spacing and no type scale. `out/web/assets/main-DBjGUzRM.css` is byte-identical
+in the M3.2 and M3.3 worktrees, so all three M3 verifications in Chrome were
+done against an unstyled page — every assertion in them was about content, which
+is why nothing looked wrong. An explicit `@source` in `renderer/src/index.css` is
+scanned whether or not it is ignored; the web bundle goes from 6 KB to 45 KB and
+the Electron renderer's CSS comes out byte-identical to before, because
+electron-vite's own root never had the problem.
+
+Verified in Chrome against a `gitwarren serve` and then, on the same scratch
+directory with the daemon stopped, in the real Electron window. In the tab, with
+a home directory holding no launcher: one warning, the daemon's own, naming
+`gitwarren service install`; the prompt leading, styled, and copying to the
+clipboard; the three tabs each holding the same path in their own syntax; a
+forced `writeText` rejection selecting the prompt and saying "Selected — press
+copy" instead of failing silently. In the window, with the real launcher
+present: no warning at all, the same `~/.gitwarren/bin/gitwarren-mcp` the daemon
+named, and the direct Electron-run-as-node fallback shown only there, since in a
+daemon it is the launcher again. `g a` reached the page in both. No console
+errors and no failed requests in either run.
+
+**Not done in M3.4, and why.** The responsive pass and the favicon are M3.5,
+which is the last slice. Two things are still open from M3.3 and are worth
+repeating here rather than leaving behind: Windows' `schtasks` branch of
+`service install` is written and typed and has been run on neither platform —
+the one branch no test on this Mac can reach, the same shape as the Windows
+launcher-banner bug M2 shipped, so it wants a run on the PC before M3 is called
+done; and the daemon tarballs are unsigned and unnotarised, with `npm publish`
+wired but inert without an `NPM_TOKEN` and the npm name `gitwarren` still
+unregistered. Both of those are deliberate decisions to take on their own.
+
 ### M4 — SSH hosts
 
 *Ships: review the PC's WSL repos from the Mac; any VPS.*
@@ -1301,12 +1393,14 @@ configuration, then call its agent_identity tool to confirm it works.
   (M2), the local web daemon (M3) and the SSH/WSL installer (M4, M5). On a
   remote host the user pastes the same prompt into the session running there —
   no config editing over SSH.
-- **Per-harness snippets stay, as a fallback.** The `mcpServers` JSON already
-  covers Claude Code, Cursor, Windsurf and Gemini CLI; Codex needs TOML
-  (`[mcp_servers.gitwarren]`) and VS Code uses `servers`. Show them behind a
-  "configure by hand" disclosure, generated from the same launcher path.
+- **Per-harness snippets stay, as a fallback.** Three formats, since that is how
+  many there are: `mcpServers` covers Claude Code, Cursor, Windsurf and Gemini
+  CLI, VS Code renamed the object to `servers`, and Codex keeps its config in
+  TOML (`[mcp_servers.gitwarren]`). Behind a "configure by hand" disclosure,
+  generated from the same launcher path — `shared/agent-setup.ts` since M3.4.
 - **`gitwarren agent-setup`** prints the prompt on any host, for people who
-  never open the UI.
+  never open the UI. Prompt on stdout, the state of the launcher on stderr;
+  `--manual` adds the three formats.
 - **Attribution unchanged.** Identity still comes from the MCP handshake
   (`src/mcp/identity.ts`), never from the prompt.
 

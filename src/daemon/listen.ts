@@ -103,7 +103,7 @@ export function resolveWebRoot(): string | null {
  *
  * Thinner than the app's: there is no `app.getVersion()`, no updater and no
  * `isPackaged`. The MCP launcher path is the one field worth getting exactly
- * right, because the Agent Access panel prints it as a command to paste, and a
+ * right, because the Agent Access page prints it as a command to paste, and a
  * daemon that named a different path from the app's would hand out an
  * instruction that works on one of them - hence `core/mcp-launcher.ts`.
  */
