@@ -1031,7 +1031,7 @@ npm run package:dir    # unpacked app only, much faster
 | --- | --- |
 | Windows | `GitWarren-<v>-x64.exe`, `-arm64.exe` (NSIS), `.blockmap` each, `latest.yml` |
 | macOS | `-arm64.dmg`, `-x64.dmg`, `-arm64.zip`, `-x64.zip`, `.blockmap` each, `latest-mac.yml` |
-| Linux | `-x64.AppImage`, `-arm64.AppImage`, `latest-linux.yml` |
+| Linux | `-x86_64.AppImage`, `-arm64.AppImage`, `latest-linux.yml`, `latest-linux-arm64.yml` |
 | Any host | `gitwarren-daemon-<v>-linux-x64.tar.gz`, `-linux-arm64.tar.gz` |
 
 The `.blockmap` files are what make updates differential: electron-updater

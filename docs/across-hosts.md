@@ -609,21 +609,106 @@ against SQLite.
   makes the one-sentence agent prompt in [Agent setup](#agent-setup) possible -
   it is now what the Agent Access panel leads with, snippet behind a disclosure.
 
-  The AppImage caveat is retired, with a caveat of its own: an AppImage's only
-  stable path is the `.AppImage` file, which AppRun exports as `APPIMAGE`, so
-  the launcher names that and reaches the script through `APPDIR` at run time.
-  That form is written but **untested** - it needs a Linux box with a packaged
-  AppImage, which this milestone was built on a Mac. Worth ten minutes on the
-  PC before the release.
+  The AppImage caveat is retired. An AppImage's only stable path is the
+  `.AppImage` file, which the runtime exports as `APPIMAGE`, so the launcher
+  names that and reaches the script through `APPDIR` at run time. This was
+  written blind and is now verified - see the verification addendum below.
 
   #### Not done here
 
-  - The daemon tarball's CI job from S3 is still not written. `out/daemon/serve.cjs`
-    exists, is unpacked from asar, and runs standalone - `echo '{"id":1,…}' |
-    node out/daemon/serve.cjs --stdio` answers - but nothing builds a release
-    asset out of it yet. M4 is where a remote host needs one.
   - `GitWarren --serve` implies `--stdio`; there is no argv parser worth the
     name until M3 adds `--listen`.
+
+- **Verification addendum.** *10 September 2026, against the artifacts of the
+  `v0.1.7-beta.1` draft release - the first build of any of M0-M2 - rather than
+  against a development build.* M2 shipped with three code paths that had never
+  run on the platform they target, and two of them could not be tested without
+  a packaged build at all. This closes most of that; what is left needs the PC.
+
+  **The daemon tarball's CI job now exists.** `scripts/build-daemon-tarball.mjs`,
+  promoted out of the S3 spike, built by a `daemon` job in `release.yml` - one
+  ubuntu runner for both architectures, since better-sqlite3 ships prebuilds for
+  each and nothing is compiled. It carries both bundles now rather than only the
+  MCP server: a remote host has to answer a GitWarren over a pipe *and* be
+  reached by the agent working next to the code, and rule 6 makes those
+  different processes. `bin/gitwarren serve --stdio` is the line M4 spawns, so it
+  works against this tarball rather than against a name invented later.
+
+  Downloaded from the draft and run in a bare `ubuntu:24.04` arm64 container
+  with no Node installed: `bin/gitwarren serve --stdio` answered
+  `{"id":1,"result":[]}` and `bin/gitwarren-mcp` answered an MCP `initialize`,
+  each having created and migrated the database first. Exit 0 both times. The
+  asset names are a contract - M4 maps `uname -sm` to one of them and fetches a
+  single URL - and the README says so.
+
+  **The AppImage launcher works, for a reason the code does not say.** Checked
+  by running the real arm64 AppImage inside a container with `--device
+  /dev/fuse`, which is enough to make an AppImage mount itself properly:
+
+  ```
+  APPDIR      = "/tmp/.mount_gw.AppaTGlSt"
+  APPIMAGE    = "/tmp/gw.AppImage"
+  execPath    = /tmp/.mount_gw.AppaTGlSt/gitwarren
+  via APPDIR  = RESOLVES
+  ```
+
+  and then, through a byte-for-byte copy of the launcher the app writes, at
+  `~/.gitwarren/bin/gitwarren-mcp` against an AppImage in `~/Apps`, the MCP
+  server started and answered `initialize` and `list_repositories`.
+
+  The reason worth writing down: **`AppRun` only assigns `APPDIR`, it never
+  exports it.** The launcher works because the AppImage's ELF runtime puts
+  `APPDIR` into the environment before `AppRun` is exec'd at all - so the
+  assumption holds, but not for the reason someone reading `AppRun` would
+  conclude. `process.execPath` resolves the same file and depends on none of
+  that; if this ever breaks, that is the anchor to move to.
+
+  Also, and consistent with S3: the Electron binary needs GTK to load **even
+  under `ELECTRON_RUN_AS_NODE`**, so the AppImage launcher wants a desktop
+  stack. That is fine for an AppImage user and is exactly why the tarball exists
+  for headless hosts.
+
+  **The packaged macOS build.** Everything in M2 was checked under
+  `electron-vite dev`, where `app.isPackaged` is false - so `mcp-launch.ts`'s
+  packaged branch, which is a different code path, had never run. Against the
+  draft's `arm64.dmg`, copied out of the volume to a scratch location and driven
+  with a scratch data directory:
+
+  | | |
+  | --- | --- |
+  | `packaged` | `true` - the branch under test |
+  | `mcp.command` | `~/.gitwarren/bin/gitwarren-mcp`, `args: []`, `env: {}` |
+  | launcher contents | names `Contents/MacOS/GitWarren` and `Contents/Resources/app.asar.unpacked/out/mcp/server.cjs` |
+  | `linkPort` | 41427, and the loopback page answers 200 |
+  | login item | off → on → read back on → off → read back off, through `SMAppService` with a real bundle id |
+  | closing | hides; the renderer stays attached |
+
+  With the window closed, an agent created review 4 through that launcher and
+  got back
+  `http://127.0.0.1:41427/#h=0e37f642-…/review/4/conversation`. So the whole
+  chain holds in a packaged build, not only in dev.
+
+  **A finding about tags and the updater**, which matters for how the rest of
+  this work is released. Pushing `v0.1.7-beta.1` makes the *tag* public even
+  though the release is a draft, and the packaged beta's updater duly found it
+  and 404'd fetching `latest-mac.yml` - a draft's assets are not downloadable.
+  Harmless, but it raised the question of whether existing users were affected.
+  They are not: the installed 0.1.6, run against scratch directories, reported
+
+  ```
+  [updater] Update for version 0.1.6 is not available (latest version: 0.1.6, downgrade is disallowed).
+  ```
+
+  because `allowPrerelease` defaults to true only when the *running* version is
+  itself a prerelease. A stable install filters a `-beta` version out and never
+  sees it. So a beta tag is a safe way to get artifacts, and the draft is a safe
+  place to leave them.
+
+  **Still unverified, and needing the PC:** the Windows tray item and its `Run`
+  registry login item with `--hidden`; the Linux
+  `~/.config/autostart/gitwarren.desktop` file on a real desktop; and the
+  hidden relaunch after an update, which by construction cannot be tested until
+  there are two published releases to move between.
 
 ### M3 — The web view, locally
 
