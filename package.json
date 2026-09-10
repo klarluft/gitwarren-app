@@ -31,7 +31,7 @@
   "scripts": {
     "dev": "electron-vite dev",
     "start": "electron-vite preview",
-    "build": "npm run typecheck && electron-vite build && npm run build:mcp && npm run build:daemon",
+    "build": "npm run typecheck && electron-vite build && npm run build:mcp && npm run build:daemon && npm run build:web",
     "build:mcp": "vite build --config vite.mcp.config.ts",
     "build:daemon": "vite build --config vite.daemon.config.ts",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
@@ -46,7 +46,9 @@
     "package": "npm run build && electron-builder --publish never",
     "package:dir": "npm run build && electron-builder --dir --publish never",
     "release": "npm run build && electron-builder --publish always",
-    "postinstall": "electron-builder install-app-deps"
+    "postinstall": "electron-builder install-app-deps",
+    "build:web": "vite build --config vite.web.config.ts",
+    "listen:dev": "tsx src/daemon/serve.ts --listen"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",
@@ -61,6 +63,7 @@
     "@types/node": "^26.4.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",
+    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^5.2.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -86,6 +89,7 @@
     "typescript-eslint": "^8.69.0",
     "unist-util-visit": "^5.1.0",
     "vite": "^7.3.6",
+    "ws": "^8.21.3",
     "zod": "^4.5.4"
   }
 }

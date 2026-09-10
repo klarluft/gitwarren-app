@@ -17,22 +17,28 @@
  * from the browser the user just clicked in inherits the right on all three
  * platforms. The click has to reach the OS, so it is a link, not a redirect.
  *
- * ## This server never does anything
+ * ## This page never does anything
  *
- * It answers every request with the same static page and has no other endpoint.
- * That is a property worth defending rather than an accident of it being small:
- * anything on loopback is reachable by every process on the machine and by any
- * web page the user happens to have open, so an endpoint here that mutated
- * state, read a repository or drove IPC would be a capability handed to
- * whatever the user visits next. Keep it an inert file server. The route it is
- * linking to never even reaches it - that rides in the URL fragment, which
- * browsers do not send.
+ * The page below is inert, and stays inert: no endpoint of its own, no state to
+ * mutate, nothing read out of a repository. The route it links to never even
+ * reaches this process - that rides in the URL fragment, which browsers do not
+ * send.
+ *
+ * Since M3 the *server* is no longer as empty as the page, and the distinction
+ * is the point. `/app/` and `/gitwarren/…` are handed to `core/web/handler.ts`,
+ * which serves the renderer and the WebSocket carrier behind a per-launch token
+ * - the whole apparatus in `core/web/token.ts` exists because that half of the
+ * port is emphatically not inert. Everything else still lands on the page, so
+ * the M2 behaviour a review link depends on is untouched: an agent's
+ * `http://127.0.0.1:41427/#h=…` gets the button, exactly as before, on exactly
+ * the same path.
  */
 import { createServer, type Server } from 'node:http'
 import { readFileSync } from 'node:fs'
 import { LINK_SERVER_HOST, LINK_SERVER_PORT } from '../shared/link-port.js'
 import { DEEP_LINK_SCHEME, LOOPBACK_HOST_PREFIX } from '../shared/deep-link.js'
 import { INSTANCE_ID_PATTERN } from '../shared/instance-id.js'
+import { startWebHandler, stopWebHandler } from './web-view.js'
 // `?asset` copies the file next to the bundle so it also exists at runtime -
 // the same mechanism the window icon uses. It is inlined into the page as a
 // data: URI because the page has to be self-contained: serving it as a second
@@ -311,8 +317,15 @@ export function startLinkServer(onSettled?: (port: number | null) => void): void
   if (server) return
 
   const page = buildPage()
+  const web = startWebHandler()
 
   const listening = createServer((request, response) => {
+    // The web view first, and only for the paths it owns - `/app/` and
+    // `/gitwarren/…`. It applies the same Host check plus a token before it
+    // answers anything; a request it does not claim falls through to the page
+    // below with nothing changed.
+    if (web?.request(request, response)) return
+
     // The only Host that can legitimately reach this is the one we handed out.
     // Cheap, and it forecloses DNS rebinding - a name that resolves to 127.0.0.1
     // would otherwise let a web page talk to this from its own origin.
@@ -326,9 +339,16 @@ export function startLinkServer(onSettled?: (port: number | null) => void): void
       return
     }
 
-    // Every path, deliberately: there is one page and no routing to get wrong.
+    // Every other path, deliberately: there is one page and no routing to get
+    // wrong.
     response.writeHead(200, HEADERS)
     response.end(request.method === 'HEAD' ? undefined : page)
+  })
+
+  // An upgrade on this port is the web view's carrier or it is nothing. The
+  // link page has no socket and never will - see the note at the top.
+  listening.on('upgrade', (request, socket, head) => {
+    if (!web?.upgrade(request, socket, head)) socket.destroy()
   })
 
   server = listening
@@ -363,4 +383,5 @@ export function stopLinkServer(): void {
   server?.close()
   server = null
   servedPort = null
+  stopWebHandler()
 }

@@ -891,6 +891,68 @@ and Codex both reach the MCP server from the pasted prompt; a `guiUrl` from an
 agent opens the review in the browser. A page on another origin cannot reach
 the API.
 
+#### How it is being built, and where it has got to
+
+M3 is the largest milestone in this file, so it is going in as five changes,
+each mergeable on its own:
+
+1. **The carrier, the serving and the token.** *(done — see below.)*
+2. **What the browser shell lacks.** Attachments over HTTP, open-in-editor as a
+   `vscode://` link, and a shell *capability flag* so a screen can hide a
+   control instead of offering one that explains itself when pressed.
+3. **The `gitwarren` CLI and distribution.** `serve`, `open`,
+   `service install`; the S3 tarball, a Homebrew formula, `npx gitwarren`.
+4. **The Agent Access page**, one-sentence prompt leading.
+5. **The responsive pass.**
+
+**M3.1, done on the Mac, 10 September.** One handler (`core/web/handler.ts`)
+mounted by both shells: the app serves it at `/app/` because `/` is the link
+page M2 is verified on, and `gitwarren serve --listen` serves it at `/`, where
+an agent's `guiUrl` opens the review with no "Open in GitWarren" hop — which is
+the thing this milestone exists for. The gate is Host, then Origin, then a
+per-launch token swapped for a `SameSite=Strict` cookie; the token is written
+to `web-token` at mode 0600 rather than into `daemon-runtime.json`, which is a
+published fact and no place for a secret. `--listen` claims the runtime file and
+refuses to start beside a running app, which is the ownership check `daemon.ts`
+said belonged here.
+
+Verified in Chrome against both shells with a scratch data directory: the
+renderer paints, the socket connects, a repository added *in the browser* lands
+in SQLite, `app-info` answers over HTTP, and a refusal a tab must give — reveal
+a folder — arrives as a sentence rather than a silence. No console errors and no
+failed requests in either run. The renderer needed no change at all, which is
+what M1 was for.
+
+Two things bit, and both are worth keeping:
+
+**A doubled `#`.** `hrefFor` already returns a string beginning with `#`, and
+the translated route was being written back as `` `#${hrefFor(route)}` ``. The
+hash became `##/reviews/2/files`, `parseRoute` read a first segment of `#`, and
+every agent link quietly opened the repository list. Nothing threw and nothing
+was logged — the screen it lands on is a completely plausible one. The
+translation now lives in `web/loopback-fragment.ts`, apart from the DOM so it
+can be tested, and the test asserts on `parseRoute(hrefFor(...))` rather than on
+the route alone.
+
+**`ws` and its optional native accelerators.** `bufferutil` and `utf-8-validate`
+are reached for by reassigning `module.exports` at the bottom of two `ws`
+modules. Rollup's *ESM* output turns the module's own later reference into
+`bufferUtil$1.unmask`, which is `undefined`, so the first masked frame — and
+every frame a browser sends is masked — dies inside `Receiver._write` before
+anything of ours runs. The socket connects perfectly, accepts everything and
+answers nothing. It hit the Electron main bundle and not the daemon purely
+because main is built as ESM and `serve.cjs` is CommonJS. Both builds now define
+`WS_NO_BUFFER_UTIL` and `WS_NO_UTF_8_VALIDATE` so the optional block is compiled
+away (`vite.ws-define.ts`). A distinction between two bundlers' output formats
+is not something anyone should have to remember.
+
+**Not done in M3.1, and why.** `GitWarren --serve --listen` from inside the
+packaged app is not a supported combination: `out/web` lives in the asar and
+only `out/daemon` is unpacked, and the app serves the web view itself anyway.
+The browser shell's missing capabilities are honest refusals rather than hidden
+controls until M3.2 gives it the capability flag. Attachments in markdown do not
+render in a tab yet — that is the HTTP blob endpoint, also M3.2.
+
 ### M4 — SSH hosts
 
 *Ships: review the PC's WSL repos from the Mac; any VPS.*
