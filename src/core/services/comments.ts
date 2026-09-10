@@ -14,6 +14,7 @@
  */
 import { asc, eq, inArray } from 'drizzle-orm'
 import { getDatabase } from '../db/client.js'
+import { getLocalPrincipal } from '../db/principals.js'
 import {
   commentThreads,
   comments,
@@ -75,6 +76,22 @@ export interface AnchoredCommentThread extends CommentThread {
 
 function nowIso(): string {
   return new Date().toISOString()
+}
+
+/**
+ * Which principal a write belongs to.
+ *
+ * Resolved here rather than carried on the `CommentAuthor`, and the reason is
+ * the same one that keeps the author out of the payload: the caller must not be
+ * able to choose it. A human comment reaching this service arrived by someone
+ * typing into this install, so the principal is this install's, and it is not
+ * something the IPC layer should have to remember to attach - `HUMAN_AUTHOR` is
+ * a constant and could not carry a row id anyway.
+ *
+ * Agents get no principal. See the note on the column in `db/schema.ts`.
+ */
+function principalIdFor(actor: CommentAuthor): number | null {
+  return actor.kind === 'human' ? getLocalPrincipal().id : null
 }
 
 /**
@@ -453,6 +470,7 @@ export const commentsService = {
           authorName: actor.name,
           authorLabel: actor.label,
           authorSession: actor.session,
+          authorId: principalIdFor(actor),
           body,
           createdAt: timestamp,
           updatedAt: timestamp
@@ -489,6 +507,7 @@ export const commentsService = {
           authorName: actor.name,
           authorLabel: actor.label,
           authorSession: actor.session,
+          authorId: principalIdFor(actor),
           body,
           createdAt: timestamp,
           updatedAt: timestamp

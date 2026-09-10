@@ -242,13 +242,25 @@ milestone assumes these.
   MCP-derived identity (`src/shared/actors.ts`, `src/mcp/identity.ts`).
 - **Repository identity.** `repositories.host_id` (nullable, null = this
   instance); `UNIQUE(path)` becomes `UNIQUE(host_id, path)`
-  (`src/core/db/schema.ts`, `npm run db:generate`).
+  (`src/core/db/schema.ts`, `npm run db:generate`). That index alone is not
+  enough: SQLite treats NULLs in a unique index as distinct from one another,
+  and NULL is how a local row is spelled, so `(NULL, '/work/app')` twice would
+  satisfy it and local repositories would silently lose the duplicate guard
+  they have today. A second, partial index — `UNIQUE(path) WHERE host_id IS
+  NULL` — is what keeps that guard, and the two together say what `UNIQUE(path)`
+  used to say, once per host.
 - **Routes with a host segment.** `src/shared/routes.ts` accepts
   `h/<instance>/review/4/…`; the segment is optional and omitted for local, so
   every existing link keeps working.
-- **Git hygiene.** `--` before user-supplied refs and paths at every `runGit`
-  call site in `src/core/git.ts` and `git-compare.ts`; refs validated with
+- **Git hygiene.** Refs and paths separated at every `runGit` call site in
+  `src/core/git.ts` and `git-compare.ts`; refs validated with
   `git check-ref-format`; worktree file reads confined to the worktree root.
+  Note which way round the `--` goes: for a command that takes a revision it
+  means "everything after this is a *path*", so `git rev-parse -- main` reads
+  the ref as a filename and answers the wrong question instead of failing. `--`
+  therefore goes before pathspecs only, and refs are validated instead —
+  suffixes like `HEAD~3` and `main^{commit}` peeled off first, so nothing that
+  works today starts being refused.
 
 **Verify:** existing test suite green; a pre-M0 database opens, shows the same
 reviews and comments, and new comments carry the local principal.

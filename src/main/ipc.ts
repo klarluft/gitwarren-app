@@ -14,6 +14,7 @@ import { repositoriesService } from '../core/services/repositories.js'
 import { reviewedFilesService } from '../core/services/reviewed-files.js'
 import { reviewsService } from '../core/services/reviews.js'
 import { getDataDirectory, getDatabasePath } from '../core/paths.js'
+import { getInstanceId } from '../core/instance.js'
 import { HUMAN_AUTHOR } from '../shared/actors.js'
 import { AppError } from '../shared/errors.js'
 import { parseWithSchema as parse } from '../shared/validation.js'
@@ -166,6 +167,7 @@ export function registerIpcHandlers(): void {
 
   handle(IPC_CHANNELS.systemAppInfo, (): AppInfo => ({
     version: app.getVersion(),
+    instanceId: getInstanceId(),
     platform: process.platform,
     packaged: app.isPackaged,
     dataDirectory: getDataDirectory(),

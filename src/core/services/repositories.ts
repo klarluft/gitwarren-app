@@ -8,7 +8,7 @@
  * bad write through that the other would have rejected. That is the whole
  * reason the module exists.
  */
-import { asc, eq } from 'drizzle-orm'
+import { and, asc, eq, isNull } from 'drizzle-orm'
 import { getDatabase } from '../db/client.js'
 import { repositories, type RepositoryRow } from '../db/schema.js'
 import { defaultNameForPath, readGitState, resolveRepositoryRoot } from '../git.js'
@@ -42,6 +42,24 @@ async function withGitState(row: RepositoryRow): Promise<RepositoryWithGitState>
 
 function nowIso(): string {
   return new Date().toISOString()
+}
+
+/**
+ * A repository already tracked at this path *on this host*.
+ *
+ * The host scope is the point of the predicate rather than a detail of it. A
+ * path is only unique within the machine it is on - `/home/xfor/app` on a
+ * laptop and the same string inside a WSL distro are two different repositories
+ * - so a bare path match would start refusing perfectly good additions the
+ * moment there is a second host to add one from. `host_id IS NULL` is how a
+ * local row is spelled; see the schema.
+ */
+function localRepositoryAt(path: string): RepositoryRow | undefined {
+  return getDatabase()
+    .select()
+    .from(repositories)
+    .where(and(isNull(repositories.hostId), eq(repositories.path, path)))
+    .get()
 }
 
 function requireRow(id: number): RepositoryRow {
@@ -98,7 +116,7 @@ export const repositoriesService = {
     const { path, name } = parse(addRepositoryInputSchema, input)
     const root = await resolveRepositoryRoot(path)
 
-    const existing = getDatabase().select().from(repositories).where(eq(repositories.path, root)).get()
+    const existing = localRepositoryAt(root)
     if (existing) {
       throw new AppError(
         'DUPLICATE_REPOSITORY',
@@ -137,7 +155,7 @@ export const repositoriesService = {
       // A new path goes through exactly the same validation as `add`.
       const root = await resolveRepositoryRoot(path)
       if (root !== current.path) {
-        const clash = getDatabase().select().from(repositories).where(eq(repositories.path, root)).get()
+        const clash = localRepositoryAt(root)
         if (clash && clash.id !== id) {
           throw new AppError(
             'DUPLICATE_REPOSITORY',
