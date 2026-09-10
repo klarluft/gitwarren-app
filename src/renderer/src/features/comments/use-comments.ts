@@ -1,17 +1,23 @@
 /**
  * Data access for review comments.
  *
- * Unlike the commit and diff reads next door, this one *is* revalidated on
- * focus, and that difference is deliberate. The git reads are expensive and
- * spawn processes, so the app waits to be asked. Comments are a single indexed
- * SQLite query against a database another process is actively writing to -
- * every agent working the review writes through the MCP server - so the cost of
- * checking is nil and the cost of not checking is reading a discussion that
- * moved on while the window was in the background.
+ * The read itself lives next door, in `useReviewThreads`: since M1 the
+ * discussion arrives as part of `reviews.open`, together with the review and
+ * its reviewed marks, so opening a review is one round trip rather than three.
+ * What is left here is the writing half.
+ *
+ * Unlike the commit and diff reads, the discussion *is* revalidated on focus
+ * and on an interval, and that difference is deliberate. The git reads are
+ * expensive and spawn processes, so the app waits to be asked. This one is an
+ * indexed SQLite query against a database another process is actively writing
+ * to - every agent working the review writes through the MCP server - so the
+ * cost of checking is nil and the cost of not checking is reading a discussion
+ * that moved on while the window was in the background.
  */
-import useSWR, { useSWRConfig } from 'swr'
+import { useSWRConfig } from 'swr'
 import { useCallback } from 'react'
-import { api, CACHE_KEYS, CACHE_PREFIXES } from '@/lib/api'
+import { api, CACHE_PREFIXES } from '@/lib/api'
+import { useReviewThreads } from '@/features/reviews/use-reviews'
 import type {
   Comment,
   CommentThread,
@@ -29,18 +35,8 @@ export interface CommentsState {
 const EMPTY: CommentThread[] = []
 
 export function useReviewComments(reviewId: number): CommentsState {
-  const { data, error, isLoading, mutate } = useSWR<CommentThread[], unknown>(
-    CACHE_KEYS.reviewComments(reviewId),
-    () => api.comments.list({ reviewId }),
-    {
-      // Agents write to the same database from their own processes; a stale
-      // thread list is the one thing this screen must not show.
-      revalidateOnFocus: true,
-      refreshInterval: 15_000
-    }
-  )
-
-  return { threads: data ?? EMPTY, error, isLoading, refresh: mutate }
+  const { data, error, isLoading, refresh } = useReviewThreads(reviewId)
+  return { threads: data ?? EMPTY, error, isLoading, refresh }
 }
 
 export interface CommentMutations {
@@ -51,21 +47,20 @@ export interface CommentMutations {
   setResolved: (threadId: number, resolved: boolean) => Promise<void>
 }
 
-export function useCommentMutations(reviewId: number): CommentMutations {
+export function useCommentMutations(): CommentMutations {
   const { mutate } = useSWRConfig()
 
   // A comment also bumps its review's `updatedAt`, which reorders every review
-  // list, so the whole family is revalidated rather than just this thread list.
+  // list, so the whole family is revalidated rather than just this review. The
+  // `review:` prefix now covers the thread list, which lives under that key.
   const revalidate = useCallback(
     () =>
       mutate(
         (key) =>
           typeof key === 'string' &&
-          (key === CACHE_KEYS.reviewComments(reviewId) ||
-            key.startsWith(CACHE_PREFIXES.reviews) ||
-            key.startsWith(CACHE_PREFIXES.review))
+          (key.startsWith(CACHE_PREFIXES.reviews) || key.startsWith(CACHE_PREFIXES.review))
       ),
-    [mutate, reviewId]
+    [mutate]
   )
 
   return {

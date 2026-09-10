@@ -1,142 +1,102 @@
 /**
  * The only bridge between the renderer and the main process.
  *
- * The renderer has no Node access; it gets exactly the functions listed here
- * and nothing else. Each one unwraps the `IpcResult` envelope so that a failure
- * in the main process surfaces in React as a thrown `AppError` with its code
- * intact, which is what lets the forms show field-level messages.
+ * The renderer has no Node access; it gets exactly what is exposed here and
+ * nothing else. Since M1 that is two things: a carrier, and the handful of
+ * capabilities only this shell has.
+ *
+ * The carrier is one function over one channel. It is deliberately not a method
+ * per object any more - the list of methods lives in `shared/rpc.ts`, and a
+ * preload that had to be edited every time one was added would be a third place
+ * to keep the same list. What this file still does is unwrap the outcome, so a
+ * failure in the main process surfaces in React as a thrown `AppError` with its
+ * code intact, which is what lets the forms show field-level messages.
+ *
+ * It also coalesces reads. Two identical reads in flight at the same moment are
+ * the same read, and answering both from one round trip is free here and worth
+ * a great deal once a carrier is an `ssh` pipe. Writes are never coalesced -
+ * see `READ_METHODS`.
  */
 import { contextBridge, ipcRenderer } from 'electron'
-import { deserializeAppError } from '../shared/errors.js'
 import {
   IPC_CHANNELS,
   type AppInfo,
-  type AttachmentIngestInput,
   type EditorList,
-  type GitWarrenApi,
-  type IpcResult,
+  type GitWarrenBridge,
   type UpdateStatus
 } from '../shared/api.js'
-import type {
-  FileContent,
-  FileImage,
-  RepositoryRefs,
-  ReviewCommits,
-  ReviewDiff
-} from '../shared/git.js'
-import type {
-  AddRepositoryInput,
-  Attachment,
-  Comment,
-  CommentThread,
-  CreateReviewInput,
-  CreateThreadInput,
-  GetRepositoryInput,
-  GetReviewInput,
-  ListCommentsInput,
-  ListReviewsInput,
-  OpenReviewFileInput,
-  RemoveCommentInput,
-  RemoveRepositoryInput,
-  RemoveReviewInput,
-  ReplyToThreadInput,
-  Repository,
-  RepositoryRefsInput,
-  RepositoryWithGitState,
-  Review,
-  ReviewCommitsInput,
-  ReviewDiffInput,
-  ReviewedFile,
-  ReviewFileInput,
-  ReviewImageInput,
-  ReviewWithRepository,
-  ListReviewedFilesInput,
-  SetFileReviewedInput,
-  SetThreadResolvedInput,
-  UpdateCommentInput,
-  UpdateRepositoryInput,
-  UpdateReviewInput
-} from '../shared/schemas.js'
+import {
+  isReadMethod,
+  resultOf,
+  type Carrier,
+  type RpcMethod,
+  type RpcOutcome,
+  type RpcParams,
+  type RpcResult
+} from '../shared/rpc.js'
+import type { Attachment, OpenReviewFileInput } from '../shared/schemas.js'
 
 async function invoke<T>(channel: string, payload?: unknown): Promise<T> {
   // `invoke` is typed as `any`; the envelope shape is guaranteed by `handle()`
   // in the main process, which is the only thing that answers these channels.
-  const result = (await ipcRenderer.invoke(channel, payload)) as IpcResult<T>
-  if (result.ok) return result.data
-  throw deserializeAppError(result.error)
+  return resultOf((await ipcRenderer.invoke(channel, payload)) as RpcOutcome<T>)
 }
 
-const api: GitWarrenApi = {
-  repositories: {
-    list: () => invoke<RepositoryWithGitState[]>(IPC_CHANNELS.repositoriesList),
-    get: (input: GetRepositoryInput) =>
-      invoke<RepositoryWithGitState>(IPC_CHANNELS.repositoriesGet, input),
-    add: (input: AddRepositoryInput) => invoke<Repository>(IPC_CHANNELS.repositoriesAdd, input),
-    update: (input: UpdateRepositoryInput) =>
-      invoke<Repository>(IPC_CHANNELS.repositoriesUpdate, input),
-    remove: (input: RemoveRepositoryInput) =>
-      invoke<{ id: number }>(IPC_CHANNELS.repositoriesRemove, input),
-    refs: (input: RepositoryRefsInput) =>
-      invoke<RepositoryRefs>(IPC_CHANNELS.repositoriesRefs, input)
-  },
-  reviews: {
-    list: (input: ListReviewsInput) => invoke<Review[]>(IPC_CHANNELS.reviewsList, input),
-    get: (input: GetReviewInput) => invoke<ReviewWithRepository>(IPC_CHANNELS.reviewsGet, input),
-    create: (input: CreateReviewInput) => invoke<Review>(IPC_CHANNELS.reviewsCreate, input),
-    update: (input: UpdateReviewInput) => invoke<Review>(IPC_CHANNELS.reviewsUpdate, input),
-    remove: (input: RemoveReviewInput) => invoke<{ id: number }>(IPC_CHANNELS.reviewsRemove, input),
-    commits: (input: ReviewCommitsInput) =>
-      invoke<ReviewCommits>(IPC_CHANNELS.reviewsCommits, input),
-    diff: (input: ReviewDiffInput) => invoke<ReviewDiff>(IPC_CHANNELS.reviewsDiff, input),
-    file: (input: ReviewFileInput) => invoke<FileContent>(IPC_CHANNELS.reviewsFile, input),
-    image: (input: ReviewImageInput) => invoke<FileImage>(IPC_CHANNELS.reviewsImage, input),
-    openInEditor: (input: OpenReviewFileInput) =>
-      invoke<void>(IPC_CHANNELS.reviewsOpenInEditor, input),
-    reviewedFiles: (input: ListReviewedFilesInput) =>
-      invoke<ReviewedFile[]>(IPC_CHANNELS.reviewsReviewedFiles, input),
-    setFileReviewed: (input: SetFileReviewedInput) =>
-      invoke<ReviewedFile | null>(IPC_CHANNELS.reviewsSetFileReviewed, input)
-  },
-  comments: {
-    list: (input: ListCommentsInput) => invoke<CommentThread[]>(IPC_CHANNELS.commentsList, input),
-    createThread: (input: CreateThreadInput) =>
-      invoke<CommentThread>(IPC_CHANNELS.commentsCreateThread, input),
-    reply: (input: ReplyToThreadInput) => invoke<Comment>(IPC_CHANNELS.commentsReply, input),
-    update: (input: UpdateCommentInput) => invoke<Comment>(IPC_CHANNELS.commentsUpdate, input),
-    remove: (input: RemoveCommentInput) =>
-      invoke<{ id: number; threadRemoved: boolean }>(IPC_CHANNELS.commentsRemove, input),
-    setResolved: (input: SetThreadResolvedInput) =>
-      invoke<CommentThread>(IPC_CHANNELS.commentsSetResolved, input)
-  },
-  attachments: {
-    ingest: (input: AttachmentIngestInput) =>
-      invoke<Attachment>(IPC_CHANNELS.attachmentsIngest, input),
-    pick: () => invoke<Attachment | null>(IPC_CHANNELS.attachmentsPick)
-  },
-  system: {
-    pickDirectory: () => invoke<string | null>(IPC_CHANNELS.systemPickDirectory),
-    revealPath: (path: string) => invoke<void>(IPC_CHANNELS.systemRevealPath, path),
-    appInfo: () => invoke<AppInfo>(IPC_CHANNELS.systemAppInfo),
-    editors: () => invoke<EditorList>(IPC_CHANNELS.systemEditors)
-  },
-  navigation: {
-    onDeepLink: (listener: (hash: string) => void) => {
-      const handler = (_event: Electron.IpcRendererEvent, hash: string): void => listener(hash)
-      ipcRenderer.on(IPC_CHANNELS.navigationDeepLink, handler)
-      return () => ipcRenderer.off(IPC_CHANNELS.navigationDeepLink, handler)
-    }
-  },
-  updates: {
-    getStatus: () => invoke<UpdateStatus>(IPC_CHANNELS.updatesGetStatus),
-    check: () => invoke<UpdateStatus>(IPC_CHANNELS.updatesCheck),
-    installNow: () => invoke<void>(IPC_CHANNELS.updatesInstallNow),
-    subscribe: (listener: (status: UpdateStatus) => void) => {
-      const handler = (_event: Electron.IpcRendererEvent, status: UpdateStatus): void =>
-        listener(status)
-      ipcRenderer.on(IPC_CHANNELS.updatesChanged, handler)
-      return () => ipcRenderer.off(IPC_CHANNELS.updatesChanged, handler)
-    }
+/**
+ * Reads in flight, by method and params. An entry lives exactly as long as the
+ * request it stands for - long enough to be joined, never long enough to be a
+ * cache. A caller that wants a cache has SWR.
+ */
+const inFlight = new Map<string, Promise<unknown>>()
+
+const carrier: Carrier = {
+  request<M extends RpcMethod>(method: M, params: RpcParams<M>): Promise<RpcResult<M>> {
+    const send = (): Promise<RpcResult<M>> =>
+      invoke<RpcResult<M>>(IPC_CHANNELS.rpcRequest, { method, params })
+
+    if (!isReadMethod(method)) return send()
+
+    const key = `${method}:${JSON.stringify(params ?? null)}`
+    const existing = inFlight.get(key) as Promise<RpcResult<M>> | undefined
+    if (existing) return existing
+
+    const pending = send().finally(() => inFlight.delete(key))
+    inFlight.set(key, pending)
+    return pending
   }
 }
 
-contextBridge.exposeInMainWorld('gitwarren', api)
+const bridge: GitWarrenBridge = {
+  carrier,
+  shell: {
+    system: {
+      pickDirectory: () => invoke<string | null>(IPC_CHANNELS.systemPickDirectory),
+      revealPath: (path: string) => invoke<void>(IPC_CHANNELS.systemRevealPath, path),
+      appInfo: () => invoke<AppInfo>(IPC_CHANNELS.systemAppInfo),
+      editors: () => invoke<EditorList>(IPC_CHANNELS.systemEditors)
+    },
+    updates: {
+      getStatus: () => invoke<UpdateStatus>(IPC_CHANNELS.updatesGetStatus),
+      check: () => invoke<UpdateStatus>(IPC_CHANNELS.updatesCheck),
+      installNow: () => invoke<void>(IPC_CHANNELS.updatesInstallNow),
+      subscribe: (listener: (status: UpdateStatus) => void) => {
+        const handler = (_event: Electron.IpcRendererEvent, status: UpdateStatus): void =>
+          listener(status)
+        ipcRenderer.on(IPC_CHANNELS.updatesChanged, handler)
+        return () => ipcRenderer.off(IPC_CHANNELS.updatesChanged, handler)
+      }
+    },
+    navigation: {
+      onDeepLink: (listener: (hash: string) => void) => {
+        const handler = (_event: Electron.IpcRendererEvent, hash: string): void => listener(hash)
+        ipcRenderer.on(IPC_CHANNELS.navigationDeepLink, handler)
+        return () => ipcRenderer.off(IPC_CHANNELS.navigationDeepLink, handler)
+      }
+    },
+    pickAttachment: () => invoke<Attachment | null>(IPC_CHANNELS.attachmentsPick),
+    openInEditor: (input: OpenReviewFileInput) =>
+      invoke<void>(IPC_CHANNELS.reviewsOpenInEditor, input)
+  }
+}
+
+contextBridge.exposeInMainWorld('gitwarren', bridge)

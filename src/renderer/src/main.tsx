@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { SWRConfig } from 'swr'
 import { App } from './App'
+import { api } from './lib/api'
 import './index.css'
 
 /** Follow the OS appearance, and keep following it if the user switches. */
@@ -25,7 +26,7 @@ applyColourScheme()
  * the main process from a parsed route, so setting it here is not trusting the
  * link - see `main/deep-link.ts`.
  */
-window.gitwarren.navigation.onDeepLink((hash) => {
+api.navigation.onDeepLink((hash) => {
   window.location.hash = hash
 })
 

@@ -49,6 +49,7 @@ import { Markdown } from '@/components/markdown'
 import { Tabs, TabsList, TabsPanel, TabsTab } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { Tooltip } from '@/components/ui/tooltip'
+import { api } from '@/lib/api'
 import { errorMessage } from '@/lib/errors'
 import { cn } from '@/lib/utils'
 import {
@@ -240,7 +241,7 @@ export function CommentComposer({
       try {
         const markdown: string[] = []
         for (const [index, file] of images.entries()) {
-          const attachment = await window.gitwarren.attachments.ingest({
+          const attachment = await api.attachments.ingest({
             bytes: await file.arrayBuffer(),
             originalName: file.name
           })
@@ -299,7 +300,7 @@ export function CommentComposer({
     setBusy(true)
     setError(null)
     try {
-      const attachment = await window.gitwarren.attachments.pick()
+      const attachment = await api.attachments.pick()
       if (attachment === null) return
       const selected = state.value.slice(state.selectionStart, state.selectionEnd).trim()
       const alt = selected.length > 0 ? selected : (attachment.originalName ?? 'image')
