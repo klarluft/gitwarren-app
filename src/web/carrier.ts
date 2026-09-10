@@ -26,6 +26,9 @@
  * Read coalescing is carried over from the preload unchanged, and matters more
  * here: two components asking the same question in the same tick is one frame
  * on the wire instead of two.
+ *
+ * A request is turned into text by `wire.ts` rather than by `JSON.stringify`,
+ * because one of them holds an image. See the note there.
  */
 import { AppError } from '@shared/errors'
 import {
@@ -40,6 +43,7 @@ import {
   type RpcResult
 } from '@shared/rpc'
 import { WEB_PATHS } from '@shared/web'
+import { frame } from './wire'
 
 /** Backoff between reconnects: quick at first, then out of the way. */
 const RETRY_MS = [250, 500, 1000, 2000, 5000] as const
@@ -79,7 +83,7 @@ export function createWebCarrier(): WebCarrier {
   }
 
   const send = (request: RpcRequest): void => {
-    if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(request))
+    if (socket?.readyState === WebSocket.OPEN) socket.send(frame(request))
     else queued.push(request)
   }
 
@@ -106,7 +110,7 @@ export function createWebCarrier(): WebCarrier {
       // iterate: a request queued by a listener during the flush belongs to the
       // socket that is now open, not to this loop.
       const backlog = queued.splice(0, queued.length)
-      for (const request of backlog) opening.send(JSON.stringify(request))
+      for (const request of backlog) opening.send(frame(request))
       announce(true)
     })
 

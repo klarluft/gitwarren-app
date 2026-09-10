@@ -35,6 +35,11 @@
  *    to get in. Not a 404: pretending the app is not there would be a lie the
  *    user cannot act on, and the port is not a secret anyway - the token is.
  *
+ * Everything behind the gate is a read: the web build, `app-info`, and since
+ * M3.2 the attachment bytes an `<img>` in a comment body needs. Writes happen
+ * over the socket and nowhere else, which is what keeps the whole of this file
+ * answering `GET` and `HEAD` and refusing every other method outright.
+ *
  * The socket is upgraded only after the same three, with `Origin` required
  * rather than optional, because a WebSocket handshake is never a navigation.
  */
@@ -42,6 +47,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Duplex } from 'node:stream'
 import { WebSocketServer } from 'ws'
 import { serveWebSocket } from '../rpc/websocket.js'
+import { serveAttachment } from './attachments.js'
 import { isAllowedHost, isAllowedOrigin, loopbackAuthority } from './origin.js'
 import { LINK_SERVER_PORT } from '../../shared/link-port.js'
 import { serveStatic } from './static.js'
@@ -227,6 +233,11 @@ export function createWebHandler({
           })
         return true
       }
+
+      // Images in comment bodies. Behind the same cookie as everything else -
+      // an attachment is review content, and a port that handed screenshots out
+      // to whoever asked would be a hole the token exists to close.
+      if (serveAttachment(pathname, request.method ?? 'GET', response).served) return true
 
       // The socket path only exists as an upgrade. A plain GET to it is a
       // mistake worth naming rather than a 404 among many.

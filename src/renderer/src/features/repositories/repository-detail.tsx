@@ -45,19 +45,25 @@ export function RepositoryDetail({ repositoryId }: { repositoryId: number }) {
                 icon: Pencil,
                 run: () => setEditing(true)
               },
-              {
-                id: 'repository:reveal',
-                label: 'Show in file manager',
-                group: 'Repository',
-                hint: repository.path,
-                keys: 'o',
-                keywords: 'finder explorer folder open reveal',
-                icon: FolderOpen,
-                // A missing folder cannot be revealed, and saying so in the
-                // palette beats a key that silently does nothing.
-                disabled: !repository.git.exists,
-                run: () => void api.system.revealPath(repository.path)
-              }
+              // A shell with no file manager to reach contributes no command
+              // and no `o` key, rather than one that answers with a sentence.
+              ...(api.capabilities.revealPath
+                ? ([
+                    {
+                      id: 'repository:reveal',
+                      label: 'Show in file manager',
+                      group: 'Repository',
+                      hint: repository.path,
+                      keys: 'o',
+                      keywords: 'finder explorer folder open reveal',
+                      icon: FolderOpen,
+                      // A missing folder cannot be revealed, and saying so in
+                      // the palette beats a key that silently does nothing.
+                      disabled: !repository.git.exists,
+                      run: () => void api.system.revealPath(repository.path)
+                    }
+                  ] satisfies Command[])
+                : [])
             ],
       [repository]
     )
@@ -129,17 +135,19 @@ export function RepositoryDetail({ repositoryId }: { repositoryId: number }) {
           </div>
 
           <div className="flex shrink-0 items-center gap-1">
-            <Tooltip label={missing ? 'Folder is missing' : 'Show in file manager'}>
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label="Show in file manager"
-                disabled={missing}
-                onClick={() => void api.system.revealPath(repository.path)}
-              >
-                <FolderOpen />
-              </Button>
-            </Tooltip>
+            {api.capabilities.revealPath && (
+              <Tooltip label={missing ? 'Folder is missing' : 'Show in file manager'}>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label="Show in file manager"
+                  disabled={missing}
+                  onClick={() => void api.system.revealPath(repository.path)}
+                >
+                  <FolderOpen />
+                </Button>
+              </Tooltip>
+            )}
             <Tooltip label="Edit repository">
               <Button
                 variant="ghost"

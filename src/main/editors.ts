@@ -12,6 +12,8 @@
  *  - **A URL scheme** (`vscode://file/...`), handed to `shell.openExternal`.
  *    Registered by the application itself at install time, so it works without
  *    the user ever having installed a shell command, and it carries the line.
+ *    The forms themselves live in `shared/editors.ts` since M3.2, because a
+ *    browser tab opens the same URLs and cannot import this file.
  *  - **A CLI on PATH** (`code -g file:line`), for editors with no scheme worth
  *    using and for the `GITWARREN_EDITOR` escape hatch.
  *
@@ -26,81 +28,75 @@ import { access, constants } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { shell } from 'electron'
+import { EDITOR_LINKS, type EditorId, type EditorLink } from '../shared/editors.js'
 import { AppError } from '../shared/errors.js'
 import type { EditorInfo } from '../shared/api.js'
 
-interface EditorDefinition {
-  id: string
-  label: string
+interface EditorDefinition extends EditorLink {
   /** macOS application bundle, looked for in the usual two places. */
   appBundle?: string
   /** Windows application path, relative to a well-known root. */
   windowsPath?: string
   /** Command to look for on PATH. */
   bin?: string
-  /** Preferred launch: a URL the application registered for itself. */
-  url?: (path: string, line: number) => string
   /** Fallback launch: arguments for `bin`. */
   cliArgs?: (path: string, line: number) => string[]
 }
 
 /**
- * Order is the order the UI offers them in, and the first one found is the
- * default. It is a judgement call rather than a fact; the picker exists so the
- * judgement does not have to be right.
+ * How to find each editor on this machine, keyed by the id it has in
+ * `shared/editors.ts`.
+ *
+ * The ids, the labels and the URL forms live there because a browser tab in
+ * M3.2 offers the same editors and opens the same URLs, with no way to look at
+ * a filesystem. What is left here is everything Node can do and a tab cannot,
+ * and the two halves are merged below - so an editor is added by adding it in
+ * one place, and gains detection here only if there is detection to be had.
  */
-const EDITORS: EditorDefinition[] = [
-  {
-    id: 'vscode',
-    label: 'VS Code',
+const DETECTION: Record<EditorId, Omit<EditorDefinition, 'id' | 'label' | 'url'>> = {
+  vscode: {
     appBundle: 'Visual Studio Code.app',
     windowsPath: 'Microsoft VS Code\\Code.exe',
     bin: 'code',
-    url: (path, line) => `vscode://file${encodeURI(path)}:${line}`,
     cliArgs: (path, line) => ['--goto', `${path}:${line}`]
   },
-  {
-    id: 'cursor',
-    label: 'Cursor',
+  cursor: {
     appBundle: 'Cursor.app',
     windowsPath: 'cursor\\Cursor.exe',
     bin: 'cursor',
-    url: (path, line) => `cursor://file${encodeURI(path)}:${line}`,
     cliArgs: (path, line) => ['--goto', `${path}:${line}`]
   },
-  {
-    id: 'windsurf',
-    label: 'Windsurf',
+  windsurf: {
     appBundle: 'Windsurf.app',
     bin: 'windsurf',
-    url: (path, line) => `windsurf://file${encodeURI(path)}:${line}`,
     cliArgs: (path, line) => ['--goto', `${path}:${line}`]
   },
-  {
-    id: 'zed',
-    label: 'Zed',
+  zed: {
     appBundle: 'Zed.app',
     bin: 'zed',
-    url: (path, line) => `zed://file${encodeURI(path)}:${line}`,
     cliArgs: (path, line) => [`${path}:${line}`]
   },
-  {
-    id: 'sublime',
-    label: 'Sublime Text',
+  sublime: {
     appBundle: 'Sublime Text.app',
     windowsPath: 'Sublime Text\\sublime_text.exe',
     bin: 'subl',
-    // Sublime's scheme wants the path as a query parameter, not a path segment.
-    url: (path, line) => `subl://open?url=file://${encodeURIComponent(path)}&line=${line}`,
     cliArgs: (path, line) => [`${path}:${line}`]
   },
-  {
-    id: 'jetbrains',
-    label: 'JetBrains IDE',
+  jetbrains: {
     bin: process.platform === 'win32' ? 'idea64.exe' : 'idea',
     cliArgs: (path, line) => ['--line', String(line), path]
   }
-]
+}
+
+/**
+ * Order is the order the UI offers them in, and the first one found is the
+ * default - both inherited from `EDITOR_LINKS`, so the two shells offer the
+ * same editors in the same order.
+ */
+const EDITORS: EditorDefinition[] = EDITOR_LINKS.map((link) => ({
+  ...link,
+  ...DETECTION[link.id]
+}))
 
 /** What an editor turned out to support on this machine. */
 interface DetectedEditor extends EditorInfo {

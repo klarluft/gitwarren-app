@@ -209,10 +209,15 @@ export interface ReviewOpen {
  * naive `JSON.stringify` of a byte array produces, but it costs about four
  * bytes per byte and exists for compatibility rather than as a recommendation.
  *
- * Whoever answers accepts all three.
+ * `ArrayBufferView` - a `Uint8Array` and its relatives - is the shape an
+ * `ArrayBuffer` comes out of structured clone as, and is taken over its own
+ * byte range rather than over the buffer behind it.
+ *
+ * Whoever answers accepts all four; see `toIngestSource` in
+ * `core/rpc/dispatcher.ts`, which is the one place that decides.
  */
 export interface AttachmentIngestParams {
-  bytes: ArrayBuffer | number[] | string
+  bytes: ArrayBuffer | ArrayBufferView | number[] | string
   /** Only ever used for display and default alt text; the format is sniffed. */
   originalName?: string
 }

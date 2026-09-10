@@ -19,9 +19,14 @@ import { hrefFor } from '@shared/routes'
 import type { GitWarrenBridge } from '@shared/api'
 
 export function installBridge(): GitWarrenBridge {
+  // The shell is handed the carrier, which the preload's never needed. Two of
+  // the things a tab does for itself - attaching an image, opening a file in an
+  // editor - are half a question for the host and half an action here, and the
+  // host half is an ordinary method. See `shell.ts` on where that line falls.
+  const carrier = createWebCarrier()
   const bridge: GitWarrenBridge = {
-    carrier: createWebCarrier(),
-    shell: createWebShell()
+    carrier,
+    shell: createWebShell(carrier)
   }
 
   window.gitwarren = bridge

@@ -132,7 +132,11 @@ function RepositoryForm({ repository, onDone }: RepositoryFormProps) {
         <DialogDescription>
           {isEditing
             ? 'Rename this repository, or point it at a new location if you moved it.'
-            : 'Choose any folder inside a git repository. GitWarren stores the repository root.'}
+            : api.capabilities.pickDirectory
+              ? 'Choose any folder inside a git repository. GitWarren stores the repository root.'
+              : // No Browse button to choose with, so the sentence says what the
+                // remaining half of the form actually wants.
+                'Type the path of any folder inside a git repository. GitWarren stores the repository root.'}
         </DialogDescription>
       </DialogHeader>
 
@@ -150,15 +154,20 @@ function RepositoryForm({ repository, onDone }: RepositoryFormProps) {
               autoComplete="off"
               spellCheck={false}
             />
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => void browse()}
-              className="shrink-0"
-            >
-              <FolderOpen />
-              Browse
-            </Button>
+            {/* A tab has no folder picker, so the field beside this is the
+                whole of the interaction there - which is also what adding a
+                repository on a remote host will look like in M4. */}
+            {api.capabilities.pickDirectory && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void browse()}
+                className="shrink-0"
+              >
+                <FolderOpen />
+                Browse
+              </Button>
+            )}
           </div>
           <FieldError>{pathError}</FieldError>
           {!pathError && (

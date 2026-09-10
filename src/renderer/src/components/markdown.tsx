@@ -31,6 +31,10 @@
  * cannot; rendering the link instead means the reader still sees that an image
  * was referenced, and still gets to decide whether to open it.
  *
+ * That is still true in a browser tab, where the token is rewritten to a path
+ * on the page's own origin: `img-src 'self'` is not a loosening of the rule but
+ * the same rule spelled the way that shell spells it.
+ *
  * Repo-relative paths land in the same branch. Rendering those live against the
  * repository is worth doing later, but it needs repository context down here
  * that the renderer does not have, so for now they read as links rather than as
@@ -38,6 +42,8 @@
  */
 import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { ATTACHMENT_URL_PREFIX } from '@shared/attachments'
+import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
 /**
@@ -45,12 +51,13 @@ import { cn } from '@/lib/utils'
  *
  * react-markdown strips URLs whose protocol it does not recognise, which is the
  * behaviour that keeps `javascript:` out of an href - so the default is kept
- * for every other URL and only `gitwarren:` is added. The scheme resolves to a
- * file this app copied into its own store and serves itself; see
- * `main/attachment-protocol.ts`.
+ * for every other URL and only `gitwarren:` is added. The token names a file
+ * this app copied into its own store and serves itself, over a custom scheme in
+ * the window (`main/attachment-protocol.ts`) and over HTTP in a browser tab
+ * (`core/web/attachments.ts`).
  */
 function urlTransform(url: string): string {
-  return url.startsWith('gitwarren://attachment/') ? url : defaultUrlTransform(url)
+  return url.startsWith(ATTACHMENT_URL_PREFIX) ? url : defaultUrlTransform(url)
 }
 
 /**
@@ -169,7 +176,7 @@ const components: Components = {
 
   img: ({ node: _node, src, alt, title, className, ...props }) => {
     const url = typeof src === 'string' ? src : ''
-    if (!url.startsWith('gitwarren://')) {
+    if (!url.startsWith(ATTACHMENT_URL_PREFIX)) {
       return (
         <a
           href={url}
@@ -184,7 +191,11 @@ const components: Components = {
     }
     return (
       <img
-        src={url}
+        // The one place a stored token becomes something fetchable, and the
+        // only place that differs between the two shells: the window has a
+        // custom scheme registered and passes it through, a tab rewrites it to
+        // a path on its own origin. See `ShellApi.attachmentSrc`.
+        src={api.attachments.src(url)}
         alt={alt ?? ''}
         title={title}
         className={cn('my-2 max-w-full rounded-md border border-border', className)}

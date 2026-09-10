@@ -20,6 +20,8 @@
  * `WEB_PATHS.appInfo` below.
  */
 
+import { ATTACHMENT_FILE_NAME, attachmentName } from './attachments.js'
+
 /** Everything the browser shell talks to, under one reserved prefix. */
 export const WEB_PREFIX = '/gitwarren'
 
@@ -43,8 +45,59 @@ export const WEB_PATHS = {
    * Revealing a folder or launching an editor stays with the machine the person
    * is sitting at, which in a browser tab means it is simply absent.
    */
-  appInfo: `${WEB_PREFIX}/app-info`
+  appInfo: `${WEB_PREFIX}/app-info`,
+  /**
+   * Attachment bytes, one file per name: `…/attachments/<sha>.<ext>`.
+   *
+   * A prefix rather than a path, and the one thing under here that is not a
+   * single endpoint. It exists because `gitwarren://attachment/…` is a custom
+   * scheme only the Electron main process can serve, and a tab needs the same
+   * images. Serving them over HTTP rather than inlining them as `data:` URLs in
+   * the comment body keeps the cache, the range requests and the memory
+   * behaviour a browser already has for images, and keeps a body the same
+   * string in both shells.
+   *
+   * A read, and only a read - the way *in* is `attachments.ingest` on the
+   * dispatcher, which is where the size limit and the format sniff live. There
+   * is no upload endpoint here and there should not be one.
+   */
+  attachments: `${WEB_PREFIX}/attachments/`
 } as const
+
+/**
+ * The same image, addressed the way a browser tab can fetch it.
+ *
+ * A comment body holds `gitwarren://attachment/<name>` whoever reads it - the
+ * body is stored text and must not depend on which shell renders it. So the
+ * rewrite happens at the `<img src>` and nowhere else: the Electron window
+ * passes the token through to its custom scheme, and a tab turns it into a path
+ * on this origin.
+ *
+ * Anything that is not one of our tokens comes back unchanged, so the caller's
+ * own decision about what to do with a foreign URL - render it as a link, per
+ * `components/markdown.tsx` - is still the caller's to make.
+ */
+export function webAttachmentSrc(url: string): string {
+  const name = attachmentName(url)
+  return name === null ? url : `${WEB_PATHS.attachments}${name}`
+}
+
+/**
+ * The store filename a request under the attachments prefix is asking for, or
+ * null when the path is not one.
+ *
+ * The other half of `webAttachmentSrc`, and the reason both live here: this is
+ * the pair of functions most able to drift apart, and one of them is compiled
+ * into a browser bundle while the other runs in the server that answers it.
+ *
+ * `pathname` arrives decoded, so a name that decoded into a `/` fails the
+ * pattern rather than becoming two segments.
+ */
+export function attachmentNameFromWebPath(pathname: string): string | null {
+  if (!pathname.startsWith(WEB_PATHS.attachments)) return null
+  const name = pathname.slice(WEB_PATHS.attachments.length)
+  return ATTACHMENT_FILE_NAME.test(name) ? name : null
+}
 
 /**
  * The cookie the session lives in, once a token has been exchanged for it.

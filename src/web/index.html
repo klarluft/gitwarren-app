@@ -15,9 +15,11 @@
 
       `img-src` keeps `data:` - image diffs arrive as data URLs from
       `reviews.image` - and drops the `gitwarren:` scheme, which is a custom
-      protocol only the Electron main process serves. Attachments in markdown
-      come over HTTP from this same origin in M3.2; until then they are the one
-      thing in a comment body that does not render in a tab.
+      protocol only the Electron main process serves. Attachments reach this
+      shell over HTTP instead, from `/gitwarren/attachments/…` on this very
+      origin, so `'self'` already covers them and no source had to be added.
+      Note what is still absent: no remote `img-src`, so an image in a comment
+      body cannot reach the network in a tab either.
     -->
     <meta
       http-equiv="Content-Security-Policy"

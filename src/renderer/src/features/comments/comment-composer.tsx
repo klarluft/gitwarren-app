@@ -287,11 +287,12 @@ export function CommentComposer({
   }
 
   /**
-   * Open the native picker.
+   * Open the shell's file picker.
    *
-   * The dialog and the copy both happen in the main process - the renderer has
-   * no filesystem access, so it never learns the path of the file that was
-   * chosen, only the token it turned into.
+   * A native dialog in the window and an `<input type="file">` in a browser
+   * tab; either way the renderer never learns the path of what was chosen, only
+   * the token it turned into. Which is why this needs no capability flag - both
+   * shells can ask for a file, they just ask differently.
    */
   const pickFile = useCallback(async (): Promise<void> => {
     const state = readState()

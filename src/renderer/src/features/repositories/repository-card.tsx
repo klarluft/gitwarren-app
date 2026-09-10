@@ -59,17 +59,22 @@ export function RepositoryCard({ repository, onEdit, onRemove }: RepositoryCardP
         onKeyDown={(event) => event.stopPropagation()}
         role="presentation"
       >
-        <Tooltip label={missing ? 'Folder is missing' : 'Show in file manager'}>
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="Show in file manager"
-            disabled={missing}
-            onClick={() => void api.system.revealPath(repository.path)}
-          >
-            <FolderOpen />
-          </Button>
-        </Tooltip>
+        {/* Absent rather than disabled in a browser tab: a disabled button is a
+            promise the shell cannot keep, and there is no file manager to put
+            in front of someone reading this over loopback in Chrome. */}
+        {api.capabilities.revealPath && (
+          <Tooltip label={missing ? 'Folder is missing' : 'Show in file manager'}>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Show in file manager"
+              disabled={missing}
+              onClick={() => void api.system.revealPath(repository.path)}
+            >
+              <FolderOpen />
+            </Button>
+          </Tooltip>
+        )}
         <Tooltip label="Edit this repository">
           <Button
             variant="ghost"
