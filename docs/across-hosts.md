@@ -1543,7 +1543,7 @@ them verifiable against the real `pc-wsl` node rather than against a mock:
    another machine at all. *(done — see below.)*
 2. **The Hosts screen and the installer over SSH.** `uname -sm`, the tarball
    fetched once and streamed in, the launchers maintained, and the screen that
-   drives it.
+   drives it. *(done — see below.)*
 3. **Repositories on hosts.** `fs.list`, the host segment in routes, reviews
    listed under their host, clones grouped by root commit across hosts.
 4. **Attachments, editors and agent access per host.**
@@ -1648,6 +1648,125 @@ by hand for now. Repositories on hosts are M4.3, so `hosts.remove` deliberately
 leaves any repository rows pointing at that host alone rather than cascading —
 a cascade written now would have to be unpicked once there is a remote
 repository to have an opinion about.
+
+**M4.2, done on the Mac against the WSL node, 10–11 September.** A machine with
+git on it and nothing else is now four commands away from being reviewable,
+and all four go down a connection that was already open:
+
+    uname -sm                                which tarball
+    ~/.gitwarren/bin/gitwarren --version     whether there is anything to do
+    tar xzf -            reading stdin       the bytes
+    …/bin/gitwarren service install          the launchers
+
+`core/hosts/release.ts` decides which file that is and gets it onto *this*
+disk; `core/hosts/install.ts` is the sequence; `hosts.install` on the
+dispatcher is how a screen asks. Nothing was added to `ssh.ts` but
+`runOverSsh`, because "how this app invokes ssh" is one decision and
+`SSH_OPTIONS` is where it was already written down — which is also why `uname`
+on a host with a connection open costs a process spawn and no crypto.
+
+**The host writes its own launchers, and that is the load-bearing choice.** It
+would be a shorter file to `echo` two `sh` scripts into `~/.gitwarren/bin` from
+here. `src/cli/launchers.ts` already knows what a launcher looks like, down to
+the symlink loop and the two absolute paths a login shell cannot work out for
+itself, and a second implementation across an ssh pipe is a copy that drifts.
+The better reason is that running the binary we just unpacked is the only
+*proof* that the architecture was picked correctly: a linux-arm64 tarball on an
+x86-64 box gets as far as a perfectly successful `tar` and then dies at the
+first `exec`, and that is much better discovered during an install someone is
+watching than at the first review they try to open. `--no-login-item` is passed
+because a remote host is not where a login item belongs — the carrier spawns
+`serve --stdio` on demand and hangs up after ten idle minutes, and a daemon
+that also started itself at boot would be a second process on one database
+that nobody asked for. That flag was added in M3.3 for the VPS case, before
+there was one.
+
+Unpacking goes to a scratch directory beside the destination and is moved in
+with one `mv`, because a `tar` interrupted halfway through the destination
+itself leaves a directory that exists, looks installed and cannot run.
+
+**Verification was the point, and it was destructive on purpose.**
+`~/.gitwarren` on `pc-wsl` — which since M4.1 held a hand-built daemon that was
+ahead of the published beta — was deleted, and everything below was done by the
+shipping code onto a machine with nothing on it. From the app: 46.4 MB streamed
+in 3.4 seconds, the launcher and `gitwarren-mcp` written by the host's own
+`service install` with absolute paths into
+`~/.gitwarren/daemon/0.1.7-beta.1/`, `service status` reporting no login item,
+the instance id learned and the row reading *Reachable · GitWarren
+0.1.7-beta.1*. Then the same screen in a Chrome tab against the same core:
+"already up to date, nothing was sent", and Forget. No console errors in
+either, and no horizontal scroll at 390 px.
+
+**Three things bit.**
+
+*One failed press climbed two rungs of the backoff ladder.* A probe of a host
+with no GitWarren on it came back `failures: 2`. A dying connection is noticed
+twice — the close handler sees stdout end, and every request waiting on it
+rejects — and M4.1's pool counted both, so a machine that was switched off went
+from a one-second wait to a fifteen-second one after two attempts instead of
+four. The pool's own tests could not see it: their fake connection rejects a
+request without ever closing, which is a shape a real `ssh` never has. Failures
+are now counted once per connection, by generation. The *message* still takes
+the later of the two, deliberately — the close handler arrives first with "the
+connection closed" because that is all that is known when stdout ends, and the
+request's own failure arrives a moment later having waited for the exit status
+and says "GitWarren is not installed on xfor@pc-wsl". Keeping the first because
+it was first would have undone the thing M4.1 went to some trouble to get
+right. Two tests now assert both halves.
+
+*The remote command is run by the login shell, and on that box it is zsh.* Not
+`sh`, whatever `#!/bin/sh` might suggest — `ssh host '<script>'` hands the
+string to whatever the account's shell is. The unpack script was already free
+of bashisms and of `--strip-components` (busybox `tar` has never had it, so the
+archive's own directory is moved rather than stripped), so it ran unchanged;
+had it not been, this is the sort of thing that fails on someone else's server
+and nowhere else.
+
+*The published tarballs cannot be downloaded yet, and that is not a workflow
+bug.* `release.yml` on `main` builds all four targets, but the tag
+`v0.1.7-beta.1` predates that change — at that tag the daemon job built linux
+only, which is why the draft carries two tarballs and no Homebrew formula. The
+next tag gets macOS. Separately, a *draft* release's assets 404 for everyone,
+so nothing can install from this one until it is published; the 404 says so by
+name rather than reporting a bare status code. `GITWARREN_DAEMON_TARBALL_DIR`
+is what makes a development build installable at all — its version is
+`0.0.0-dev`, which no release has ever heard of — and it is the same answer an
+air-gapped machine with the file on a stick needs, which is why it is a
+directory rather than a flag on a form. Everything above was verified through
+it, with a `linux-x64` tarball built by `scripts/build-daemon-tarball.mjs`.
+
+**The Hosts screen needed no capability flag, and that is the M3.2 design
+working.** Every control on it is one `carrier.request`; in a tab that reaches
+the daemon's core rather than the app's, and what gets managed is *that*
+install's list of hosts — which is correct, because `hosts.*` is answered by
+whoever is asked and never forwarded. `shell.capabilities` exists for controls
+a tab genuinely cannot offer, and installing over ssh is not one of them: the
+install runs wherever the core runs, and that this may be a different machine
+from the browser is the point of the milestone rather than a problem with it.
+`#/hosts` is accordingly the one route in `shared/routes.ts` that is not host
+scoped, and the type says so.
+
+The install is one request with no progress and no timeout, and both are
+deliberate. `shared/rpc.ts` reserves an event channel for M6 and nothing emits
+on it; inventing half of one for a progress bar would put a push-shaped hole in
+a request/response protocol for a wait that is three seconds on a LAN. There is
+also no number of seconds after which abandoning a part-finished install would
+be an improvement. The screen says how big the download is and shows the
+outcome in a dialog rather than a toast, because a person who pressed a button
+and went to make tea should not have to have been watching — least of all for
+the failure, which is `ssh`'s own words and the only thing that says what to
+fix.
+
+**Not done in M4.2, and why.** There is no remote uninstall. `hosts.remove`
+forgets a row on this machine, and the dialog says so in as many words; going
+onto somebody's server to delete a directory is a different act, and
+`rm -rf ~/.gitwarren` is one they can type and read before pressing return. Old
+versions accumulate under `~/.gitwarren/daemon/` and are not pruned, because
+two GitWarrens on two laptops can point one host's launcher at different
+versions and deleting the other's install is not this one's decision to make.
+Nothing on the screen reaches a *repository* on a host yet — that is M4.3, and
+until it lands a host is a machine you can install onto and prove reachable,
+which is exactly what M4.2 set out to be.
 
 ### M5 — WSL from Windows
 

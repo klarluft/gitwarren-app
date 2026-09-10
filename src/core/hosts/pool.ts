@@ -87,6 +87,21 @@ interface Entry {
   state: HostState
   idleTimer: NodeJS.Timeout | null
   inFlight: number
+  /**
+   * Which connection the state describes. Incremented every time one is opened.
+   *
+   * A dying connection is noticed twice - the close handler sees the pipe end,
+   * and every request that was waiting on it rejects - and both of those are
+   * the *same* event. Counting them separately made one failed press of "Try
+   * now" advance the backoff by two rungs, so a machine that was switched off
+   * went from a one-second wait to a fifteen-second one after two attempts
+   * instead of four. Found against `pc-wsl` in M4.2: the pool's own tests use a
+   * fake connection that rejects a request without ever closing, which is a
+   * shape a real `ssh` never has.
+   */
+  generation: number
+  /** The generation a failure has already been counted for. */
+  failedGeneration: number | null
 }
 
 export interface HostPool {
@@ -123,7 +138,9 @@ export function createHostPool({
       connection: null,
       state: { connected: false, failures: 0 },
       idleTimer: null,
-      inFlight: 0
+      inFlight: 0,
+      generation: 0,
+      failedGeneration: null
     }
     entries.set(hostId, created)
     return created
@@ -169,8 +186,36 @@ export function createHostPool({
     connection?.close()
   }
 
-  /** A failure moves the host along the backoff ladder. */
-  const recordFailure = (hostId: number, entry: Entry, message: string): void => {
+  /**
+   * A failure moves the host along the backoff ladder, once per connection.
+   *
+   * `generation` is what makes it once. See the note on `Entry.generation`: the
+   * end of a pipe and the rejection of what was travelling through it are one
+   * event seen from two places, and only the first of them adds a rung to the
+   * ladder.
+   *
+   * The second still replaces the message, and that is not a detail. The close
+   * handler arrives first with "the connection closed", because that is all
+   * that is known at the instant stdout ends; the request's own failure arrives
+   * a moment later having waited for `ssh` to exit, and says "GitWarren is not
+   * installed on xfor@pc-wsl". Keeping the first message because it was first
+   * would undo the thing M4.1 went to some trouble to get right - so the count
+   * takes the earliest and the explanation takes the latest.
+   */
+  const recordFailure = (
+    hostId: number,
+    entry: Entry,
+    message: string,
+    generation: number
+  ): void => {
+    if (entry.failedGeneration === generation) {
+      if (entry.state.lastError === message) return
+      entry.state = { ...entry.state, lastError: message }
+      publish(hostId, entry)
+      return
+    }
+    entry.failedGeneration = generation
+
     const failures = entry.state.failures + 1
     // The last rung repeats forever; `?? 0` is unreachable and is there because
     // a tuple index is not something the compiler can prove is in range.
@@ -211,6 +256,9 @@ export function createHostPool({
         throw OFFLINE(entry.state.lastError ?? `${route.target} is not reachable.`)
       }
 
+      entry.generation += 1
+      const generation = entry.generation
+
       entry.connection = connect(route, (error) => {
         // The pipe died. Whether that is a failure depends on whether anything
         // was expecting it: a connection closed by the idle timer has already
@@ -218,7 +266,7 @@ export function createHostPool({
         // ladder as though the machine had gone away.
         const current = entries.get(route.id)
         if (!current || current.connection === null) return
-        recordFailure(route.id, current, error.message)
+        recordFailure(route.id, current, error.message, generation)
       })
     }
 
@@ -233,6 +281,9 @@ export function createHostPool({
   ): Promise<RpcResult<M>> => {
     const entry = entryFor(route.id)
     const connection = connectionFor(route, ignoreBackoff)
+    // Read after the connection is in hand, so it names the connection this
+    // request is actually travelling on rather than whatever was there before.
+    const generation = entry.generation
 
     entry.inFlight += 1
     try {
@@ -249,7 +300,7 @@ export function createHostPool({
         // and what `ssh` printed - lands a moment after the stream ended. See
         // `diagnostics` in `ssh.ts`.
         const detail = await connection.diagnostics()
-        recordFailure(route.id, entry, detail || appError.message)
+        recordFailure(route.id, entry, detail || appError.message, generation)
         throw OFFLINE(detail || appError.message)
       }
       recordSuccess(route.id, entry)

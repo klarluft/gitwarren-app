@@ -41,9 +41,13 @@
  *
  * ## What this module refuses to do
  *
- * It does not install anything (M4.2 does, and until then a host without the
- * daemon fails with a message saying so), it does not authenticate (`ssh` did
- * that before we saw a byte), and it does not decide what any method means.
+ * It does not authenticate (`ssh` did that before we saw a byte) and it does
+ * not decide what any method means. Since M4.2 it owns one thing besides the
+ * carrier - `runOverSsh`, a single command on a host - because "how this app
+ * invokes ssh" is one decision and `SSH_OPTIONS` is where it is written down.
+ * What that is *used* for is `core/hosts/install.ts`; the multiplexing master
+ * is why `uname -sm` on a host with a connection open costs a process spawn
+ * and nothing else.
  *
  * The one rule it enforces itself is that a `hosts.*` method is never sent. A
  * host list is a property of the install a person is sitting at: forwarding it
@@ -55,6 +59,7 @@
  * the machine.
  */
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import type { Readable } from 'node:stream'
 import { createStdioClient, type StdioClient } from '../rpc/stdio-client.js'
 import { AppError } from '../../shared/errors.js'
 import type { RpcMethod, RpcParams, RpcResult } from '../../shared/rpc.js'
@@ -245,6 +250,106 @@ export function connectOverSsh({
       return (exitReason ?? closeError?.message ?? stderr).trim()
     }
   }
+}
+
+export interface RunOverSshOptions {
+  target: string
+  /** A `sh` script. It crosses as one argument and the login shell runs it. */
+  command: string
+  /** Piped to the remote command's stdin. This is how a tarball gets there. */
+  stdin?: Readable
+  spawnProcess?: typeof spawn
+}
+
+export interface SshRunResult {
+  code: number
+  stdout: string
+  stderr: string
+}
+
+/**
+ * Run one command on a host and wait for it to finish.
+ *
+ * Deliberately resolves on a non-zero exit rather than rejecting. Every caller
+ * asks a question the host is allowed to answer with "no": `uname` on a machine
+ * that answered ssh, `gitwarren --version` on a machine that has never had
+ * GitWarren. Exit 127 *is* the answer to the second, and a throw would make the
+ * ordinary first install arrive as a failure. Not reaching the host at all is
+ * the exception and does reject, because that is not an answer to anything.
+ *
+ * stdout is captured whole, which is safe only because everything run through
+ * here prints a line or two. The tarball travels the other way, on stdin.
+ */
+export function runOverSsh({
+  target,
+  command,
+  stdin,
+  spawnProcess = spawn
+}: RunOverSshOptions): Promise<SshRunResult> {
+  return new Promise((resolve, reject) => {
+    let child: ChildProcessWithoutNullStreams
+    try {
+      child = spawnProcess('ssh', [...SSH_OPTIONS, target, command], {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        // No shell locally, for the reason `connectOverSsh` gives: `target`
+        // came from a form. The *remote* shell is what runs `command`, which is
+        // why everything interpolated into it is quoted by the caller that
+        // built it - see `core/shell-quote.ts`.
+        shell: false,
+        windowsHide: true
+      })
+    } catch (error) {
+      reject(
+        new AppError(
+          'HOST_OFFLINE',
+          `Could not start ssh: ${error instanceof Error ? error.message : String(error)}`
+        )
+      )
+      return
+    }
+
+    let stdout = ''
+    let stderr = ''
+    child.stdout.setEncoding('utf8')
+    child.stderr.setEncoding('utf8')
+    child.stdout.on('data', (chunk: string) => {
+      stdout += chunk
+    })
+    child.stderr.on('data', (chunk: string) => {
+      stderr = (stderr + chunk).slice(-MAX_STDERR_BYTES)
+    })
+
+    child.on('error', (error: Error) => {
+      reject(new AppError('HOST_OFFLINE', `Could not run ssh: ${error.message}`))
+    })
+
+    if (stdin) {
+      // A host that dies mid-transfer closes the pipe under us, and an
+      // unhandled EPIPE on a stream nobody awaits takes the whole process down.
+      // The exit status below is the real report; this only has to not be fatal.
+      child.stdin.on('error', () => {})
+      stdin.on('error', (error: Error) => child.stdin.destroy(error))
+      stdin.pipe(child.stdin)
+    } else {
+      child.stdin.end()
+    }
+
+    // `close` rather than `exit`: the streams have to be drained before stdout
+    // is read, and `exit` can arrive with the last chunk still in flight.
+    child.on('close', (code, signal) => {
+      if (signal) {
+        reject(new AppError('HOST_OFFLINE', `ssh to ${target} was terminated (${signal}).`))
+        return
+      }
+      // 255 is ssh's own "I could not do my half of this", and is never the
+      // remote command's status. See `describeExit`.
+      if (code === 255) {
+        reject(new AppError('HOST_OFFLINE', describeExit(target, code, null, stderr)))
+        return
+      }
+      resolve({ code: code ?? 0, stdout, stderr })
+    })
+  })
 }
 
 /**

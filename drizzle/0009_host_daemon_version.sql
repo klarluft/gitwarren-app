@@ -1,0 +1,1 @@
+ALTER TABLE `hosts` ADD `daemon_version` text;

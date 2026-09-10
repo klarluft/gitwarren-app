@@ -1,5 +1,5 @@
 /**
- * The app shell and its four screens.
+ * The app shell and its five screens.
  *
  * Routing is a hash and a switch (see `lib/router`). The screens are given
  * different amounts of the window - see `reviewWidth` - because a diff needs
@@ -19,6 +19,8 @@ import { AgentAccessCard } from './features/agent/agent-access-card'
 import { AgentAccessPage } from './features/agent/agent-access-page'
 import { CommandCenter } from './features/commands/command-center'
 import { CommandRegistryProvider } from './features/commands/command-registry'
+import { HostsCard } from './features/hosts/hosts-card'
+import { HostsPage } from './features/hosts/hosts-page'
 import { SettingsPanel } from './features/settings/settings-panel'
 import { RepositoryDetail } from './features/repositories/repository-detail'
 import { RepositoryList } from './features/repositories/repository-list'
@@ -74,6 +76,7 @@ export function App() {
 
             {route.name === 'repositories' && <HomeScreen />}
             {route.name === 'agent' && <AgentAccessPage />}
+            {route.name === 'hosts' && <HostsPage />}
             {route.name === 'repository' && <RepositoryDetail repositoryId={route.repositoryId} />}
             {route.name === 'review' && (
               <ReviewDetail reviewId={route.reviewId} tab={route.tab} focus={route.focus} />
@@ -111,6 +114,7 @@ function HomeScreen() {
 
       <div className="flex flex-col gap-6">
         <RepositoryList />
+        <HostsCard />
         <AgentAccessCard />
         <SettingsPanel />
       </div>

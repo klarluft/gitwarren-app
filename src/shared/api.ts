@@ -20,8 +20,15 @@
 import type { FileContent, FileImage, RepositoryRefs, ReviewCommits, ReviewDiff } from './git.js'
 import type { AttachmentIngestParams, Carrier, ReviewOpen, RpcMethod } from './rpc.js'
 import type {
+  AddHostInput,
   AddRepositoryInput,
   Attachment,
+  GetHostInput,
+  HostWithState,
+  InstallOnHostInput,
+  InstallReport,
+  RemoveHostInput,
+  UpdateHostInput,
   Comment,
   CommentThread,
   CreateReviewInput,
@@ -271,6 +278,25 @@ export interface GitWarrenApi {
    * offer one that only explains itself when pressed. See `ShellCapabilities`.
    */
   capabilities: ShellCapabilities
+  /**
+   * The other machines this install knows about.
+   *
+   * Every one of these is answered by whoever the carrier reaches and is never
+   * forwarded onward - see the note on `hosts.*` in `shared/rpc.ts`. Which is
+   * why the Hosts screen in a browser tab manages the *daemon's* hosts and the
+   * one in the window manages the app's, without either screen knowing.
+   */
+  hosts: {
+    list(): Promise<HostWithState[]>
+    get(input: GetHostInput): Promise<HostWithState>
+    add(input: AddHostInput): Promise<HostWithState>
+    update(input: UpdateHostInput): Promise<HostWithState>
+    remove(input: RemoveHostInput): Promise<{ id: number }>
+    /** Reach it now, ignoring backoff. Never throws for an unreachable host. */
+    probe(input: GetHostInput): Promise<HostWithState>
+    /** Slow, and the only method here that changes the other machine. */
+    install(input: InstallOnHostInput): Promise<InstallReport>
+  }
   repositories: {
     list(): Promise<RepositoryWithGitState[]>
     get(input: GetRepositoryInput): Promise<RepositoryWithGitState>

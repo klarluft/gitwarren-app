@@ -129,6 +129,8 @@ export const hostSchema = z.object({
   target: z.string(),
   editorTarget: z.string().nullable(),
   lastSeenAt: z.iso.datetime().nullable(),
+  /** What GitWarren the host was running when it last said. Null until it has. */
+  daemonVersion: z.string().nullable(),
   createdAt: z.iso.datetime()
 })
 
@@ -173,6 +175,35 @@ export const updateHostInputSchema = z
 export const getHostInputSchema = z.object({ id: hostIdSchema })
 export const removeHostInputSchema = z.object({ id: hostIdSchema })
 
+/**
+ * `force` is the difference between "make sure GitWarren is on that machine"
+ * and "put it there again".
+ *
+ * Without it an install of a version that is already there is a no-op with a
+ * sentence, which is what the button does by default - pressing it twice should
+ * not move 45 MB. With it, it reinstalls: the case that needs this is a daemon
+ * directory that is present, reports the right version and is somehow broken,
+ * and a person who has decided that is what happened is right more often than
+ * a version string is.
+ */
+export const installOnHostInputSchema = z.object({
+  id: hostIdSchema,
+  force: z.boolean().optional()
+})
+
+/** What the install did. See `core/hosts/install.ts` for why each is separate. */
+export const installActionSchema = z.enum(['installed', 'upgraded', 'already-current'])
+
+export const installReportSchema = z.object({
+  action: installActionSchema,
+  version: z.string(),
+  previousVersion: z.string().nullable(),
+  target: z.string(),
+  bytes: z.number().int().nonnegative(),
+  /** The host row afterwards, so a screen does not have to re-read it. */
+  host: hostWithStateSchema
+})
+
 export type Host = z.infer<typeof hostSchema>
 export type HostWithState = z.infer<typeof hostWithStateSchema>
 export type HostConnectionState = z.infer<typeof hostStateSchema>
@@ -180,6 +211,9 @@ export type AddHostInput = z.input<typeof addHostInputSchema>
 export type UpdateHostInput = z.input<typeof updateHostInputSchema>
 export type GetHostInput = z.input<typeof getHostInputSchema>
 export type RemoveHostInput = z.input<typeof removeHostInputSchema>
+export type InstallOnHostInput = z.input<typeof installOnHostInputSchema>
+export type InstallAction = z.infer<typeof installActionSchema>
+export type InstallReport = z.infer<typeof installReportSchema>
 
 /* -------------------------------------------------------------------------- */
 /* Reviews                                                                    */
