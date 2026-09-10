@@ -726,7 +726,7 @@ against SQLite.
   | Closing | Survives. Same four PIDs and the same `instanceId` before and after, so the reopen was a re-show and not a relaunch; the window came back on the screen and the page it was left on |
   | Quit | Process gone, `daemon-runtime.json` gone, 41427 released, loopback refuses |
   | Login item | Written, removed and rewritten across four flips, always `"…\GitWarren.exe" --hidden`, with no `StartupApproved` byte to silently disable it |
-  | Hidden start | `GitWarren.exe --hidden` gives four processes with `MainWindowHandle = 0` on every one - no window - while the runtime file and port 41427 come up |
+  | Hidden start | Verified on a real reboot: Windows fired the `Run` entry unattended, the main process carries `--hidden`, `MainWindowHandle = 0` on all four, and the window opens from the tray |
   | Launcher | `%USERPROFILE%\.gitwarren\bin\gitwarren-mcp.cmd`, correct as the bare command with no args and no env: handshake, `tools/list`, `agent_identity` |
   | Links | Loopback page 200; clicking through it put the window back on review 2 |
 
@@ -809,13 +809,30 @@ against SQLite.
   connection, which is what `list_reviews`' tool text tells the agent to
   predict, and it loaded on the same URL once the app was up.
 
+  **The login start, on a real reboot.** This is the one the milestone exists
+  for, and it was the last thing left: the `Run` value and the `--hidden` argv
+  path could each be checked alone, but not the join - Windows firing the entry
+  at sign-in - because testing that means ending the session doing the testing.
+  A reboot settled it, and covers strictly more than the sign-out it replaced.
+  Two minutes after boot, with nobody typing anything:
+
+  ```
+  Pid              : 33744
+  Started          : 10-Sep-26 14:38:20
+  MainWindowHandle : 0
+  CommandLine      : "…\Programs\gitwarren\GitWarren.exe" --hidden
+  ```
+
+  `--hidden` in a command line nobody typed is the `Run` value being read back
+  by Windows and honoured; `MainWindowHandle = 0` on all four processes is the
+  flag being obeyed rather than merely accepted; and the runtime file and port
+  41427 came up carrying the same `instanceId` as before the reboot, so a link
+  minted in an earlier session still resolves to this install. The icon was in
+  the notification area, and the window opened from it. End to end, unattended,
+  on the platform this was written blind for.
+
   **Not checked, and why.**
 
-  - **The login-triggered hidden start.** The registry value is correct and
-    `--hidden` was driven by hand to a running tray app with no window, so both
-    halves are verified - but not the join, which is Windows firing the `Run`
-    entry at sign-in. Testing it means signing out, which kills the session
-    doing the testing. The proxy is strong and it is still a proxy.
   - **SmartScreen.** The installer is **unsigned** (`Get-AuthenticodeSignature`
     → `NotSigned`). It was fetched with `gh`, which sets no mark-of-the-web, so
     no `Zone.Identifier` stream existed and SmartScreen never appeared. A
@@ -826,9 +843,9 @@ against SQLite.
 
   **Still unverified:** the Linux `~/.config/autostart/gitwarren.desktop` file
   on a real desktop; the hidden relaunch after an update, which by construction
-  cannot be tested until there are two published releases to move between; and,
-  on Windows, the sign-in that fires the `Run` entry and the SmartScreen prompt
-  a browser download would raise - both detailed above.
+  cannot be tested until there are two published releases to move between; and
+  the SmartScreen prompt a browser download of the unsigned Windows installer
+  would raise - detailed above.
 
 ### M3 — The web view, locally
 
