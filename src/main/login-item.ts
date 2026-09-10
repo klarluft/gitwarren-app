@@ -37,6 +37,53 @@ import { HIDDEN_FLAG } from './start-hidden.js'
 
 const DESKTOP_FILE_NAME = 'gitwarren.desktop'
 
+/**
+ * What the `Run` value is called on Windows.
+ *
+ * Given no `name`, Electron names it after the app user model id, which comes
+ * out as `electron.app.GitWarren` - and that is what 0.1.7-beta.1 wrote. The
+ * entry works perfectly under either name. What the default costs is that the
+ * obvious way to check it,
+ *
+ *     reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v GitWarren
+ *
+ * reports the value missing while the feature is working, which is exactly what
+ * happened the first time this was verified on Windows: the login item was
+ * briefly recorded as broken on the strength of it. A name the user would guess
+ * makes the obvious check the right one.
+ *
+ * **No migration, deliberately.** A registry entry is keyed by its name, so
+ * renaming one normally means carrying it across - write the new, clear the old -
+ * or a user ends up with two, the stale one still starting the app while the
+ * toggle no longer controls it. Nothing to carry here: start at login arrived
+ * with M2 in `v0.1.7-beta.1`, which is a draft that was never released, and the
+ * newest published version - `v0.1.6` - has no `login-item.ts` and calls
+ * `setLoginItemSettings` nowhere. No installed GitWarren has ever written a
+ * `Run` value, so `electron.app.GitWarren` exists only on machines that ran the
+ * unreleased beta. If that stops being true before this ships, the migration is
+ * back on.
+ */
+const LOGIN_ITEM_NAME = 'GitWarren'
+
+/**
+ * The options both calls have to agree on.
+ *
+ * `name` and `args` are read back as part of the identity of the entry - Windows
+ * looks up the value by name and compares the whole command line - so a `get`
+ * that omits either reports `false` for an entry we wrote ourselves.
+ */
+function loginItemOptions(openAtLogin: boolean): Parameters<typeof app.setLoginItemSettings>[0] {
+  const options = {
+    openAtLogin,
+    // Windows only - macOS ignores it, and reports `wasOpenedAtLogin` instead.
+    // Passed unconditionally because an empty array is what turns a previously
+    // registered `--hidden` entry back into a plain one.
+    args: openAtLogin ? [HIDDEN_FLAG] : []
+  }
+
+  return process.platform === 'win32' ? { ...options, name: LOGIN_ITEM_NAME } : options
+}
+
 function autostartDirectory(): string {
   return join(process.env.XDG_CONFIG_HOME ?? join(homedir(), '.config'), 'autostart')
 }
@@ -72,11 +119,11 @@ function desktopFile(): string {
 
 export function isOpenAtLogin(): boolean {
   if (process.platform === 'linux') return existsSync(desktopFilePath())
-  // The same `args` have to be handed back or Windows reports `openAtLogin`
-  // false for an entry it registered itself: the registry value it looks for is
-  // keyed by the whole command line, arguments included.
+  // The same `name` and `args` have to be handed back or Windows reports
+  // `openAtLogin` false for an entry it registered itself: the value is found by
+  // name and matched on the whole command line, arguments included.
   return app.getLoginItemSettings(
-    process.platform === 'win32' ? { args: [HIDDEN_FLAG] } : undefined
+    process.platform === 'win32' ? loginItemOptions(true) : undefined
   ).openAtLogin
 }
 
@@ -95,13 +142,7 @@ export function setOpenAtLogin(openAtLogin: boolean): boolean {
         rmSync(desktopFilePath(), { force: true })
       }
     } else {
-      app.setLoginItemSettings({
-        openAtLogin,
-        // Windows only - macOS ignores it, and reports `wasOpenedAtLogin`
-        // instead. Passed unconditionally because an empty array is what turns
-        // a previously registered `--hidden` entry back into a plain one.
-        args: openAtLogin ? [HIDDEN_FLAG] : []
-      })
+      app.setLoginItemSettings(loginItemOptions(openAtLogin))
     }
   } catch (error) {
     console.error('[login-item] could not change the login item', error)
