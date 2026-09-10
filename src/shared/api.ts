@@ -111,6 +111,12 @@ export interface AttachmentIngestInput {
 
 export interface AppInfo {
   version: string
+  /**
+   * This install's id - see `core/instance.ts`. Stable for the life of the data
+   * directory, and how a host, a link or a principal names this GitWarren once
+   * there is more than one of them to tell apart.
+   */
+  instanceId: string
   /** `process.platform`: 'darwin' | 'win32' | 'linux' in practice. Typed as a
    *  plain string because this module is also compiled for the renderer, which
    *  has no Node type definitions. */

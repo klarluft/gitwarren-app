@@ -9,6 +9,7 @@ import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
 import { ensureDataDirectory, getDatabasePath } from '../paths.js'
 import { resolveMigrationsFolder } from './migrations.js'
+import { ensureLocalPrincipal, resetLocalPrincipalCache } from './principals.js'
 import * as schema from './schema.js'
 
 export type AppDatabase = BetterSQLite3Database<typeof schema>
@@ -39,6 +40,11 @@ export function getDatabase(): AppDatabase {
 
   const db = drizzle(sqlite, { schema })
   migrate(db, { migrationsFolder: resolveMigrationsFolder() })
+  // Migrations move the schema; this moves the data that the new schema needs
+  // and that no SQL file could have known - see `db/principals.ts`. It runs
+  // before the connection is published so that no caller can observe a database
+  // that has the principals table but not this install's principal in it.
+  ensureLocalPrincipal(db)
 
   connection = sqlite
   instance = db
@@ -50,4 +56,5 @@ export function closeDatabase(): void {
   connection?.close()
   connection = null
   instance = null
+  resetLocalPrincipalCache()
 }

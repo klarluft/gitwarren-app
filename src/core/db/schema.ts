@@ -8,16 +8,77 @@
 import { sql } from 'drizzle-orm'
 import { index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
 
+/**
+ * A person, as opposed to a name printed next to a comment.
+ *
+ * GitWarren still has no accounts and no auth, and this table does not add
+ * either. What it adds is a *stable subject* for the one human in the system,
+ * which is the piece that stops working the moment there is more than one
+ * machine: "Human" is a fine label on one laptop and meaningless as soon as a
+ * review can be read from a second one, where the local user of *that* install
+ * is also called "Human".
+ *
+ * So a principal is identified by where the claim comes from rather than by
+ * what it is called. `kind` is the authority and `identifier` is what that
+ * authority says. For `local` the identifier is this install's instance id
+ * (`core/instance.ts`), which makes the local user of each install a distinct,
+ * durable subject. `tailscale` is the second authority, and the reason the
+ * shape is a pair rather than a plain string: Tailscale reports the same login
+ * on every device the user owns, so one principal spans their machines while
+ * the local ones stay per-install.
+ *
+ * `displayName` is still denormalised onto every comment row, exactly as
+ * before. This table is what those rows now *point at*, not a replacement for
+ * what they carry - see the note on `comments` below.
+ */
+export const principals = sqliteTable(
+  'principals',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    /**
+     * Which authority vouches for `identifier`. `local` is the owner of one
+     * install; `tailscale` arrives with the tailnet listener and carries a
+     * login that is the same on all of the user's devices.
+     */
+    kind: text('kind', { enum: ['local', 'tailscale'] }).notNull(),
+    /** Instance id for `local`, the login for `tailscale`. Never displayed. */
+    identifier: text('identifier').notNull(),
+    /** What to call them. "Human" for the local principal, as the UI always has. */
+    displayName: text('display_name').notNull(),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`)
+  },
+  // One row per (authority, subject). This is what makes seeding the local
+  // principal idempotent when the GUI and the MCP server open the database at
+  // the same moment.
+  (table) => [uniqueIndex('principals_identity_idx').on(table.kind, table.identifier)]
+)
+
+export type PrincipalRow = typeof principals.$inferSelect
+export type NewPrincipalRow = typeof principals.$inferInsert
+
 export const repositories = sqliteTable(
   'repositories',
   {
     id: integer('id').primaryKey({ autoIncrement: true }),
     /**
-     * Canonical absolute path to the repository root. UNIQUE is the backstop
-     * that enforces "one row per repository"; the path is resolved through
-     * `git rev-parse --show-toplevel` + realpath before it ever gets here.
+     * The install that owns this repository, or NULL for this one.
+     *
+     * A host owns its repositories: SQLite, git and the MCP server for a repo
+     * all live on the machine the repo is on, and a row here for a repository
+     * on another host is a *reference* to it, never a copy. NULL rather than
+     * this install's own instance id, so that nothing has to be rewritten when
+     * a data directory is moved or restored onto a machine that mints a new id.
      */
-    path: text('path').notNull().unique(),
+    hostId: text('host_id'),
+    /**
+     * Canonical absolute path to the repository root, on its host. The path is
+     * resolved through `git rev-parse --show-toplevel` + realpath before it
+     * ever gets here; the unique indexes below are the backstop that enforces
+     * "one row per repository per host".
+     */
+    path: text('path').notNull(),
     name: text('name').notNull(),
     /** ISO-8601 UTC strings - readable in a SQLite browser, no timezone traps. */
     createdAt: text('created_at')
@@ -27,7 +88,26 @@ export const repositories = sqliteTable(
       .notNull()
       .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`)
   },
-  (table) => [index('repositories_name_idx').on(table.name)]
+  (table) => [
+    index('repositories_name_idx').on(table.name),
+    /**
+     * One row per path per host.
+     *
+     * This index alone is not enough, and the reason is a SQLite rule worth
+     * stating out loud: NULLs in a unique index are all distinct from one
+     * another, so `(NULL, '/work/app')` twice would satisfy it perfectly. Since
+     * NULL is precisely how a *local* repository is spelled, relying on this
+     * index by itself would quietly retire the duplicate guard that local
+     * repositories have always had.
+     */
+    uniqueIndex('repositories_host_path_idx').on(table.hostId, table.path),
+    /** Which is why local rows get their own index, where there is no NULL to
+     *  make two identical paths look different. Together the two say what
+     *  `UNIQUE(path)` used to say, once per host. */
+    uniqueIndex('repositories_local_path_idx')
+      .on(table.path)
+      .where(sql`${table.hostId} is null`)
+  ]
 )
 
 export type RepositoryRow = typeof repositories.$inferSelect
@@ -169,12 +249,18 @@ export type NewCommentThreadRow = typeof commentThreads.$inferInsert
 /**
  * One message in a thread.
  *
- * Authorship is denormalised onto every row on purpose. There is no users
- * table and there will not be one: GitWarren is a single-person app with no
- * auth, and an "author" here is not an account but a description of where a
- * message came from - the person at the keyboard, or a named agent process that
- * has since exited. Copying the label onto the row keeps that description true
- * forever, which a foreign key to a mutable identity would not.
+ * Authorship is denormalised onto every row on purpose. An "author" here is not
+ * an account but a description of where a message came from - the person at the
+ * keyboard, or a named agent process that has since exited. Copying the label
+ * onto the row keeps that description true forever, which a foreign key to a
+ * mutable identity would not.
+ *
+ * `authorId` does not change that; it adds the other half. The denormalised
+ * columns say what a comment *looked like* when it was written and must never
+ * be recomputed; the principal says *who* wrote it, so two humans' comments can
+ * be told apart once a review is readable from more than one machine. Agent
+ * rows have no principal and are not meant to: an agent session is a process,
+ * not a person, and its identity is the MCP handshake it arrived on.
  */
 export const comments = sqliteTable(
   'comments',
@@ -185,6 +271,21 @@ export const comments = sqliteTable(
       .references(() => commentThreads.id, { onDelete: 'cascade' }),
     /** 'human' for anything typed in the app, 'agent' for anything over MCP. */
     authorKind: text('author_kind', { enum: ['human', 'agent'] }).notNull(),
+    /**
+     * Which person wrote this, when a person did. NULL for every agent comment,
+     * and for a human comment written before principals existed that has not
+     * been backfilled yet (see `db/principals.ts`).
+     *
+     * No delete action, which in SQLite means the delete is *refused*: a
+     * principal who has written comments cannot be removed out from under them.
+     * That is the conservative reading of "a discussion outlives the code it
+     * was about" and, unlike `set null` or `cascade`, it is what SQLite's
+     * `ALTER TABLE ... ADD COLUMN` can actually express - anything else would
+     * mean rebuilding the comments table to add one nullable column, and the
+     * declaration here has to match the SQL that ships or the two quietly
+     * disagree forever.
+     */
+    authorId: integer('author_id').references(() => principals.id),
     /**
      * Display name. Always "Human" from the UI. For an agent this is derived
      * from the MCP `clientInfo` handshake rather than self-reported, so every

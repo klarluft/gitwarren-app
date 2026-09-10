@@ -50,6 +50,13 @@
       "when": 1788784787308,
       "tag": "0006_reviewed_files",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1789030274674,
+      "tag": "0007_hosts_and_principals",
+      "breakpoints": true
     }
   ]
 }

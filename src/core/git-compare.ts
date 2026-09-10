@@ -28,8 +28,9 @@
  * while making a small change on top of a long branch.
  */
 import { readFile, stat } from 'node:fs/promises'
-import { join, resolve, sep } from 'node:path'
+import { resolve, sep } from 'node:path'
 import { canonicalise, isDirectory, runGit, runGitBinary, runGitRaw } from './git-exec.js'
+import { isValidRef } from './git-refs.js'
 import { buildUntrackedFileDiff, parseUnifiedDiff } from './diff-parser.js'
 import { AppError } from '../shared/errors.js'
 import { imageMediaType } from '../shared/git.js'
@@ -397,6 +398,20 @@ async function readUpstreamTracking(
 }
 
 async function resolveEndpoint(repositoryPath: string, ref: string): Promise<CompareEndpoint> {
+  // The gate every ref in this module goes through. Both writes and every read
+  // reach git through here, so one check covers a ref typed into the review
+  // form, one an agent passed to `create_review`, and one stored years ago -
+  // see `git-refs.ts` for why the check is a check rather than a `--`.
+  if (!(await isValidRef(ref, repositoryPath))) {
+    return {
+      ref,
+      sha: null,
+      shortSha: null,
+      upstream: null,
+      error: `\`${ref}\` is not a valid ref name.`
+    }
+  }
+
   // `^{commit}` makes an annotated tag resolve to the commit it points at, and
   // rejects refs that name a tree or a blob.
   const [result, upstream] = await Promise.all([
@@ -505,7 +520,12 @@ export async function readReviewCommits(
       `--max-count=${MAX_COMMITS + 1}`,
       '--no-color',
       `--format=${format}`,
-      `${compare.base.sha}..${compare.head.sha}`
+      `${compare.base.sha}..${compare.head.sha}`,
+      // The range is git's own output from `rev-parse`, so this separator is
+      // not protecting against these two shas. It says the argument list is
+      // finished, which stops a repository that happens to contain a file
+      // named like the range from making `log` ambiguous.
+      '--'
     ],
     repositoryPath
   )
@@ -673,14 +693,21 @@ export async function readReviewDiff(
  * `node_modules` stay out of the review the same way they stay out of a commit.
  */
 async function readUntrackedFiles(worktreePath: string): Promise<FileDiff[]> {
-  const listed = await runGitRaw(['ls-files', '--others', '--exclude-standard', '-z'], worktreePath)
+  const listed = await runGitRaw(
+    ['ls-files', '--others', '--exclude-standard', '-z', '--'],
+    worktreePath
+  )
   if (listed.code !== 0) return []
 
   const paths = listed.stdout.split('\0').filter((path) => path.length > 0)
 
   return Promise.all(
     paths.map(async (path) => {
-      const absolute = join(worktreePath, path)
+      const absolute = resolveInsideRoot(worktreePath, path)
+      // git listed it as untracked *in this worktree*, so it is inside it by
+      // construction and this is unreachable. Handled as "listed but not read",
+      // exactly like a file that vanished mid-scan, rather than trusted.
+      if (absolute === null) return buildUntrackedFileDiff(path, '', { isBinary: true })
       try {
         const info = await stat(absolute)
         if (!info.isFile() || info.size > MAX_UNTRACKED_BYTES) {
@@ -729,6 +756,34 @@ export function isSafeRelativePath(path: string): boolean {
 }
 
 /**
+ * Where a repository-relative path lands on disk, or null if it lands outside.
+ *
+ * The second half is the point. `isSafeRelativePath` is a check on the *string*
+ * and it runs first, but a string check is the wrong last line of defence for a
+ * filesystem read: it has to anticipate every way a path can be spelled, and
+ * platforms keep inventing more of them. This asks the path resolver instead,
+ * after normalisation, and takes its answer.
+ *
+ * Every read of a file from a worktree in this module goes through here, so
+ * "GitWarren reads files from inside the checkout it is reviewing" is a
+ * property of one function rather than a habit at four call sites.
+ *
+ * Note that symlinks are deliberately not resolved. A symlink committed to a
+ * repository is a file the repository has, and git shows it; following it to
+ * its target and then refusing to read it would make GitWarren less able to
+ * show a checkout than `cat` is. What is being prevented is a *path* that
+ * addresses its way out, which is the thing a caller can actually construct.
+ */
+function resolveInsideRoot(root: string, relativePath: string): string | null {
+  const base = resolve(root)
+  const absolute = resolve(base, relativePath)
+  // `resolve` collapses `..`, so this catches a traversal however it was
+  // spelled - and the equality case catches a path that names the root itself.
+  if (absolute === base || !absolute.startsWith(base + sep)) return null
+  return absolute
+}
+
+/**
  * The head-side text of one file in a review, whole.
  *
  * Sent in one go rather than a line range per click. A range API would mean a
@@ -757,8 +812,9 @@ export async function readReviewFile(
   const worktree =
     effectiveChanges(options.changes, compare) === 'committed' ? null : compare.headWorktree
 
-  if (worktree) {
-    const absolute = join(worktree.path, filePath)
+  const absolute = worktree === null ? null : resolveInsideRoot(worktree.path, filePath)
+
+  if (absolute !== null) {
     try {
       const info = await stat(absolute)
       if (!info.isFile()) throw new Error('not a file')
@@ -779,7 +835,10 @@ export async function readReviewFile(
 
   if (!compare.head.sha) return emptyContent(filePath, 'The head ref does not resolve to a commit.')
 
-  const result = await runGitRaw(['show', `${compare.head.sha}:${filePath}`], repositoryPath, {
+  // `<sha>:<path>` is one argument naming a blob, not a rev and a pathspec, so
+  // the trailing `--` is what tells `show` there are no pathspecs coming. The
+  // path itself has already been through `isSafeRelativePath` above.
+  const result = await runGitRaw(['show', `${compare.head.sha}:${filePath}`, '--'], repositoryPath, {
     maxBuffer: MAX_FILE_BYTES
   })
   if (result.code !== 0) {
@@ -862,8 +921,9 @@ export async function readReviewImage(
   // next to a diff that says it changed.
   const worktree = side === 'head' && changes !== 'committed' ? compare.headWorktree : null
 
-  if (worktree) {
-    const absolute = join(worktree.path, filePath)
+  const absolute = worktree === null ? null : resolveInsideRoot(worktree.path, filePath)
+
+  if (absolute !== null) {
     try {
       const info = await stat(absolute)
       if (!info.isFile()) throw new Error('not a file')
@@ -933,9 +993,8 @@ export async function resolveReviewFilePath(
   )
 
   for (const root of roots) {
-    const absolute = resolve(root, filePath)
-    // `resolve` collapses any traversal the check above somehow let through.
-    if (!absolute.startsWith(resolve(root) + sep)) continue
+    const absolute = resolveInsideRoot(root, filePath)
+    if (absolute === null) continue
     try {
       if ((await stat(absolute)).isFile()) return absolute
     } catch {

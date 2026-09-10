@@ -15,6 +15,8 @@ import { mkdirSync } from 'node:fs'
 
 export const APP_DIR_NAME = 'GitWarren'
 export const DATABASE_FILE_NAME = 'gitwarren.db'
+/** Holds this install's instance id. See `core/instance.ts`. */
+export const INSTANCE_FILE_NAME = 'instance-id'
 
 /** Set to point the whole app at a throwaway directory. Used by the tests. */
 export const DATA_DIR_ENV_VAR = 'GITWARREN_DATA_DIR'
@@ -35,6 +37,15 @@ export function getDataDirectory(): string {
 
 export function getDatabasePath(): string {
   return join(getDataDirectory(), DATABASE_FILE_NAME)
+}
+
+/**
+ * Where this install's instance id is kept. Next to the database rather than
+ * inside it: the id names the install, and it has to be readable by a process
+ * that has not opened - or cannot open - SQLite.
+ */
+export function getInstanceIdPath(): string {
+  return join(getDataDirectory(), INSTANCE_FILE_NAME)
 }
 
 export function ensureDataDirectory(): string {
