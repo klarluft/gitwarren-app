@@ -841,11 +841,101 @@ against SQLite.
     way; it needs a browser download to settle, and it is the first thing a
     real Windows user meets.
 
-  **Still unverified:** the Linux `~/.config/autostart/gitwarren.desktop` file
-  on a real desktop; the hidden relaunch after an update, which by construction
-  cannot be tested until there are two published releases to move between; and
-  the SmartScreen prompt a browser download of the unsigned Windows installer
-  would raise - detailed above.
+  **The Linux desktop.** *10 September 2026, Kubuntu 26.04.1 LTS - KDE Plasma 6
+  on Wayland - in a VirtualBox VM, against the draft's
+  `GitWarren-0.1.7-beta.1-x86_64.AppImage`. Driven over SSH and D-Bus, with the
+  VM's framebuffer grabbed as PNGs to confirm each step visually.*
+
+  The last of the three platforms, and the one where the tray was least certain:
+  Linux is where a tray may not exist at all, and where the login item is a file
+  the app writes rather than an API it calls.
+
+  | | |
+  | --- | --- |
+  | Tray | Registers with `org.kde.StatusNotifierWatcher`: `Id=GitWarren_status_icon_1`, `Status=Active`, `Category=ApplicationStatus` |
+  | Menu | `Open GitWarren`, separator, `Quit GitWarren` - read back out of `com.canonical.dbusmenu.GetLayout`, not off a screenshot |
+  | Left click | `StatusNotifierItem.Activate` opens the window |
+  | Closing | Hides. Same pid, same tray item, runtime file intact and the link server still answering 200 afterwards |
+  | Quit | The menu item ends the process: runtime file gone, 41427 released, tray item deregistered |
+  | Login item | The toggle writes and removes `~/.config/autostart/gitwarren.desktop`, and reads back correctly on the next start |
+  | Hidden start | Cold boot: argv is `--hidden`, tray icon present, no window |
+  | Launcher | The AppImage form, now on a real desktop rather than in a container |
+  | MCP | `initialize` and `agent_identity` answered, exit 0, stderr clean |
+  | Links | A deep link delivered through argv put the window back on the review |
+
+  The login item is worth spelling out, because it is the claim the milestone
+  rests on here. The file the app writes is
+
+  ```
+  [Desktop Entry]
+  Type=Application
+  Name=GitWarren
+  Comment=Local code review for your git repositories
+  Exec="/home/gw/GitWarren.AppImage" --hidden
+  Terminal=false
+  X-GNOME-Autostart-enabled=true
+  ```
+
+  - `linuxCommand()` resolving to `APPIMAGE`, which is the whole point of it -
+  and after a cold boot the process that came up had `--hidden` in a command
+  line nobody typed, a tray icon, and no window.
+
+  **What honoured that file was systemd, not a session manager.** The parent of
+  the autostarted process is `systemd`, because Plasma 6 routes XDG autostart
+  through `xdg-desktop-autostart.target` rather than forking entries itself. The
+  claim in the table above - "`~/.config/autostart`, which is what GNOME, KDE and
+  the rest look at" - holds, but on this desktop it holds through a mechanism a
+  reader of that sentence would not picture. Worth knowing before debugging a
+  desktop where it does not work: the question to ask is whether that target is
+  reached, not whether some session manager scanned the directory.
+
+  **The `#` banner is correct here**, which is the other half of the Windows
+  launcher bug. The identical bytes that make `cmd` write three errors per start
+  are an ordinary comment to `/bin/sh`; stderr from the launcher on this platform
+  carries only the two lines the server writes itself. No amount of testing here
+  or on macOS could have found it.
+
+  **One thing that is not a bug and is worth writing down anyway.** With no
+  working GPU - VirtualBox with no 3D - GitWarren starts as a tray icon and
+  nothing else, *even when it was not asked to start hidden*. The GPU process
+  cannot create a command buffer:
+
+  ```
+  ContextResult::kTransientFailure: Failed to send GpuControl.CreateCommandBuffer
+  ```
+
+  so the renderer never paints, so `ready-to-show` never fires, and the window
+  built by `createWindow` is never shown - `window.once('ready-to-show', () =>
+  window.show())` is the only thing that shows it. `--disable-gpu` fixes it
+  completely, which is what identifies this as the VM rather than the app. But
+  the shape of the failure is worth keeping in mind: on a machine with a broken
+  GL stack, the distance between GitWarren and an app that starts invisible with
+  no explanation is one event that never arrives.
+
+  Also, and consistent with the macOS finding: the packaged beta's updater
+  404'd on `latest-linux.yml`, for the same reason it 404'd on `latest-mac.yml`
+  - a draft's assets are not downloadable.
+
+  **How the clicking was done, since it bears on how much to trust this.**
+  `VBoxManage` injects keystrokes but has no mouse, and `ydotool`'s uinput device
+  was created after the session started, so KWin never assigned it to seat0 and
+  ignored every event it produced. So the clicks that mattered were not clicks:
+  `Activate` is precisely what a left click on a StatusNotifierItem sends, and a
+  `com.canonical.dbusmenu` `Event` is precisely what choosing a menu entry sends,
+  so those two are exercised at the same interface a mouse would reach - arguably
+  a better test than a click, since the assertion is about what the item exposes.
+  The settings toggle was reached with keyboard focus and pressed with Space.
+  Screenshots confirmed each result on screen.
+
+  **Not covered here:** the no-tray fallback - the path where `new Tray()` throws
+  on a desktop with no StatusNotifierItem host and the app is supposed to say so
+  and carry on with a window. Plasma has a tray, so this run could only take the
+  branch where one exists.
+
+  **Still unverified:** the hidden relaunch after an update, which by
+  construction cannot be tested until there are two published releases to move
+  between; the SmartScreen prompt a browser download of the unsigned Windows
+  installer would raise; and the no-tray Linux fallback - all detailed above.
 
 ### M3 — The web view, locally
 
