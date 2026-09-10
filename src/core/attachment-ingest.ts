@@ -85,7 +85,20 @@ export function localPathFor(url: string): string | null {
 
   // Any other scheme is remote, or at least not ours: http(s), data, and the
   // gitwarren tokens produced by an earlier pass through this function.
-  if (/^[a-z][a-z0-9+.-]*:/i.test(url)) return null
+  //
+  // Except a Windows drive letter, which parses as a scheme and is not one:
+  // `C:\Users\me\shot.png` matches any scheme pattern that can be written,
+  // which meant every absolute path on Windows was read as remote and left in
+  // the body as dead text - the whole screenshot feature, silently doing
+  // nothing on one platform. A drive letter is one character and is always
+  // followed by a separator, and single-letter schemes are not used in
+  // practice, so that pair tells them apart.
+  //
+  // Deliberately not conditional on `process.platform`: the check below is
+  // `isAbsolute`, which already answers per platform, so a POSIX host reading a
+  // body written on Windows still declines the path - it just declines it for
+  // the true reason rather than by mistaking it for a URL.
+  if (!/^[a-z]:[\\/]/i.test(url) && /^[a-z][a-z0-9+.-]*:/i.test(url)) return null
 
   const decoded = safeDecode(url)
   return isAbsolute(decoded) ? decoded : null
