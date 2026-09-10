@@ -36,14 +36,18 @@ const TRACE_IPC = process.env.GITWARREN_TRACE_IPC === '1'
  */
 function handle<T>(channel: string, handler: (payload: unknown) => Promise<T> | T): void {
   ipcMain.handle(channel, async (_event, payload: unknown): Promise<IpcResult<T>> => {
-    // Set GITWARREN_TRACE_IPC=1 to see every call with its duration. The point
-    // is to count round trips per screen before the core moves behind a
-    // network carrier - see docs/across-hosts.md, spike S5 - where each one
-    // stops being free.
+    // Set GITWARREN_TRACE_IPC=1 to see every call with when it started and how
+    // long it took. The point is to count round trips per screen, and how many
+    // of them wait on each other, before the core moves behind a network
+    // carrier - see docs/across-hosts.md, spike S5 - where each one stops
+    // being free.
     const startedAt = TRACE_IPC ? performance.now() : 0
     try {
       const data = await handler(payload)
-      if (TRACE_IPC) console.error(`[ipc] ${channel} ${(performance.now() - startedAt).toFixed(1)}ms`)
+      if (TRACE_IPC) {
+        const duration = performance.now() - startedAt
+        console.error(`[ipc] ${channel} at ${startedAt.toFixed(0)}ms took ${duration.toFixed(1)}ms`)
+      }
       return { ok: true, data }
     } catch (error) {
       const appError = AppError.from(error)
