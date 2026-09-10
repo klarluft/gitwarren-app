@@ -1,6 +1,26 @@
 @import 'tailwindcss';
 
 /*
+ * Where the class names are, said out loud.
+ *
+ * Tailwind v4 finds its own sources by walking the project from the repository
+ * root and skipping whatever `.gitignore` skips. That is exactly right in a
+ * checkout and silently wrong in a worktree under `.claude/worktrees/`, which
+ * this repository ignores: the scan finds no `.tsx` at all, emits the theme
+ * layer and nothing else, and the build succeeds. The page then paints with no
+ * borders, no spacing and no type scale, and nothing anywhere says so - three
+ * M3 changes were verified in a browser against a 6 KB stylesheet before anyone
+ * looked closely enough to notice.
+ *
+ * An explicit source is scanned whether or not it is ignored, so this line
+ * makes the CSS the same wherever the build is run from. The renderer alone,
+ * because it is the only place with markup in it: pointing this at `src` would
+ * also have the scanner reading the daemon and the CLI for class names, and
+ * find a handful of strings that merely look like some.
+ */
+@source "../";
+
+/*
  * Theme tokens. The palette is defined once here in both schemes; the `.dark`
  * class is applied to <html> from main.tsx following the OS setting, so the app
  * matches the rest of the desktop without the user configuring anything.

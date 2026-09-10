@@ -931,9 +931,11 @@ comment is worth more than the link.
 
 ### Pointing an agent at it
 
-**The app shows you the exact configuration for your install** — open the
-*Agent access* panel at the bottom of the window and copy it. The paths depend
-on where the app was installed, so prefer the panel over the notes below.
+**GitWarren shows you the exact configuration for your install** — open the
+*Agent access* page (the card on the home screen, or `g a`) and copy the prompt
+at the top of it. The browser shell has the same page, and on a machine with no
+screen `gitwarren agent-setup` prints the same words. The paths depend on where
+GitWarren was installed, so prefer one of those over the notes below.
 
 ### One command, everywhere
 
@@ -948,7 +950,7 @@ It takes no arguments and needs no environment, and the app rewrites it
 whenever the install moves — after an update, after dragging the app to a
 different folder, after switching between a packaged build and a source
 checkout. So an agent config that names it keeps working, and the *Agent
-access* panel leads with a sentence you paste into whatever agent you use
+access* page leads with a sentence you paste into whatever agent you use
 rather than with JSON you paste into a file:
 
 > Set up the GitWarren MCP server for yourself. It speaks MCP over stdio and is
@@ -956,11 +958,12 @@ rather than with JSON you paste into a file:
 > environment). Register it under the name "gitwarren" in your own MCP
 > configuration, then call its `agent_identity` tool to confirm it works.
 
-Agents know their own configuration format better than a panel can. What they
+Agents know their own configuration format better than a page can. What they
 need from us is a stable command.
 
-To configure it by hand instead, that command is all a `mcpServers` entry
-needs:
+To configure it by hand instead, that command is all an entry needs. Three
+formats cover every harness we know of, and the page generates all three from
+the launcher path (`gitwarren agent-setup --manual` prints them too):
 
 ```json
 {
@@ -970,8 +973,16 @@ needs:
 }
 ```
 
-Codex wants the same under `[mcp_servers.gitwarren]` in TOML; VS Code calls the
-object `servers`.
+for Claude Code, Cursor, Windsurf and Gemini CLI; the same object called
+`servers` for VS Code; and TOML for Codex:
+
+```toml
+[mcp_servers.gitwarren]
+command = "/Users/you/.gitwarren/bin/gitwarren-mcp"
+```
+
+On Windows, double every backslash in that TOML string — `\U` is a real escape,
+so a path pasted raw parses into a different one rather than into an error.
 
 ### What the launcher wraps
 
@@ -998,7 +1009,7 @@ same database independently, and an agent gets a working `guiUrl` either way.
 
 ## The `gitwarren` command line
 
-The same GitWarren, with a browser tab for a shell. One binary, three
+The same GitWarren, with a browser tab for a shell. One binary, four
 subcommands, and no Electron anywhere in it.
 
 ```bash
@@ -1008,6 +1019,7 @@ gitwarren open [link]           # open this machine's GitWarren in a browser
 gitwarren service install       # write the launchers, and start at login
 gitwarren service uninstall     # remove the login item
 gitwarren service status        # what is registered, and what is running
+gitwarren agent-setup           # print the sentence that points an agent here
 ```
 
 It exists for two audiences that the app cannot serve. Someone who will not
@@ -1048,7 +1060,7 @@ then handed to the operating system.
 Two things, and only the second is about logging in:
 
 1. **The launchers.** `~/.gitwarren/bin/gitwarren` and `~/.gitwarren/bin/gitwarren-mcp`,
-   at the paths the rest of GitWarren already names — the Agent Access panel
+   at the paths the rest of GitWarren already names — the Agent Access page
    prints the second as a command to paste, and M4 spawns the first over ssh as
    `~/.gitwarren/bin/gitwarren serve --stdio`. Rerunning after an update points
    them at the install that ran last.

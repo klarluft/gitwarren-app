@@ -1,5 +1,5 @@
 /**
- * The app shell and its three screens.
+ * The app shell and its four screens.
  *
  * Routing is a hash and a switch (see `lib/router`). The screens are given
  * different amounts of the window - see `reviewWidth` - because a diff needs
@@ -15,7 +15,8 @@ import { ScrollToTop } from './components/scroll-to-top'
 import { Kbd } from './components/ui/kbd'
 import { TooltipProvider } from './components/ui/tooltip'
 import { UpdateBanner } from './components/update-banner'
-import { AgentAccessPanel } from './features/agent/agent-access-panel'
+import { AgentAccessCard } from './features/agent/agent-access-card'
+import { AgentAccessPage } from './features/agent/agent-access-page'
 import { CommandCenter } from './features/commands/command-center'
 import { CommandRegistryProvider } from './features/commands/command-registry'
 import { SettingsPanel } from './features/settings/settings-panel'
@@ -72,6 +73,7 @@ export function App() {
             </div>
 
             {route.name === 'repositories' && <HomeScreen />}
+            {route.name === 'agent' && <AgentAccessPage />}
             {route.name === 'repository' && <RepositoryDetail repositoryId={route.repositoryId} />}
             {route.name === 'review' && (
               <ReviewDetail reviewId={route.reviewId} tab={route.tab} focus={route.focus} />
@@ -109,7 +111,7 @@ function HomeScreen() {
 
       <div className="flex flex-col gap-6">
         <RepositoryList />
-        <AgentAccessPanel />
+        <AgentAccessCard />
         <SettingsPanel />
       </div>
     </>

@@ -115,7 +115,7 @@ function relaunchEnv(): Record<string, string> {
  *
  * Null rather than a path that is not there: `service install` writes an agent
  * launcher out of this, and a launcher pointing at a missing file is worse than
- * no launcher, because the Agent Access panel would report it as available.
+ * no launcher, because the Agent Access page would report it as available.
  */
 function findMcpServer(script: string | null): string | null {
   const candidates = [

@@ -24,6 +24,7 @@
  * spawns over ssh.
  */
 import { runDaemon } from '../daemon/daemon.js'
+import { runAgentSetup } from './agent-setup.js'
 import { runOpen } from './open.js'
 import { runService } from './service.js'
 
@@ -40,6 +41,7 @@ const USAGE = `gitwarren - local-only code review, from the command line
   gitwarren service install      write the launchers and start at login
   gitwarren service uninstall    remove the login item
   gitwarren service status       what is registered, and what is running
+  gitwarren agent-setup          print the sentence that points an agent here
   gitwarren --version
 
 Run a subcommand with no valid arguments to see its own usage.
@@ -69,6 +71,9 @@ export function runCli(argv: readonly string[]): boolean {
 
     case 'service':
       return runService(rest)
+
+    case 'agent-setup':
+      return runAgentSetup(rest)
 
     case '--version':
     case '-v':

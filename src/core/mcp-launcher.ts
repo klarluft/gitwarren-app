@@ -4,7 +4,7 @@
  * Split out of `main/mcp-launch.ts` - which still owns *writing* the MCP file
  * and everything Electron knows about where this install put its server -
  * because from M3 the path has a second reader: a `gitwarren serve` with no
- * Electron anywhere near it has to tell the Agent Access panel the same command
+ * Electron anywhere near it has to tell the Agent Access page the same command
  * the app would have told it. Two processes computing "one path per OS"
  * separately is exactly the drift the launcher exists to prevent, so the
  * computation is here, free of any `electron` import, and both import it.
