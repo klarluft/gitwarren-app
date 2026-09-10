@@ -12,10 +12,11 @@
  * behind the user's back; the screens carry an explicit refresh button instead,
  * which is honest about when the app looks at the disk.
  */
-import useSWR, { useSWRConfig } from 'swr'
+import useSWR, { useSWRConfig, type SWRResponse } from 'swr'
 import { useCallback, useMemo, useState } from 'react'
 import { api, CACHE_KEYS, CACHE_PREFIXES } from '@/lib/api'
 import type { EditorList } from '@shared/api'
+import type { ReviewOpen } from '@shared/rpc'
 import type {
   DiffChanges,
   DiffFileSide,
@@ -26,6 +27,7 @@ import type {
   ReviewDiff
 } from '@shared/git'
 import type {
+  CommentThread,
   CreateReviewInput,
   Review,
   ReviewedFile,
@@ -80,12 +82,39 @@ export function useReviews(
   )
 }
 
-export function useReview(reviewId: number): ListState<ReviewWithRepository> {
-  return toState(
-    useSWR<ReviewWithRepository, unknown>(CACHE_KEYS.review(reviewId), () =>
-      api.reviews.get({ id: reviewId })
-    )
+/**
+ * A whole review in one read: the review itself, its discussion, and which of
+ * its files have been ticked off.
+ *
+ * One hook and one cache key behind all three, which is what makes opening a
+ * review a single round trip. Every consumer - the header, the conversation
+ * tab, the files tab - subscribes to the same key, so however many of them
+ * mount at once, SWR issues one request. Before M1 these were three keys and
+ * three calls, and the second and third were pure overhead over a network.
+ *
+ * Revalidated on focus and every fifteen seconds, because the discussion is in
+ * it: agents write to the same database from their own processes, and a stale
+ * thread list is the one thing this screen must not show. The review row and
+ * the marks come along for free - all three are indexed queries, and asking for
+ * them separately would cost a round trip each.
+ */
+function useReviewOpen(reviewId: number): SWRResponse<ReviewOpen, unknown> {
+  return useSWR<ReviewOpen, unknown>(
+    CACHE_KEYS.review(reviewId),
+    () => api.reviews.open({ id: reviewId }),
+    { revalidateOnFocus: true, refreshInterval: 15_000 }
   )
+}
+
+export function useReview(reviewId: number): ListState<ReviewWithRepository> {
+  const result = useReviewOpen(reviewId)
+  return toState({ ...result, data: result.data?.review })
+}
+
+/** The discussion. See `useReviewOpen` for why this is not a read of its own. */
+export function useReviewThreads(reviewId: number): ListState<CommentThread[]> {
+  const result = useReviewOpen(reviewId)
+  return toState({ ...result, data: result.data?.threads })
 }
 
 export function useReviewCommits(reviewId: number): ListState<ReviewCommits> {
@@ -97,6 +126,16 @@ export function useReviewCommits(reviewId: number): ListState<ReviewCommits> {
     )
   )
 }
+
+/**
+ * The diff a review opens on, and the one both tabs ask for first.
+ *
+ * Shared rather than written out three times, because the review screen starts
+ * this read before either tab exists (see `review-detail.tsx`). A tab that
+ * defaulted to a different setting would silently make that head start useless
+ * and cost the extra round trip it was there to save.
+ */
+export const DEFAULT_DIFF_CHANGES: DiffChanges = 'all'
 
 export function useReviewDiff(reviewId: number, changes: DiffChanges): ListState<ReviewDiff> {
   return toState(
@@ -220,12 +259,9 @@ export interface ReviewedFilesState {
  * and revalidates, which is the same read the screen already trusts.
  */
 export function useReviewedFiles(reviewId: number): ReviewedFilesState {
-  const { data, isLoading, mutate } = useSWR<ReviewedFile[], unknown>(
-    CACHE_KEYS.reviewedFiles(reviewId),
-    () => api.reviews.reviewedFiles({ reviewId })
-  )
+  const { data, isLoading, mutate } = useReviewOpen(reviewId)
 
-  const files = data ?? NO_REVIEWED_FILES
+  const files = data?.reviewedFiles ?? NO_REVIEWED_FILES
 
   const digests = useMemo(
     () => new Map(files.map((file) => [file.filePath, file.contentDigest])),
@@ -234,17 +270,29 @@ export function useReviewedFiles(reviewId: number): ReviewedFilesState {
 
   const setReviewed = useCallback(
     async (filePath: string, contentDigest: string | null) => {
-      const next = (current: ReviewedFile[] = NO_REVIEWED_FILES): ReviewedFile[] => {
-        const others = current.filter((file) => file.filePath !== filePath)
-        return contentDigest === null
-          ? others
-          : [...others, { reviewId, filePath, contentDigest, reviewedAt: new Date().toISOString() }]
+      // Nothing on screen to patch - the review has not arrived yet. Write, then
+      // let the ordinary read bring the mark back with everything else.
+      if (!data) {
+        await api.reviews.setFileReviewed({ reviewId, filePath, contentDigest })
+        await mutate()
+        return
+      }
+
+      // The marks live inside the opened review now, so the optimistic update
+      // replaces that one field and leaves the review and its threads alone.
+      const others = data.reviewedFiles.filter((file) => file.filePath !== filePath)
+      const next: ReviewOpen = {
+        ...data,
+        reviewedFiles:
+          contentDigest === null
+            ? others
+            : [...others, { reviewId, filePath, contentDigest, reviewedAt: new Date().toISOString() }]
       }
 
       await mutate(
         async () => {
           await api.reviews.setFileReviewed({ reviewId, filePath, contentDigest })
-          return next(data)
+          return next
         },
         { optimisticData: next, revalidate: false, rollbackOnError: true }
       )

@@ -1,13 +1,24 @@
 /**
- * The contract between the main process and the renderer.
+ * The contract between the Electron shell and the renderer.
  *
- * Channel names and the shape of the bridge live here so the preload script and
- * the React code are typed from one declaration. The MCP server does not use
- * any of this - it talks to `core/services` directly - which is deliberate:
- * this file is transport, not behaviour.
+ * Two things live here, and the line between them is the one M1 drew.
+ *
+ * `GitWarrenApi` is what a screen sees: the whole app, grouped by object. Most
+ * of it is now one carrier call each (`shared/rpc.ts`), and `lib/api.ts` builds
+ * it. What is left in this file that is *not* a carrier call is the Electron
+ * shell - folder pickers, revealing a path, launching an editor, the updater,
+ * deep links. Those are capabilities of the machine the person is sitting at.
+ * They are not methods, they never travel to another host, and a browser tab in
+ * M3 will simply not have some of them.
+ *
+ * `GitWarrenBridge` is what the preload actually exposes: the carrier plus that
+ * shell surface, and nothing else.
+ *
+ * The MCP server uses none of this - it talks to `core/services` directly - and
+ * that is deliberate: this file is transport, not behaviour.
  */
-import type { SerializedAppError } from './errors.js'
 import type { FileContent, FileImage, RepositoryRefs, ReviewCommits, ReviewDiff } from './git.js'
+import type { AttachmentIngestParams, Carrier, ReviewOpen, RpcMethod } from './rpc.js'
 import type {
   AddRepositoryInput,
   Attachment,
@@ -43,6 +54,15 @@ import type {
 } from './schemas.js'
 
 export const IPC_CHANNELS = {
+  /**
+   * The carrier. One channel, every core method, `{method, params}` in and an
+   * `RpcOutcome` out - see `shared/rpc.ts`.
+   *
+   * The per-object channels below still answer, each a one-line delegation to
+   * the same dispatcher, so nothing that spoke to this app before M1 has
+   * stopped being spoken to. The renderer no longer uses them.
+   */
+  rpcRequest: 'rpc:request',
   repositoriesList: 'repositories:list',
   repositoriesGet: 'repositories:get',
   repositoriesAdd: 'repositories:add',
@@ -86,28 +106,66 @@ export const IPC_CHANNELS = {
 } as const
 
 /**
- * Errors cannot cross `ipcRenderer.invoke` intact - Electron stringifies them
- * and the code would be lost. Every handler returns this envelope instead, and
- * the preload script turns a failure back into a real `AppError` before the
- * renderer ever sees it.
+ * The channels that are one method by another name.
+ *
+ * Every one of these existed before M1 and still answers; each is now a
+ * one-line delegation to the dispatcher. They are a table rather than a list of
+ * registration calls so that `main/ipc.ts` and the test that checks none of
+ * them was dropped read the same thing.
+ *
+ * The renderer does not use them - it goes through `rpcRequest` - but a channel
+ * is a published surface, and removing one would be a change with no way to
+ * find out who noticed.
  */
-export type IpcResult<T> =
-  | { ok: true; data: T }
-  | { ok: false; error: SerializedAppError }
+export const CHANNEL_METHODS = {
+  [IPC_CHANNELS.repositoriesList]: 'repositories.list',
+  [IPC_CHANNELS.repositoriesGet]: 'repositories.get',
+  [IPC_CHANNELS.repositoriesAdd]: 'repositories.add',
+  [IPC_CHANNELS.repositoriesUpdate]: 'repositories.update',
+  [IPC_CHANNELS.repositoriesRemove]: 'repositories.remove',
+  [IPC_CHANNELS.repositoriesRefs]: 'repositories.refs',
+  [IPC_CHANNELS.reviewsList]: 'reviews.list',
+  [IPC_CHANNELS.reviewsGet]: 'reviews.get',
+  [IPC_CHANNELS.reviewsCreate]: 'reviews.create',
+  [IPC_CHANNELS.reviewsUpdate]: 'reviews.update',
+  [IPC_CHANNELS.reviewsRemove]: 'reviews.remove',
+  [IPC_CHANNELS.reviewsCommits]: 'reviews.commits',
+  [IPC_CHANNELS.reviewsDiff]: 'reviews.diff',
+  [IPC_CHANNELS.reviewsFile]: 'reviews.file',
+  [IPC_CHANNELS.reviewsImage]: 'reviews.image',
+  [IPC_CHANNELS.reviewsReviewedFiles]: 'reviews.reviewedFiles',
+  [IPC_CHANNELS.reviewsSetFileReviewed]: 'reviews.setFileReviewed',
+  [IPC_CHANNELS.commentsList]: 'comments.list',
+  [IPC_CHANNELS.commentsCreateThread]: 'comments.createThread',
+  [IPC_CHANNELS.commentsReply]: 'comments.reply',
+  [IPC_CHANNELS.commentsUpdate]: 'comments.update',
+  [IPC_CHANNELS.commentsRemove]: 'comments.remove',
+  [IPC_CHANNELS.commentsSetResolved]: 'comments.setResolved',
+  [IPC_CHANNELS.attachmentsIngest]: 'attachments.ingest'
+} as const satisfies Record<string, RpcMethod>
 
 /**
- * An image on its way into the store.
- *
- * A plain array of bytes rather than a Buffer or a Blob: the structured clone
- * used by `ipcRenderer.invoke` carries `number[]` and `ArrayBuffer` faithfully,
- * while Node's Buffer is not a thing the renderer has. The main process turns
- * it back into bytes on arrival.
+ * The channels the shell answers itself, because each one does something to
+ * this machine: puts a window in front of the person, launches a program, quits
+ * and reinstalls the app. None of them is a method, and none may become one.
  */
-export interface AttachmentIngestInput {
-  bytes: ArrayBuffer
-  /** Only ever used for display and default alt text; the format is sniffed. */
-  originalName?: string
-}
+export const SHELL_CHANNELS = [
+  IPC_CHANNELS.reviewsOpenInEditor,
+  IPC_CHANNELS.attachmentsPick,
+  IPC_CHANNELS.systemPickDirectory,
+  IPC_CHANNELS.systemRevealPath,
+  IPC_CHANNELS.systemEditors,
+  IPC_CHANNELS.systemAppInfo,
+  IPC_CHANNELS.updatesGetStatus,
+  IPC_CHANNELS.updatesCheck,
+  IPC_CHANNELS.updatesInstallNow
+] as const
+
+/** Main -> renderer pushes. Nothing handles these; they are sent. */
+export const PUSH_CHANNELS = [
+  IPC_CHANNELS.updatesChanged,
+  IPC_CHANNELS.navigationDeepLink
+] as const
 
 export interface AppInfo {
   version: string
@@ -178,6 +236,12 @@ export interface GitWarrenApi {
   }
   reviews: {
     list(input: ListReviewsInput): Promise<Review[]>
+    /**
+     * Everything the review screen needs, in one call: the review, its threads
+     * and its reviewed marks. What the screens actually use - `get`, `list` and
+     * `reviewedFiles` remain for callers that want one of the three on its own.
+     */
+    open(input: GetReviewInput): Promise<ReviewOpen>
     get(input: GetReviewInput): Promise<ReviewWithRepository>
     create(input: CreateReviewInput): Promise<Review>
     update(input: UpdateReviewInput): Promise<Review>
@@ -236,7 +300,7 @@ export interface GitWarrenApi {
    * draws the real image before the comment has been submitted.
    */
   attachments: {
-    ingest(input: AttachmentIngestInput): Promise<Attachment>
+    ingest(input: AttachmentIngestParams): Promise<Attachment>
     /** Opens the native image picker and ingests the choice. Null if cancelled. */
     pick(): Promise<Attachment | null>
   }
@@ -271,4 +335,43 @@ export interface GitWarrenApi {
     /** Returns an unsubscribe function. */
     subscribe(listener: (status: UpdateStatus) => void): () => void
   }
+}
+
+/**
+ * What the preload script exposes on `window`.
+ *
+ * The carrier, and the handful of things only this shell can do. Deliberately
+ * not `GitWarrenApi`: that one is assembled in the renderer, on top of this, so
+ * that the day a browser tab supplies a WebSocket carrier instead, the screens
+ * above it do not change at all.
+ */
+export interface GitWarrenBridge {
+  /** Every core method, in one function. See `shared/rpc.ts`. */
+  carrier: Carrier
+  shell: ShellApi
+}
+
+/**
+ * The Electron-only surface.
+ *
+ * Each of these does something to *this* machine: puts a window in front of the
+ * user, launches a program, quits and reinstalls the app. None of them is a
+ * method on the dispatcher, and none of them may become one - a request that
+ * could start a process on a host across the network would make this a very
+ * different piece of software. See the note in `core/rpc/dispatcher.ts`.
+ */
+export interface ShellApi {
+  system: GitWarrenApi['system']
+  updates: GitWarrenApi['updates']
+  navigation: GitWarrenApi['navigation']
+  /** Native picker, then straight into `attachments.ingest`. */
+  pickAttachment(): Promise<Attachment | null>
+  /**
+   * Ask the owning host where the file is, then open it here.
+   *
+   * Two halves that must not be merged: *which* file on disk is review
+   * knowledge and belongs to whoever owns the review, while launching an
+   * application is a capability of the machine the person is sitting at.
+   */
+  openInEditor(input: OpenReviewFileInput): Promise<void>
 }

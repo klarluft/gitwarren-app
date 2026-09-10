@@ -16,8 +16,7 @@
  *     ./node_modules/.bin/electron . --remote-debugging-port=9222 2>/tmp/gw-ipc.log
  *   node scripts/spikes/s5-ipc-per-screen.mjs /tmp/gw-ipc.log 1
  *
- * The second argument is the review to open. Re-run after M1 to confirm the
- * duplicated cold-load wave is gone and the review opens at depth 1.
+ * The second argument is the review to open.
  */
 import { readFileSync } from 'node:fs'
 import { Cdp, settle, wait } from '../cdp.mjs'
@@ -48,9 +47,26 @@ async function screen(name, action) {
 }
 
 const go = (hash) => () => cdp.evaluate(`location.hash = ${JSON.stringify(hash)}`)
+
+/**
+ * Land on a screen with nothing cached, in exactly one mount.
+ *
+ * Setting the hash and then reloading looks equivalent and is not. The
+ * hashchange lands first, React renders the screen, every read fires - and only
+ * then does the reload tear the document down and do it all again. The log then
+ * shows each key fetched twice, some 40 ms apart, which is a measurement of the
+ * navigation helper rather than of the app. That artefact is what S5 recorded
+ * as a "duplicated wave"; see the M1 note in docs/across-hosts.md.
+ *
+ * So the fragment travels with a real navigation: away to a blank document,
+ * which throws the renderer's caches out, then straight to the target URL with
+ * its hash already on it. One document, one mount, one wave.
+ */
 const reload = (hash) => async () => {
-  await go(hash)()
-  await cdp.evaluate('location.reload()')
+  const base = await cdp.evaluate("location.href.split('#')[0]")
+  await cdp.send('Page.navigate', { url: 'about:blank' })
+  await wait(250)
+  await cdp.send('Page.navigate', { url: base + hash })
   await wait(1500)
 }
 

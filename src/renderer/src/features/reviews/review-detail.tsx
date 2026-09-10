@@ -1,12 +1,19 @@
 /**
  * The review screen: a header describing the comparison, and the three tabs.
  *
- * The commit read is issued here rather than only inside the commits tab. It is
- * cheap (`git log` plus a `git status` in the head worktree), it is shared with
- * the tab through SWR's cache under the same key, and it is what lets the
- * header say "this branch has uncommitted work" no matter which tab you land
- * on - which is the single most useful thing this app can tell you on arrival.
- * The diff stays lazy, because that one is not cheap.
+ * All three reads a review needs are issued here, side by side, and that is the
+ * whole reason opening a review costs one round trip rather than two. The
+ * commit read is cheap and is what lets the header say "this branch has
+ * uncommitted work" no matter which tab you land on. The diff is not cheap -
+ * but it used to be started by whichever tab was showing, which meant it could
+ * not begin until the review itself had come back and the tab had mounted. Over
+ * a network that wait is a whole round trip spent doing nothing, so the diff is
+ * asked for here, at mount, keyed on the review id alone.
+ *
+ * Both tabs open on the complete diff, so this is the same read they would have
+ * made; SWR hands it to them from the cache under the same key. Turning the
+ * files tab's "include uncommitted" switch asks for a second one, exactly as
+ * before.
  */
 import { useCallback, useMemo, useState } from 'react'
 import {
@@ -39,7 +46,13 @@ import { ReviewConversationTab } from './review-conversation-tab'
 import { ReviewFilesTab } from './review-files-tab'
 import { ReviewFormDialog } from './review-form-dialog'
 import { RemoveReviewDialog } from './remove-review-dialog'
-import { useReview, useReviewCommits, useReviewMutations } from './use-reviews'
+import {
+  DEFAULT_DIFF_CHANGES,
+  useReview,
+  useReviewCommits,
+  useReviewDiff,
+  useReviewMutations
+} from './use-reviews'
 import { isSelfReview } from '@shared/schemas'
 import type { CompareEndpoint } from '@shared/git'
 import type { Review } from '@shared/schemas'
@@ -68,9 +81,11 @@ export function ReviewDetail({ reviewId, tab, focus }: ReviewDetailProps) {
   const { data: review, error, isLoading } = useReview(reviewId)
   const { updateReview } = useReviewMutations()
   const commits = useReviewCommits(reviewId)
-  // Read here rather than inside the tab so the count is on the tab itself.
-  // It is one indexed query and it is polled, which matters because agents
-  // write into this review from their own processes while it is open.
+  // Started here so it does not wait for the review. Nothing on this screen
+  // reads the result - the tabs do, from the cache.
+  useReviewDiff(reviewId, DEFAULT_DIFF_CHANGES)
+  // Free: the discussion arrived with the review above, under the same key. It
+  // is read here so the unresolved count can sit on the tab itself.
   const { threads } = useReviewComments(reviewId)
 
   const [editing, setEditing] = useState(false)

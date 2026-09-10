@@ -52,7 +52,12 @@ import { CompareErrorCard, NoWorktreeNotice, WorkingTreeBanner } from './compare
 import { fileDomId, lineDomId } from './dom-ids'
 import { DiffSnippet } from './diff-snippet'
 import { DiffStat, FileDiffCard, type AnchoredThread } from './diff-view'
-import { useEditors, useReviewDiff, useReviewedFiles } from './use-reviews'
+import {
+  DEFAULT_DIFF_CHANGES,
+  useEditors,
+  useReviewDiff,
+  useReviewedFiles
+} from './use-reviews'
 import { fileDiffDigest } from '@shared/diff-digest'
 import { findAnchorFile, isInlineAnchor, resolveAnchor } from '@shared/comment-anchors'
 import { threadSnippet } from '@shared/comment-snippets'
@@ -266,13 +271,13 @@ function useFocusScroll(focus: DiffFocus | undefined, ready: boolean): DiffFocus
 }
 
 export function ReviewFilesTab({ review, focus }: { review: Review; focus?: DiffFocus }) {
-  const [changes, setChanges] = useState<DiffChanges>('all')
+  const [changes, setChanges] = useState<DiffChanges>(DEFAULT_DIFF_CHANGES)
   const [treeOpen, setTreeOpen] = useStoredFlag('files-tree', true)
   const [editorId, setEditorId] = useStoredPreference('editor', null)
   const [openError, setOpenError] = useState<unknown>(null)
   const { data, error, isLoading, isRefreshing, refresh } = useReviewDiff(review.id, changes)
   const { threads } = useReviewComments(review.id)
-  const mutations = useCommentMutations(review.id)
+  const mutations = useCommentMutations()
   const editors = useEditors()
 
   const threadsByFile = useMemo(

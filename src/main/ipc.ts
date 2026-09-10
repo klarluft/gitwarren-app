@@ -1,135 +1,109 @@
 /**
- * IPC handlers.
+ * The Electron carrier.
  *
- * Every repository handler is a one-line delegation to `repositoriesService`.
- * That thinness is the point: validation, path resolution and error semantics
- * all live in the service, so the UI and the MCP server cannot disagree about
- * what a valid repository is. If you find yourself adding logic here, it almost
- * certainly belongs in the service instead.
+ * Two kinds of channel are registered here, and the difference between them is
+ * the whole shape of M1.
+ *
+ * **The carrier.** `rpc:request` takes a `{method, params}` and hands it to the
+ * dispatcher. That is the entire implementation. Everything that used to be a
+ * handler in this file - what a valid review is, who a comment belongs to, how
+ * an error is coded - now lives in `core/rpc/dispatcher.ts`, where the daemon
+ * and every carrier after it will read it from too. The per-object channels
+ * below are kept and still answer, each a one-line delegation to the same
+ * dispatcher, so nothing that spoke to this app before M1 stopped being spoken
+ * to; the renderer no longer uses them.
+ *
+ * **The shell.** Folder pickers, revealing a path, launching an editor, the
+ * updater. These do things to the machine the person is sitting at, they stay
+ * here, and they must never become methods - in M4 the far end of a carrier is
+ * a daemon on another machine, and a request that could open a window or start
+ * a process there would be a very different piece of software.
+ *
+ * If you find yourself adding logic to either kind, it almost certainly belongs
+ * in a service instead.
  */
 import { BrowserWindow, dialog, ipcMain, shell, app } from 'electron'
+import { dispatch } from '../core/rpc/dispatcher.js'
+import { traced } from '../core/trace.js'
 import { attachmentsService } from '../core/services/attachments.js'
-import { commentsService } from '../core/services/comments.js'
-import { repositoriesService } from '../core/services/repositories.js'
-import { reviewedFilesService } from '../core/services/reviewed-files.js'
-import { reviewsService } from '../core/services/reviews.js'
 import { getDataDirectory, getDatabasePath } from '../core/paths.js'
 import { getInstanceId } from '../core/instance.js'
-import { HUMAN_AUTHOR } from '../shared/actors.js'
 import { AppError } from '../shared/errors.js'
 import { parseWithSchema as parse } from '../shared/validation.js'
 import { openReviewFileInputSchema } from '../shared/schemas.js'
-import {
-  IPC_CHANNELS,
-  type AppInfo,
-  type AttachmentIngestInput,
-  type IpcResult
-} from '../shared/api.js'
+import { CHANNEL_METHODS, IPC_CHANNELS, type AppInfo } from '../shared/api.js'
+import type { RpcMethod, RpcOutcome, RpcParams } from '../shared/rpc.js'
 import { listEditors, openInEditor } from './editors.js'
 import { getMcpLaunchInfo } from './mcp-launch.js'
 import { checkForUpdates, getUpdateStatus, quitAndInstall } from './updater.js'
 
-const TRACE_IPC = process.env.GITWARREN_TRACE_IPC === '1'
-
 /**
- * Wraps a handler so thrown errors arrive in the renderer as structured data
+ * Wraps a handler so a failure arrives in the renderer as structured data
  * rather than as Electron's flattened "Error invoking remote method" string.
+ *
+ * The envelope is the protocol's own `RpcOutcome`, not an Electron-shaped one:
+ * the same `{result} | {error}` a stdio pipe or a WebSocket will carry, so the
+ * preload's unwrapping is the unwrapping every carrier does.
  */
 function handle<T>(channel: string, handler: (payload: unknown) => Promise<T> | T): void {
-  ipcMain.handle(channel, async (_event, payload: unknown): Promise<IpcResult<T>> => {
-    // Set GITWARREN_TRACE_IPC=1 to see every call with when it started and how
-    // long it took. The point is to count round trips per screen, and how many
-    // of them wait on each other, before the core moves behind a network
-    // carrier - see docs/across-hosts.md, spike S5 - where each one stops
-    // being free.
-    const startedAt = TRACE_IPC ? performance.now() : 0
+  ipcMain.handle(channel, async (_event, payload: unknown): Promise<RpcOutcome<T>> => {
     try {
-      const data = await handler(payload)
-      if (TRACE_IPC) {
-        const duration = performance.now() - startedAt
-        console.error(`[ipc] ${channel} at ${startedAt.toFixed(0)}ms took ${duration.toFixed(1)}ms`)
-      }
-      return { ok: true, data }
+      return { result: await handler(payload) }
     } catch (error) {
-      const appError = AppError.from(error)
-      if (appError.code === 'INTERNAL') {
-        // Unexpected failures are worth seeing in the terminal; the domain
-        // errors below are ordinary user-facing outcomes.
-        console.error(`[ipc] ${channel} failed`, error)
-      }
-      return { ok: false, error: appError.toSerialized() }
+      // Codes, messages and field errors are preserved on the way through; the
+      // dispatcher logs the unexpected ones, so that it happens the same way
+      // for every carrier.
+      return { error: AppError.from(error).toSerialized() }
     }
   })
 }
 
+/**
+ * A shell channel, traced.
+ *
+ * The dispatcher traces every method it answers, so the carrier channels above
+ * need nothing. These do: they are not methods, but they are still a round trip
+ * the renderer paid for, and a count that left them out would be measuring the
+ * wrong thing. See `core/trace.ts`.
+ */
+function handleShell<T>(channel: string, handler: (payload: unknown) => Promise<T> | T): void {
+  handle(channel, (payload) => traced(channel, () => handler(payload)))
+}
+
 export function registerIpcHandlers(): void {
-  handle(IPC_CHANNELS.repositoriesList, () => repositoriesService.list())
-  handle(IPC_CHANNELS.repositoriesGet, (input) => repositoriesService.get(input))
-  handle(IPC_CHANNELS.repositoriesAdd, (input) => repositoriesService.add(input))
-  handle(IPC_CHANNELS.repositoriesUpdate, (input) => repositoriesService.update(input))
-  handle(IPC_CHANNELS.repositoriesRemove, (input) => repositoriesService.remove(input))
-  handle(IPC_CHANNELS.repositoriesRefs, (input) => repositoriesService.refs(input))
+  // The carrier. Everything the renderer does arrives here.
+  handle(IPC_CHANNELS.rpcRequest, (payload) => {
+    if (typeof payload !== 'object' || payload === null || !('method' in payload)) {
+      throw new AppError('INVALID_INPUT', 'A request needs a method.')
+    }
+    const { method, params } = payload as { method: RpcMethod; params?: unknown }
+    return dispatch(method, params as RpcParams<RpcMethod>)
+  })
 
-  handle(IPC_CHANNELS.reviewsList, (input) => reviewsService.list(input))
-  handle(IPC_CHANNELS.reviewsGet, (input) => reviewsService.get(input))
-  handle(IPC_CHANNELS.reviewsCreate, (input) => reviewsService.create(input))
-  handle(IPC_CHANNELS.reviewsUpdate, (input) => reviewsService.update(input))
-  handle(IPC_CHANNELS.reviewsRemove, (input) => reviewsService.remove(input))
-  handle(IPC_CHANNELS.reviewsCommits, (input) => reviewsService.commits(input))
-  handle(IPC_CHANNELS.reviewsDiff, (input) => reviewsService.diff(input))
-  handle(IPC_CHANNELS.reviewsFile, (input) => reviewsService.file(input))
-  handle(IPC_CHANNELS.reviewsImage, (input) => reviewsService.image(input))
+  // Every channel that existed before M1, still answering, now through the
+  // dispatcher. The table lives in `shared/api.ts` next to the channel names.
+  for (const [channel, method] of Object.entries(CHANNEL_METHODS)) {
+    handle(channel, (payload) => dispatch(method, payload as RpcParams<RpcMethod>))
+  }
 
-  // Two steps rather than one service call: *which* file on disk is review
-  // knowledge and belongs in the service, while launching an application is a
-  // main-process capability the service must not have - the MCP server imports
-  // that same service, and an agent must not be able to start processes here.
-  handle(IPC_CHANNELS.reviewsOpenInEditor, async (input) => {
-    const { line, editorId } = parse(openReviewFileInputSchema, input)
-    const absolute = await reviewsService.absolutePath(input)
+  // ---------------------------------------------------------------------------
+  // The shell. Everything below this line does something to this machine.
+  // ---------------------------------------------------------------------------
+
+  // Two steps rather than one: *which* file on disk is review knowledge and
+  // belongs to whoever owns the review - a method, so that in M4 it can be a
+  // host across the network - while launching an application is a capability
+  // only the machine with the screen on it has.
+  handleShell(IPC_CHANNELS.reviewsOpenInEditor, async (input) => {
+    const { id, path, changes, line, editorId } = parse(openReviewFileInputSchema, input)
+    const absolute = await dispatch('reviews.filePath', { id, path, changes })
     await openInEditor(absolute, line, editorId)
   })
 
-  // Reviewed marks are a record of what the person at the keyboard has read,
-  // so they are reachable from the UI and from nowhere else. There is
-  // deliberately no MCP tool for them: an agent claiming a human has reviewed
-  // a file would make the one honest signal on the screen worthless.
-  handle(IPC_CHANNELS.reviewsReviewedFiles, (input) => reviewedFilesService.list(input))
-  handle(IPC_CHANNELS.reviewsSetFileReviewed, (input) => reviewedFilesService.setReviewed(input))
-
-  // Every comment write passes HUMAN_AUTHOR, and there is no way to reach these
-  // channels except by typing into the app - the renderer has no other route to
-  // the main process. That is the whole enforcement mechanism for "comments
-  // from the UI are the person's, comments over MCP are the agent's", and it
-  // works because the actor is a property of the channel rather than a field
-  // any caller could set.
-  handle(IPC_CHANNELS.commentsList, (input) => commentsService.list(input))
-  handle(IPC_CHANNELS.commentsCreateThread, (input) =>
-    commentsService.createThread(input, HUMAN_AUTHOR)
-  )
-  handle(IPC_CHANNELS.commentsReply, (input) => commentsService.reply(input, HUMAN_AUTHOR))
-  handle(IPC_CHANNELS.commentsUpdate, (input) => commentsService.update(input, HUMAN_AUTHOR))
-  handle(IPC_CHANNELS.commentsRemove, (input) => commentsService.remove(input, HUMAN_AUTHOR))
-  handle(IPC_CHANNELS.commentsSetResolved, (input) =>
-    commentsService.setResolved(input, HUMAN_AUTHOR)
-  )
-
-  // The renderer cannot touch the filesystem, so a pasted or dropped image
-  // arrives as bytes and is handed straight to the service - the same service
-  // an agent's file path goes through, so both surfaces produce the same row
-  // and the same token.
-  handle(IPC_CHANNELS.attachmentsIngest, (input) => {
-    if (typeof input !== 'object' || input === null || !('bytes' in input)) {
-      throw new AppError('INVALID_INPUT', 'An image is required.')
-    }
-    const { bytes, originalName } = input as AttachmentIngestInput
-    return attachmentsService.ingest({
-      bytes: Buffer.from(bytes),
-      originalName: typeof originalName === 'string' ? originalName : undefined
-    })
-  })
-
-  handle(IPC_CHANNELS.attachmentsPick, async () => {
+  // The native picker is the shell's; what it picks goes through the same
+  // service an agent's file path goes through, so both produce the same row and
+  // the same token. Not a dispatcher method, because it opens a window.
+  handleShell(IPC_CHANNELS.attachmentsPick, async () => {
     const window = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
     const options: Electron.OpenDialogOptions = {
       title: 'Attach an image',
@@ -146,7 +120,7 @@ export function registerIpcHandlers(): void {
     return path === null ? null : await attachmentsService.ingest({ path })
   })
 
-  handle(IPC_CHANNELS.systemPickDirectory, async () => {
+  handleShell(IPC_CHANNELS.systemPickDirectory, async () => {
     const window = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
     const options: Electron.OpenDialogOptions = {
       title: 'Choose a git repository',
@@ -159,7 +133,7 @@ export function registerIpcHandlers(): void {
     return result.canceled ? null : (result.filePaths[0] ?? null)
   })
 
-  handle(IPC_CHANNELS.systemRevealPath, async (input) => {
+  handleShell(IPC_CHANNELS.systemRevealPath, async (input) => {
     if (typeof input !== 'string' || !input) {
       throw new AppError('INVALID_INPUT', 'A path is required.')
     }
@@ -167,9 +141,9 @@ export function registerIpcHandlers(): void {
     if (failure) throw new AppError('PATH_NOT_FOUND', failure)
   })
 
-  handle(IPC_CHANNELS.systemEditors, () => listEditors())
+  handleShell(IPC_CHANNELS.systemEditors, () => listEditors())
 
-  handle(IPC_CHANNELS.systemAppInfo, (): AppInfo => ({
+  handleShell(IPC_CHANNELS.systemAppInfo, (): AppInfo => ({
     version: app.getVersion(),
     instanceId: getInstanceId(),
     platform: process.platform,
@@ -179,7 +153,7 @@ export function registerIpcHandlers(): void {
     mcp: getMcpLaunchInfo()
   }))
 
-  handle(IPC_CHANNELS.updatesGetStatus, () => getUpdateStatus())
-  handle(IPC_CHANNELS.updatesCheck, () => checkForUpdates({ userInitiated: true }))
-  handle(IPC_CHANNELS.updatesInstallNow, () => quitAndInstall())
+  handleShell(IPC_CHANNELS.updatesGetStatus, () => getUpdateStatus())
+  handleShell(IPC_CHANNELS.updatesCheck, () => checkForUpdates({ userInitiated: true }))
+  handleShell(IPC_CHANNELS.updatesInstallNow, () => quitAndInstall())
 }

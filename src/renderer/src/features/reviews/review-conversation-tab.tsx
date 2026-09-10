@@ -29,7 +29,7 @@ import { CommentComposer } from '../comments/comment-composer'
 import { CommentThreadCard } from '../comments/comment-thread-card'
 import { useCommentMutations, useReviewComments } from '../comments/use-comments'
 import { DiffSnippet } from './diff-snippet'
-import { useReviewDiff } from './use-reviews'
+import { DEFAULT_DIFF_CHANGES, useReviewDiff } from './use-reviews'
 import { findAnchorFile, isInlineAnchor, resolveAnchor } from '@shared/comment-anchors'
 import { threadSnippet, type ThreadSnippet } from '@shared/comment-snippets'
 import type { FileDiff } from '@shared/git'
@@ -78,10 +78,10 @@ function buildTimeline(threads: CommentThread[], files: FileDiff[] | undefined):
 
 export function ReviewConversationTab({ review, onEdit }: ReviewConversationTabProps) {
   const { threads, error, isLoading } = useReviewComments(review.id)
-  const mutations = useCommentMutations(review.id)
+  const mutations = useCommentMutations()
 
   // Matches the Files changed tab's default, so the two share one cached diff.
-  const { data: diff, isLoading: diffLoading } = useReviewDiff(review.id, 'all')
+  const { data: diff, isLoading: diffLoading } = useReviewDiff(review.id, DEFAULT_DIFF_CHANGES)
 
   const timeline = useMemo(() => buildTimeline(threads, diff?.files), [threads, diff?.files])
 

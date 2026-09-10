@@ -243,7 +243,7 @@ Record the outcome under each one.
   | → commits tab | 0 | — | already fetched |
   | → files tab | 3 | 1 | `reviewedFiles`, `system:editors`, `comments:list`; the diff is reused |
   | Back to home | 2 | 1 | `repositories:list` again, as designed (nothing is cached) |
-  | Review files tab, cold load | 11 | 2 | `reviews:get`, `comments:list`, `system:editors` and `reviewedFiles` each fetched **twice** - a second wave 45 ms after the first, on the same keys |
+  | Review files tab, cold load | 11 | 2 | `reviews:get`, `comments:list`, `system:editors` and `reviewedFiles` each fetched **twice** - a second wave 45 ms after the first, on the same keys. *The doubling was the spike script; see the amendment below.* |
 
   The renderer is already coarse: the heavy calls are `commits` and `diff` at
   ~100 ms each locally, and everything else is under 5 ms. A network carrier
@@ -263,6 +263,19 @@ Record the outcome under each one.
   Not measured here: the 15-second comment poll, which over a network becomes
   one request per open review per host every 15 s until M6 replaces it with
   events.
+
+  **Amended during M1.** The first of those three findings was not the app. The
+  spike script set the location hash and *then* reloaded, so the screen mounted
+  twice - once on the hashchange, once on the new document - and every key was
+  fetched twice about 40 ms apart. That is the "duplicated wave", and it is a
+  measurement of the navigation helper. Re-measured against the pre-M1 build
+  with the helper fixed (it now navigates for real, so a cold load is one
+  document and one mount), the cold review load is seven calls with nothing
+  duplicated. The other two findings were real and are confirmed in the M1
+  numbers below: `system:appInfo` was re-read on every return to the home
+  screen, `system:editors` on every visit to the files tab, and the review open
+  was two deep. Worth keeping in mind for the spikes still to come: a number
+  produced by driving the app is a number about the driver too.
 
 ### S6 — The fixed loopback port
 
@@ -366,6 +379,60 @@ process. This is the load-bearing refactor; every carrier after it is small.
 
 **Verify:** S5's counts re-measured; a review opens in at most three sequential
 round trips. UI checked over CDP with a scratch data dir.
+
+- **Outcome.** *Done, 10 September 2026, macOS, the same seeded demo database
+  S5 used (3 repositories, review 1 with 5 threads), both sides built with
+  `npm run build` and driven over CDP by
+  `scripts/spikes/s5-ipc-per-screen.mjs`.* Before is the merge of M0; after is
+  this milestone. Calls include the Electron-only ones -
+  `system`, `updates` - because the renderer pays a round trip for those too,
+  and a count that left them out would flatter itself.
+
+  | Screen | Calls before | Calls after | Depth before | Depth after |
+  | --- | --- | --- | --- | --- |
+  | Home, cold load | 3 | 3 | 1 | 1 |
+  | Review → conversation tab | 4 | **3** | **2** | **1** |
+  | → commits tab | 0 | 0 | — | — |
+  | → files tab | 3 | 2 | 1 | 1 |
+  | Back to home | 2 | **1** | 1 | 1 |
+  | Review files tab, cold load | 7 | **5** | **2** | **1** |
+
+  Opening a review is now three calls that start together - `reviews.open`,
+  `reviews.commits`, `reviews.diff`, all within 6 ms of each other - so it is
+  one round trip, not the three the target allowed. Two changes got it there.
+  `reviews.open` folds `reviews:get`, `comments:list` and `reviewedFiles` into
+  one answer, and the three hooks that used to hold three cache keys now share
+  the one it lands under, so however many of them mount at once, SWR issues a
+  single request. And the diff is asked for by the review screen at mount
+  rather than by whichever tab is showing: it used to wait for the review to
+  come back before the tab existed to ask for it, which is exactly the wait a
+  network multiplies.
+
+  The static reads, measured on their own by walking home → files → home →
+  files → home inside one document, after the first paint:
+
+  | | Before | After |
+  | --- | --- | --- |
+  | Calls over four navigations | 14 | 7 |
+  | of which `system:appInfo` | 2 | 0 |
+  | of which `system:editors` | 2 | 1 |
+
+  Both are memoised in `renderer/src/lib/api.ts` for the life of the window -
+  the promise, not the value, so two callers racing on the first render still
+  share one call. Once per document is the floor; a reload is a new process and
+  asks again, which is correct.
+
+  What did not need fixing: the duplicated wave, which was the spike script -
+  see the amendment under S5. The carrier coalesces identical reads that are in
+  flight at the same moment anyway, because SWR's deduplication is a property of
+  one renderer and M3's and M4's carriers will have callers that are not SWR.
+  Writes are never coalesced; the list of methods that may be is in
+  `shared/rpc.ts` and a test asserts no write is on it.
+
+  Checked over CDP against a scratch data directory: all three tabs render, a
+  reviewed tick survives leaving the review and coming back - a real read of the
+  composite endpoint, so the optimistic patch matched what was written - and a
+  comment typed into the app is stored as the person's, not an agent's.
 
 ### M2 — Always on, locally
 
