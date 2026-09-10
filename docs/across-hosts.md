@@ -156,7 +156,29 @@ Record the outcome under each one.
   that builds them alongside a release, and confirmation that the
   Electron-binary-as-Node trick from `src/main/mcp-launch.ts` is *not* usable
   on a display-less box, so this is the only path.
-- **Outcome.** *(pending)*
+- **Outcome.** *Pass, 10 September 2026.* `scripts/spikes/s3-daemon-tarball.mjs`
+  builds `gitwarren-daemon-0.1.6-linux-{x64,arm64}.tar.gz`, 44 MB each with
+  gzip (xz would be about 28 MB but needs `xz` on the host; gzip is
+  everywhere). Contents: the official Node 24.20.0 binary, `server.cjs` from
+  `npm run build:mcp`, the one matching `better_sqlite3` prebuild — which
+  better-sqlite3 13 already ships in `node_modules/better-sqlite3/prebuilds/`
+  for both Linux arches, so nothing is compiled — the drizzle migrations, and
+  a `bin/gitwarren-mcp` launcher that sets `GITWARREN_MIGRATIONS_DIR`.
+
+  In a bare `ubuntu:24.04` container with no Node, arm64 natively and x64
+  under emulation on the Mac, `bin/gitwarren-mcp` answered an MCP
+  `initialize` and exited 0:
+
+  ```
+  [gitwarren-mcp] ready (database: /root/.config/GitWarren/gitwarren.db)
+  {"result":{"protocolVersion":"2025-06-18",…,"serverInfo":{"name":"gitwarren","version":"0.1.0"}},"jsonrpc":"2.0","id":1}
+  ```
+
+  So Node ran, the addon loaded, the database was created and migrated, and
+  the protocol answered. The daemon will run wherever this does. Two notes for
+  M2–M4: the Electron-binary-as-Node trick was not tried on Linux because the
+  tarball makes it moot; and the CI job is the same script per target,
+  attached to the release — not yet written.
 
 ### S4 — Editor deep links to remote files
 
@@ -210,7 +232,37 @@ Record the outcome under each one.
 - **Output.** A number per screen and the list of calls that could be one. Sets
   the coarse endpoints in M1. Target: opening a review costs at most three
   sequential round trips.
-- **Outcome.** *(pending)*
+- **Outcome.** *Target already met, 10 September 2026, macOS, the seeded demo
+  database (3 repositories, review 1 with 5 threads), driven over CDP.* Calls
+  per screen, with start offsets showing which ones wait on which:
+
+  | Screen | Calls | Sequential depth | Notes |
+  | --- | --- | --- | --- |
+  | Home, cold load | 3 | 1 | `repositories:list` (53 ms) plus two trivial `system`/`updates` reads |
+  | Review → conversation tab | 4 | 2 | `reviews:get`, `comments:list`, `reviews:commits` (93 ms), `reviews:diff` (105 ms); diff starts 29 ms after get |
+  | → commits tab | 0 | — | already fetched |
+  | → files tab | 3 | 1 | `reviewedFiles`, `system:editors`, `comments:list`; the diff is reused |
+  | Back to home | 2 | 1 | `repositories:list` again, as designed (nothing is cached) |
+  | Review files tab, cold load | 11 | 2 | `reviews:get`, `comments:list`, `system:editors` and `reviewedFiles` each fetched **twice** - a second wave 45 ms after the first, on the same keys |
+
+  The renderer is already coarse: the heavy calls are `commits` and `diff` at
+  ~100 ms each locally, and everything else is under 5 ms. A network carrier
+  adds one round trip per level of depth, so the two-deep review open costs
+  about 2 × RTT plus the git work, which is fine. What M1 should actually fix:
+
+  - the duplicated wave on a cold review load (same SWR keys fetched twice
+    within 45 ms - a remount or a key that is not stable across the first
+    render), which doubles the cost over a network for no benefit;
+  - `system:appInfo` and `system:editors` refetched on navigation, which are
+    static for the life of the process;
+  - fold `reviews:get` + `comments:list` + `reviewedFiles` into one
+    `reviews.open(id)`, taking the review open from depth 2 to depth 1; keep
+    `commits` and `diff` as their own calls, since they are heavy, independently
+    refreshed, and already run in parallel.
+
+  Not measured here: the 15-second comment poll, which over a network becomes
+  one request per open review per host every 15 s until M6 replaces it with
+  events.
 
 ### S6 — The fixed loopback port
 
@@ -218,7 +270,30 @@ Record the outcome under each one.
   on macOS, Windows and Ubuntu, and define behaviour when it is taken (the
   Agent Access panel warns; links are still emitted).
 - **Output.** One constant in `src/shared/` and a sentence for the README.
-- **Outcome.** *(pending)*
+- **Outcome.** *Port 41427.* Chosen
+  because it is outside every default ephemeral range (Windows and macOS use
+  49152–65535, Linux 32768–60999), absent from `/etc/services`, not on
+  Chromium's restricted-port list (which would make a browser refuse the
+  loopback link), and unclaimed by any well-known service. Free on this Mac
+  and on a default Ubuntu, which listens on nothing in that range.
+
+  Windows is the one to check: Hyper-V and WSL reserve blocks of ports at
+  boot, and the blocks move. On the PC, in PowerShell:
+
+  ```
+  netsh interface ipv4 show excludedportrange protocol=tcp
+  ```
+
+  Checked on the PC the same day: the exclusions there are 5357, 49680 and
+  eighteen blocks between 50000 and 63520, so 41427 is clear. **41427 it is.**
+  If a user's machine reserves it anyway, the plan is unchanged and the port
+  is simply a different number for them — see the runtime behaviour below.
+
+  Behaviour when the port is taken at runtime: the app still starts, links are
+  still emitted (they are the same on every machine, so a link printed on
+  another host must not depend on this one's luck), and the Agent Access
+  panel says which process holds the port. The constant lands in
+  `src/shared/` with M2, where the link server first uses it.
 
 ## Milestones
 
