@@ -69,6 +69,13 @@ const carrier: Carrier = {
 const bridge: GitWarrenBridge = {
   carrier,
   shell: {
+    // A desktop app with the machine underneath it. Every one of these is true
+    // and stays true; the interesting column is the browser's, in `web/shell.ts`.
+    capabilities: {
+      pickDirectory: true,
+      revealPath: true,
+      openAtLogin: true
+    },
     system: {
       pickDirectory: () => invoke<string | null>(IPC_CHANNELS.systemPickDirectory),
       revealPath: (path: string) => invoke<void>(IPC_CHANNELS.systemRevealPath, path),
@@ -97,6 +104,9 @@ const bridge: GitWarrenBridge = {
       }
     },
     pickAttachment: () => invoke<Attachment | null>(IPC_CHANNELS.attachmentsPick),
+    // The token as stored. This window has a custom scheme registered for it -
+    // see `main/attachment-protocol.ts` - so there is nothing to rewrite.
+    attachmentSrc: (url: string) => url,
     openInEditor: (input: OpenReviewFileInput) =>
       invoke<void>(IPC_CHANNELS.reviewsOpenInEditor, input)
   }

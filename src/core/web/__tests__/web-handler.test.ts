@@ -25,7 +25,10 @@ const dataDir = mkdtempSync(join(tmpdir(), 'gitwarren-web-'))
 process.env.GITWARREN_DATA_DIR = dataDir
 
 const { createWebHandler } = await import('../handler.js')
-const { SESSION_COOKIE, TOKEN_PARAM, WEB_PATHS } = await import('../../../shared/web.js')
+const { SESSION_COOKIE, TOKEN_PARAM, WEB_PATHS, webAttachmentSrc } = await import(
+  '../../../shared/web.js'
+)
+const { attachmentsService } = await import('../../services/attachments.js')
 const { closeDatabase } = await import('../../db/client.js')
 
 const MOUNT = '/app/'
@@ -265,6 +268,78 @@ test('app-info describes this install, to a session and to nobody else', async (
 
 test('an unknown path under the shell prefix is a 404, not the document', async () => {
   const response = await get('/gitwarren/nothing-here', withSession())
+
+  assert.equal(response.status, 404)
+})
+
+/* -------------------------------------------------------------------------- */
+/* Attachments                                                                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The half of M3.2 that has a URL.
+ *
+ * A comment body holds `gitwarren://attachment/<sha>.<ext>`, which the window
+ * serves over a custom scheme and a tab cannot. These tests are about the HTTP
+ * form of the same store, and the case that matters most is the last one: the
+ * name in that URL comes out of a comment body, comment bodies are written by
+ * agents, and an agent may have just read untrusted content out of the
+ * repository under review.
+ */
+
+/** A 1x1 PNG, the smallest thing that is really an image. */
+const PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64'
+)
+
+test('an attachment is served to a session, and to nobody else', async () => {
+  const stored = await attachmentsService.ingest({ bytes: PNG, originalName: 'shot.png' })
+  const path = webAttachmentSrc(stored.url)
+
+  // The rewrite the browser shell does, asserted here rather than trusted: the
+  // string the renderer puts in an `<img src>` is the one this server routes on.
+  assert.equal(path, `${WEB_PATHS.attachments}${stored.sha}.png`)
+
+  const anonymous = await get(path)
+  assert.equal(anonymous.status, 401)
+
+  const response = await get(path, withSession())
+  assert.equal(response.status, 200)
+  assert.equal(response.headers.get('content-type'), 'image/png')
+  assert.equal(response.headers.get('x-content-type-options'), 'nosniff')
+  // Content-addressed: the name is the hash of the bytes, so they cannot change.
+  assert.match(response.headers.get('cache-control') ?? '', /immutable/)
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()), PNG)
+})
+
+test('a token whose bytes are gone is a 404 rather than a broken stream', async () => {
+  // What the sweep leaves behind: a body still refers to an image nobody kept.
+  const response = await get(`${WEB_PATHS.attachments}${'a'.repeat(64)}.png`, withSession())
+
+  assert.equal(response.status, 404)
+})
+
+test('a name that is not a hash and an extension never reaches the filesystem', async () => {
+  // Encoded, so nothing normalises it away before it arrives. The defence is
+  // the whitelist rather than a traversal filter, so each of these fails on
+  // being read rather than on where it resolved to.
+  for (const name of [
+    '%2e%2e%2f%2e%2e%2fetc%2fpasswd',
+    `${'a'.repeat(64)}.png%2f..%2f..%2fetc%2fpasswd`,
+    `${'A'.repeat(64)}.png`,
+    `${'a'.repeat(63)}.png`
+  ]) {
+    const response = await get(`${WEB_PATHS.attachments}${name}`, withSession())
+    assert.equal(response.status, 400, name)
+  }
+})
+
+test('a well-formed name for a format the store cannot hold is refused', async () => {
+  // Passes the whitelist and is still not something an `<img>` should be handed.
+  // A 404 rather than a 400: the name is well-formed, there is simply no such
+  // attachment - the store only ever mints one of four extensions.
+  const response = await get(`${WEB_PATHS.attachments}${'a'.repeat(64)}.exe`, withSession())
 
   assert.equal(response.status, 404)
 })

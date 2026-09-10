@@ -266,6 +266,11 @@ export type UpdateStatus =
   | { state: 'error'; message: string }
 
 export interface GitWarrenApi {
+  /**
+   * What this shell can do, so a screen can leave a control out rather than
+   * offer one that only explains itself when pressed. See `ShellCapabilities`.
+   */
+  capabilities: ShellCapabilities
   repositories: {
     list(): Promise<RepositoryWithGitState[]>
     get(input: GetRepositoryInput): Promise<RepositoryWithGitState>
@@ -342,8 +347,10 @@ export interface GitWarrenApi {
    */
   attachments: {
     ingest(input: AttachmentIngestParams): Promise<Attachment>
-    /** Opens the native image picker and ingests the choice. Null if cancelled. */
+    /** Opens an image picker and ingests the choice. Null if cancelled. */
     pick(): Promise<Attachment | null>
+    /** The token in a body, as a `src` this shell can draw. See `ShellApi`. */
+    src(url: string): string
   }
   system: {
     /** Opens the native folder picker. Resolves to null if cancelled. */
@@ -401,6 +408,42 @@ export interface GitWarrenBridge {
 }
 
 /**
+ * What this shell can do, answered before anyone tries.
+ *
+ * Every method on `ShellApi` exists in every shell - that is what keeps
+ * `lib/api.ts` and the screens above it shell-agnostic. But some of them can
+ * only refuse in a browser tab, and a control that explains itself when pressed
+ * is a worse answer than a control that was never offered: the user reads a
+ * button as a promise. So a screen asks here *before* rendering, and the
+ * refusals stay as the backstop for a caller that did not ask.
+ *
+ * Deliberately a plain object rather than a promise. It is read during render,
+ * it cannot change while the page is open, and a capability that arrived a tick
+ * late would show every one of these controls for one frame.
+ *
+ * Deliberately capabilities and not a shell *name*. `if (shell === 'web')`
+ * spreads a list of what each shell happens to lack to every screen that asks;
+ * a flag per capability says what is actually being decided, and M4's remote
+ * hosts will answer some of these differently again without a screen changing.
+ */
+export interface ShellCapabilities {
+  /**
+   * A native folder picker for adding a repository. Without one the path field
+   * beside it is the whole of the interaction - which is also what a remote
+   * host in M4 will need, since a picker there would browse the wrong machine.
+   */
+  pickDirectory: boolean
+  /** Showing a path in Finder, Explorer or the desktop's file manager. */
+  revealPath: boolean
+  /**
+   * Whether GitWarren can be made to start with the machine from in here. False
+   * in a tab: the answer to "does this start at login" is a true and useful no,
+   * and turning it on is `gitwarren service install` at a terminal.
+   */
+  openAtLogin: boolean
+}
+
+/**
  * The Electron-only surface.
  *
  * Each of these does something to *this* machine: puts a window in front of the
@@ -408,13 +451,30 @@ export interface GitWarrenBridge {
  * method on the dispatcher, and none of them may become one - a request that
  * could start a process on a host across the network would make this a very
  * different piece of software. See the note in `core/rpc/dispatcher.ts`.
+ *
+ * "Electron-only" is the origin of this interface rather than a description of
+ * it any more: since M3 a browser tab supplies one too, doing what a tab can do
+ * and saying so through `capabilities`.
  */
 export interface ShellApi {
+  capabilities: ShellCapabilities
   system: GitWarrenApi['system']
   updates: GitWarrenApi['updates']
   navigation: GitWarrenApi['navigation']
-  /** Native picker, then straight into `attachments.ingest`. */
+  /** A picker, then straight into `attachments.ingest`. */
   pickAttachment(): Promise<Attachment | null>
+  /**
+   * The `src` this shell can actually draw an attachment token from.
+   *
+   * A comment body holds `gitwarren://attachment/<sha>.<ext>` whoever reads it,
+   * because the body is stored text and must not depend on which shell renders
+   * it. Turning that into something fetchable is the shell's job and happens at
+   * the `<img>` and nowhere else: the window passes it through to its custom
+   * scheme, and a tab rewrites it to a path on its own origin.
+   *
+   * Synchronous, and it has to be: it is called during render, once per image.
+   */
+  attachmentSrc(url: string): string
   /**
    * Ask the owning host where the file is, then open it here.
    *

@@ -2,31 +2,43 @@
  * The browser's shell: what a tab can do for the person in front of it, and an
  * honest refusal for everything else.
  *
- * `ShellApi` is the Electron-only surface (see `shared/api.ts`) - pickers,
- * revealing a path, launching an editor, the updater. A browser tab has none of
- * those, and the interesting question is not how to emulate them but which ones
- * may be answered by the *server* instead. The line, which M6 will lean on hard
- * when the phone connects to a host over the tailnet:
+ * `ShellApi` is the surface the dispatcher may not have (see `shared/api.ts`) -
+ * pickers, revealing a path, launching an editor, the updater. A browser tab
+ * has none of those natively, and the interesting question is not how to
+ * emulate them but where each one may be answered from instead. The line, which
+ * M6 will lean on hard when the phone connects to a host over the tailnet:
  *
  *  - **A fact about the host may travel.** `appInfo` is version numbers, an
- *    instance id and paths. Reading it over HTTP is not a capability.
- *  - **A capability of the host may not.** Revealing a folder or launching an
+ *    instance id and paths; `reviews.filePath` is where a file of this review
+ *    lives. Reading either over the carrier is not a capability.
+ *  - **A capability of the host may not.** Revealing a folder or spawning an
  *    editor acts on the machine the daemon is on, which is not necessarily the
  *    machine the person is at, and a request that could start a process there
- *    would make this very different software. So they are absent here, and they
- *    stay absent - the browser gets its own versions in M3.2 (a `vscode://`
- *    link, a file input) which act on the machine holding the keyboard.
+ *    would make this very different software. So nothing here asks the server
+ *    to *do* anything to its machine.
  *
- * Refusals throw `AppError` rather than resolving to something empty, so the
- * UI's existing error paths show a sentence a user can act on. What is still
- * missing in M3.1 is the *shell capability flag* that lets a screen hide a
- * control instead of offering one that explains itself when pressed; that is
- * the first thing M3.2 does, and until then a toggle with no meaning in a
- * browser says so when it is used rather than before.
+ * What that leaves is a tab doing these things itself, with the browser's own
+ * tools, on the machine holding the keyboard:
+ *
+ *  - **Attaching an image** is a file input, and the bytes go through
+ *    `attachments.ingest` - the same method an agent's path goes through.
+ *  - **Opening a file in an editor** is a `vscode://file/…:line` navigation.
+ *    The path is asked for over the carrier and the URL is opened here, which
+ *    is the same two halves `main/ipc.ts` joins, joined in the other order.
+ *  - **Rendering an attachment** is a rewrite of the token to a path on this
+ *    origin, which the server answers from the same store.
+ *
+ * Three things genuinely cannot be done, and rather than being offered and
+ * explaining themselves when pressed, they are declared absent in
+ * `capabilities` so the screens leave them out. The refusals below stay as the
+ * backstop for a caller that did not look.
  */
 import { AppError } from '@shared/errors'
-import { WEB_PATHS } from '@shared/web'
+import { editorLink, linkableEditors } from '@shared/editors'
+import { WEB_PATHS, webAttachmentSrc } from '@shared/web'
 import type { AppInfo, EditorList, ShellApi, UpdateStatus } from '@shared/api'
+import type { Attachment, OpenReviewFileInput } from '@shared/schemas'
+import type { Carrier } from '@shared/rpc'
 
 /** Nothing to unsubscribe from. Returned by the subscriptions a tab cannot have. */
 const NO_SUBSCRIPTION = (): void => {}
@@ -65,7 +77,18 @@ async function readAppInfo(): Promise<AppInfo> {
   return (await response.json()) as AppInfo
 }
 
-const NO_EDITORS: EditorList = { editors: [], defaultId: null }
+/**
+ * Every editor with a URL scheme, offered as a choice rather than as a finding.
+ *
+ * The Electron app lists what it detected on disk; a tab cannot look, so it
+ * lists what it knows how to address and lets the reviewer say. `defaultId` is
+ * the first of them, which is a guess - and the picker in the files tab appears
+ * precisely because more than one entry means the guess can be corrected.
+ */
+function editorChoices(): EditorList {
+  const editors = linkableEditors()
+  return { editors, defaultId: editors[0]?.id ?? null }
+}
 
 const UPDATES_UNSUPPORTED: UpdateStatus = {
   state: 'unsupported',
@@ -74,20 +97,125 @@ const UPDATES_UNSUPPORTED: UpdateStatus = {
     'tarball it was unpacked from.'
 }
 
-export function createWebShell(): ShellApi {
+/**
+ * The file picker, as a browser has one.
+ *
+ * An `<input type="file">` clicked from script, which is the only way to open a
+ * file dialog on the web and is why this is not simply absent: the composer
+ * already has an "attach" button, and it can go on meaning the same thing.
+ *
+ * Cancellation is the awkward part. A dialog that is dismissed fires `cancel`
+ * in current browsers, and fired nothing at all in browsers that are still
+ * around - which would leave the composer's `busy` flag set for the life of the
+ * page. So `cancel` settles it when it comes, and the first `focus` back on the
+ * window is the fallback: whichever happens first wins, and `change` beats both
+ * because it is dispatched before focus returns.
+ */
+function pickImageFile(): Promise<File | null> {
+  return new Promise((resolve) => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = 'image/png,image/jpeg,image/gif,image/webp'
+    // Off-screen rather than `display:none`: a hidden input is not clickable in
+    // every browser, and the click is the whole point.
+    input.style.position = 'fixed'
+    input.style.left = '-9999px'
+    document.body.append(input)
+
+    let settled = false
+    const settle = (file: File | null): void => {
+      if (settled) return
+      settled = true
+      window.removeEventListener('focus', onFocus)
+      input.remove()
+      resolve(file)
+    }
+
+    // A frame's grace after focus comes back, so a `change` that is already on
+    // its way is not overtaken by the fallback.
+    const onFocus = (): void => {
+      window.setTimeout(() => settle(input.files?.[0] ?? null), 300)
+    }
+
+    input.addEventListener('change', () => settle(input.files?.[0] ?? null))
+    input.addEventListener('cancel', () => settle(null))
+    window.addEventListener('focus', onFocus)
+
+    input.click()
+  })
+}
+
+export function createWebShell(carrier: Carrier): ShellApi {
+  /**
+   * Ask the host where the file is, then hand the URL to this machine.
+   *
+   * `reviews.filePath` is a read on the dispatcher - it answers *which* file,
+   * which is review knowledge - and the navigation is this shell's own. The
+   * path is an absolute path on the machine the daemon is on, which today is
+   * always the machine the browser is on too: the handler binds loopback and
+   * checks `Host`, so there is no way to be looking at this page from
+   * elsewhere. When M6 makes that untrue, this is one of the places that has to
+   * learn the difference, and the editor URL grows a remote authority per S4.
+   */
+  const openInEditor = async (input: OpenReviewFileInput): Promise<void> => {
+    const { id, path, changes, line, editorId } = input
+    const editor = editorLink(editorId) ?? editorLink(editorChoices().defaultId ?? undefined)
+    if (!editor?.url) {
+      return unsupported(
+        'Opening a file in an editor',
+        'No editor with a URL scheme was chosen for this tab.'
+      )
+    }
+
+    const absolute = await carrier.request('reviews.filePath', { id, path, changes })
+
+    // `location.href` rather than `window.open`: a scheme the browser hands to
+    // the OS does not open a document, so a popup would be an empty tab left
+    // behind, and a top-level navigation to an external scheme leaves this page
+    // where it is. A scheme nothing has claimed shows the browser's own "no
+    // application" dialog, which is a better answer than anything this code
+    // could invent.
+    // `line` is optional on the way in and defaulted by the schema on the way
+    // through the dispatcher, which this call does not go through.
+    window.location.href = editor.url(absolute, line ?? 1)
+  }
+
+  /**
+   * A picked file, ingested exactly as a pasted one is.
+   *
+   * The bytes go over the carrier to `attachments.ingest`, so the size limit,
+   * the format sniff and the content addressing are the store's, not this
+   * shell's - the same service an agent's file path reaches. The one thing a
+   * tab knows that the Electron picker does not is that it never learns a path,
+   * which is fine: a path was never what got stored.
+   */
+  const pickAttachment = async (): Promise<Attachment | null> => {
+    const file = await pickImageFile()
+    if (file === null) return null
+    return await carrier.request('attachments.ingest', {
+      bytes: await file.arrayBuffer(),
+      originalName: file.name
+    })
+  }
+
   return {
-    system: {
+    capabilities: {
       // No native folder picker, and no attempt at one. The path field next to
-      // the button is a text input, so a repository is added by typing or
-      // pasting its path - which is also what someone reaching a remote host in
-      // M4 will do, since a picker there would browse the wrong machine.
-      pickDirectory: () => Promise.resolve(null),
-      revealPath: () => unsupported('Revealing a folder', 'Copy the path and open it yourself.'),
-      appInfo: readAppInfo,
-      editors: () => Promise.resolve(NO_EDITORS),
+      // where the button would be is a text input, so a repository is added by
+      // typing or pasting its path - which is also what someone reaching a
+      // remote host in M4 will do.
+      pickDirectory: false,
+      revealPath: false,
       // False rather than a refusal: the question "does GitWarren start with
       // this machine" has a true answer for a browser tab, and it is no.
       // Turning it *on* is `gitwarren service install`, which arrives in M3.3.
+      openAtLogin: false
+    },
+    system: {
+      pickDirectory: () => Promise.resolve(null),
+      revealPath: () => unsupported('Revealing a folder', 'Copy the path and open it yourself.'),
+      appInfo: readAppInfo,
+      editors: () => Promise.resolve(editorChoices()),
       getOpenAtLogin: () => Promise.resolve(false),
       setOpenAtLogin: () =>
         unsupported('Starting at login', 'Run `gitwarren service install` on this machine.')
@@ -106,8 +234,8 @@ export function createWebShell(): ShellApi {
       // exists to reproduce is what a browser does natively.
       onDeepLink: () => NO_SUBSCRIPTION
     },
-    pickAttachment: () => Promise.resolve(null),
-    openInEditor: () =>
-      unsupported('Opening a file in an editor', 'Open it from the repository on this machine.')
+    pickAttachment,
+    attachmentSrc: webAttachmentSrc,
+    openInEditor
   }
 }

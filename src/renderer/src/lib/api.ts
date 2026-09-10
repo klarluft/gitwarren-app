@@ -36,6 +36,11 @@ function once<T>(read: () => Promise<T>): () => Promise<T> {
 }
 
 export const api: GitWarrenApi = {
+  // Read once, at module scope, because it is read during render and cannot
+  // change while the page is open. A screen asks `api.capabilities.revealPath`
+  // and leaves the button out; see `ShellCapabilities` on why that is better
+  // than a button that explains itself when pressed.
+  capabilities: shell.capabilities,
   repositories: {
     list: () => carrier.request('repositories.list', undefined),
     get: (input) => carrier.request('repositories.get', input),
@@ -71,7 +76,8 @@ export const api: GitWarrenApi = {
   },
   attachments: {
     ingest: (input) => carrier.request('attachments.ingest', input),
-    pick: () => shell.pickAttachment()
+    pick: () => shell.pickAttachment(),
+    src: (url) => shell.attachmentSrc(url)
   },
   system: {
     pickDirectory: () => shell.system.pickDirectory(),

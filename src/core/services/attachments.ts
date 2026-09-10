@@ -29,6 +29,7 @@ import { eq, inArray } from 'drizzle-orm'
 import { getDatabase } from '../db/client.js'
 import { attachments, comments, reviews } from '../db/schema.js'
 import { getDataDirectory } from '../paths.js'
+import { attachmentUrl, parseAttachmentUrl } from '../../shared/attachments.js'
 import { AppError } from '../../shared/errors.js'
 import type { Attachment } from '../../shared/schemas.js'
 
@@ -41,20 +42,21 @@ import type { Attachment } from '../../shared/schemas.js'
  */
 export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
 
-/** The URL scheme and host the renderer fetches attachments through. */
-export const ATTACHMENT_URL_PREFIX = 'gitwarren://attachment/'
-
 /**
- * Filenames the custom protocol will serve.
+ * The token grammar, which since M3.2 lives in `shared/attachments.ts`.
  *
- * Exported because the protocol handler in the main process tests against this
- * exact expression, and it is the security boundary there: comment bodies are
- * agent-writable, so `gitwarren://attachment/../../../../etc/passwd` is a URL
- * that will genuinely be requested one day. A hash and a short extension is the
- * entire vocabulary of a legitimate name, so anything else is refused rather
- * than resolved and checked.
+ * It moved because a browser tab now serves attachments over HTTP and has to
+ * recognise a token to rewrite it, and a browser cannot import this file - the
+ * first line of it asks for `node:crypto`. Re-exported here so that every
+ * caller that reached for it through the store still does.
  */
-export const ATTACHMENT_FILE_NAME = /^[a-f0-9]{64}\.[a-z0-9]{2,4}$/
+export {
+  ATTACHMENT_FILE_NAME,
+  ATTACHMENT_URL_PREFIX,
+  attachmentName,
+  attachmentUrl,
+  parseAttachmentUrl
+} from '../../shared/attachments.js'
 
 interface ImageFormat {
   ext: string
@@ -195,19 +197,6 @@ function attachmentsRoot(): string {
 /** Where the bytes for `<sha>.<ext>` live. Sharded so no directory grows huge. */
 export function attachmentPath(sha: string, ext: string): string {
   return join(attachmentsRoot(), sha.slice(0, 2), `${sha}.${ext}`)
-}
-
-export function attachmentUrl(sha: string, ext: string): string {
-  return `${ATTACHMENT_URL_PREFIX}${sha}.${ext}`
-}
-
-/** Pull the `<sha>.<ext>` out of a token, or null if it is not one. */
-export function parseAttachmentUrl(url: string): { sha: string; ext: string } | null {
-  if (!url.startsWith(ATTACHMENT_URL_PREFIX)) return null
-  const name = url.slice(ATTACHMENT_URL_PREFIX.length)
-  if (!ATTACHMENT_FILE_NAME.test(name)) return null
-  const dot = name.lastIndexOf('.')
-  return { sha: name.slice(0, dot), ext: name.slice(dot + 1) }
 }
 
 function toAttachment(row: {

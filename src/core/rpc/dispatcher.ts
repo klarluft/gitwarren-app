@@ -101,9 +101,8 @@ function toIngestSource(params: unknown): { bytes: Buffer; originalName?: string
   // A typed array, which is what a `Uint8Array` sent over structured clone
   // arrives as. Its own byte range, not the whole underlying buffer.
   if (ArrayBuffer.isView(bytes)) {
-    const view = bytes as ArrayBufferView
     return {
-      bytes: Buffer.from(view.buffer, view.byteOffset, view.byteLength),
+      bytes: Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength),
       ...name
     }
   }

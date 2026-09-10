@@ -36,6 +36,8 @@
     "src/renderer/src/features/reviews/__tests__/diff-search.test.ts",
     "src/web/loopback-fragment.ts",
     "src/web/__tests__/loopback-fragment.test.ts",
+    "src/web/wire.ts",
+    "src/web/__tests__/wire.test.ts",
     "electron.vite.config.ts",
     "vite.mcp.config.ts",
     "vite.daemon.config.ts",

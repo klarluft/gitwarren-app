@@ -900,6 +900,7 @@ each mergeable on its own:
 2. **What the browser shell lacks.** Attachments over HTTP, open-in-editor as a
    `vscode://` link, and a shell *capability flag* so a screen can hide a
    control instead of offering one that explains itself when pressed.
+   *(done — see below.)*
 3. **The `gitwarren` CLI and distribution.** `serve`, `open`,
    `service install`; the S3 tarball, a Homebrew formula, `npx gitwarren`.
 4. **The Agent Access page**, one-sentence prompt leading.
@@ -952,6 +953,79 @@ only `out/daemon` is unpacked, and the app serves the web view itself anyway.
 The browser shell's missing capabilities are honest refusals rather than hidden
 controls until M3.2 gives it the capability flag. Attachments in markdown do not
 render in a tab yet — that is the HTTP blob endpoint, also M3.2.
+
+**M3.2, done on the Mac, 10 September.** The three things a tab could not do,
+each done the way a tab can rather than by asking the server to do it for the
+person — which is the line M6 will need and is easiest to draw now, while the
+browser and the daemon are on the same machine and nobody would notice it being
+crossed.
+
+**Attachments over HTTP.** `/gitwarren/attachments/<sha>.<ext>`, behind the same
+cookie as everything else, reading the same content-addressed store the custom
+scheme reads. A comment body still holds `gitwarren://attachment/…` whoever
+reads it — it is stored text and must not depend on which shell renders it — so
+the rewrite happens at the `<img src>` and nowhere else, through a new
+`shell.attachmentSrc`. The window passes the token through; a tab turns it into
+a path on its own origin, which `img-src 'self'` already covered, so the CSP did
+not have to be loosened to make pictures appear. The token grammar moved to
+`shared/attachments.ts` on the way, because the store's first line asks for
+`node:crypto` and a browser bundle cannot import it to learn what a name looks
+like.
+
+**A capability flag.** `shell.capabilities` — `pickDirectory`, `revealPath`,
+`openAtLogin` — read synchronously at module scope, so a screen leaves a control
+out rather than offering one that explains itself when pressed. Deliberately
+flags and not a shell *name*: `if (shell === 'web')` spreads a list of what each
+shell happens to lack across every screen that asks, and M4's remote hosts will
+answer some of these differently again. The refusals from M3.1 stay underneath
+as the backstop for a caller that did not look.
+
+**Open in an editor.** Two halves, joined in the opposite order from
+`main/ipc.ts`: `reviews.filePath` is a read on the dispatcher — *which* file is
+review knowledge — and the `vscode://file/…:line` navigation happens in the tab.
+Nothing asks the daemon to start a process, which is the rule that makes this
+software rather than a remote shell. The URL forms moved to `shared/editors.ts`
+so both shells open the same string; detection stayed in `main/editors.ts`,
+keyed by an id union so an editor added without detection is a type error. A tab
+offers every editor with a scheme as a *choice* rather than a finding, since it
+cannot look at the filesystem — and the picker in the files tab already existed
+because the detected default was never more than a guess either.
+
+**A pasted screenshot never arrived.** The one that would have cost an
+afternoon. `attachments.ingest` is handed an `ArrayBuffer`, which structured
+clone carries perfectly and which `JSON.stringify` turns into `{}` without a
+word. Over the socket the image reached the dispatcher as an empty object,
+failed the format sniff, and the user was told their PNG is not a PNG — a
+failure that reads as being about the file rather than about the wire. The
+carrier now base64s bytes before framing (`web/wire.ts`, apart from the socket
+so it can be tested, as `loopback-fragment.ts` is), which is the encoding
+`toIngestSource` has taken since M2 for the stdio carrier. `btoa` needs the
+bytes in slices, or a four-megabyte screenshot overflows the call stack in
+`String.fromCharCode`. `AttachmentIngestParams` was also narrower than what the
+dispatcher accepted — it omitted the typed-array form the dispatcher has a
+branch for — and now says all four.
+
+Verified in Chrome and in the Electron window against one scratch data
+directory, on a review whose description and first comment both hold an
+attachment: both images paint in both shells; `reviews.filePath` answers with
+the right absolute path and the editor URL leaves the page where it is; an
+`ArrayBuffer` ingest over the socket comes back with a real sha. Side by side on
+the repository screens, the browser shows zero reveal buttons, no Browse and no
+start-at-login switch where the window shows one of each, and the path field,
+the edit buttons and the cards are all still there — controls removed, not
+screens. No console errors and no failed requests beyond Chrome's own
+`favicon.ico` probe, which the web build has nothing to answer with; an icon is
+polish for M3.5 rather than a gap in this change.
+
+**Not done in M3.2, and why.** The other half of the "Blobs over HTTP" bullet —
+*very large file reads use GET past a size threshold* — is untouched.
+`reviews.file` and `reviews.image` still answer over the socket in both shells,
+which is fine on loopback where the socket is a memcpy, and the threshold is a
+number that should be chosen against a real network rather than guessed here.
+It belongs with M6, where a file crosses the tailnet and the cost is visible.
+Drag-and-drop and paste already worked in a tab and needed only the carrier fix;
+what M3.2 added is the file *input*, so the composer's attach button means the
+same thing in both shells.
 
 ### M4 — SSH hosts
 
