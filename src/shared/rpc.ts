@@ -21,8 +21,13 @@
 import { deserializeAppError, type SerializedAppError } from './errors.js'
 import type { FileContent, FileImage, RepositoryRefs, ReviewCommits, ReviewDiff } from './git.js'
 import type {
+  AddHostInput,
   AddRepositoryInput,
   Attachment,
+  GetHostInput,
+  HostWithState,
+  RemoveHostInput,
+  UpdateHostInput,
   Comment,
   CommentThread,
   CreateReviewInput,
@@ -62,6 +67,27 @@ import type {
  * having to invent one under time pressure.
  */
 export const RPC_PROTOCOL_VERSION = 1
+
+/**
+ * Who just answered.
+ *
+ * `instanceId` is the durable identity of the install (`core/instance.ts`) and
+ * is what `hosts.instance_id` and `repositories.host_id` store. `protocol` is
+ * `RPC_PROTOCOL_VERSION` as the *responder* understands it, which is the point
+ * of exchanging it at all: the two ends of an `ssh` pipe are separately
+ * installed and separately updated, and there is no package manager keeping
+ * them in step.
+ *
+ * `version` is the human-readable release, for a Hosts screen to show and for a
+ * person to compare against their own. Nothing branches on it - a decision made
+ * from a marketing version rather than from a protocol number is a decision
+ * that breaks on a hotfix.
+ */
+export interface HostIdentity {
+  instanceId: string
+  protocol: number
+  version: string
+}
 
 export interface RpcRequest<M extends RpcMethod = RpcMethod> {
   /** Unique per connection. Answers may come back in any order. */
@@ -126,6 +152,44 @@ export function isRpcResponse(message: RpcMessage): message is RpcResponse {
  * diff between two arbitrary strings.
  */
 export interface RpcMethods {
+  /**
+   * Who is answering, and what they speak. The handshake `RPC_PROTOCOL_VERSION`
+   * was reserved for.
+   *
+   * Asked by a GUI on the first successful connection to a host, so the host's
+   * own instance id can be written into the `hosts` row - see
+   * `core/services/hosts.ts`. It is the only method whose answer is about the
+   * responder rather than about a repository, which is exactly why it has to be
+   * a method: nothing else on the wire can say *which machine* just replied.
+   *
+   * Cheap and side-effect-free on purpose. It is also the natural thing for a
+   * future health check to call, and a health check that wrote something would
+   * be a health check nobody could run twice.
+   */
+  'app.instance': { params: void; result: HostIdentity }
+
+  /**
+   * Managing the list of *other* machines this install knows about.
+   *
+   * In the map because both shells need them - the Hosts screen exists in a
+   * browser tab as much as in the window, and M3 settled that a screen reaches
+   * the core through the dispatcher and nowhere else.
+   *
+   * Answered by the install the person is driving, and never forwarded to a
+   * host. A host's list of hosts is its own business, and routing these onward
+   * would turn a hub and its spokes into a mesh, where removing a machine from
+   * one list could remove it from another. `isLocalOnly` in `core/hosts/ssh.ts`
+   * is the backstop that makes that structural; M4.3's router is where the
+   * general local-versus-remote decision will live.
+   */
+  'hosts.list': { params: void; result: HostWithState[] }
+  'hosts.get': { params: GetHostInput; result: HostWithState }
+  'hosts.add': { params: AddHostInput; result: HostWithState }
+  'hosts.update': { params: UpdateHostInput; result: HostWithState }
+  'hosts.remove': { params: RemoveHostInput; result: { id: number } }
+  /** Reach a host now, ignoring backoff. Answers with what happened. */
+  'hosts.probe': { params: GetHostInput; result: HostWithState }
+
   'repositories.list': { params: void; result: RepositoryWithGitState[] }
   'repositories.get': { params: GetRepositoryInput; result: RepositoryWithGitState }
   'repositories.add': { params: AddRepositoryInput; result: Repository }
@@ -231,6 +295,13 @@ export interface AttachmentIngestParams {
  * rather than a guess made from the method name.
  */
 export const READ_METHODS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
+  'app.instance',
+  'hosts.list',
+  'hosts.get',
+  // `hosts.probe` is deliberately absent. It reads in the sense that it changes
+  // no host row a caller can see, but it opens a connection and clears a
+  // backoff, and two people pressing "try now" at the same moment should mean
+  // two attempts - which is the whole reason the button exists.
   'repositories.list',
   'repositories.get',
   'repositories.refs',

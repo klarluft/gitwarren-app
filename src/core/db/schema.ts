@@ -58,6 +58,109 @@ export const principals = sqliteTable(
 export type PrincipalRow = typeof principals.$inferSelect
 export type NewPrincipalRow = typeof principals.$inferInsert
 
+/**
+ * Another machine this install can reach, and how to reach it.
+ *
+ * The table `repositories.host_id` has been pointing at since M0. A row here is
+ * a *route*, not a copy of anything: the host owns its repositories, its SQLite
+ * and its git, and everything this install knows about what is over there it
+ * learned by asking. Nothing here is replicated state, which is why there is no
+ * `synced_at` and never will be.
+ *
+ * ## Why the instance id is nullable
+ *
+ * `instanceId` is the host's own identity (`shared/instance-id.ts`), and it is
+ * what `repositories.host_id` actually stores - so it is tempting to require it
+ * at insert. It cannot be, because of the order the world happens in: a person
+ * types an SSH target into a form and presses Add, and at that moment nobody
+ * knows the instance id, or whether the host answers at all. It is learned on
+ * the first successful connect and written back.
+ *
+ * That also makes NULL the honest record of a host we have never reached: a row
+ * with a target and no instance id is a host that has been *described* but not
+ * yet *met*, and the Hosts screen can say exactly that instead of showing a
+ * fabricated identity next to a machine that may not exist.
+ *
+ * Keeping identity apart from address is what M6 will need: a host's address
+ * changes (DHCP, a renamed tailnet node, a different SSH user) while the
+ * machine holding the repositories does not. When discovery starts proposing
+ * peers, the instance id is what says "you already know this one" - and it is
+ * the only field a `repositories.host_id` may be matched against.
+ *
+ * ## What `kind` will and will not grow into
+ *
+ * `ssh` here, `wsl` at M5, `websocket` at M6. It discriminates over *carriers*,
+ * not over operating systems: what a host runs is discovered by asking it
+ * (`uname -sm`, for M4.2's installer), never declared in a form, because a
+ * person choosing "Linux" from a dropdown is a person who can choose wrong.
+ */
+export const hosts = sqliteTable(
+  'hosts',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    /**
+     * The host's own instance id, learned on the first successful connect and
+     * NULL until then. This is what `repositories.host_id` holds.
+     */
+    instanceId: text('instance_id'),
+    /** What the person calls this machine. Theirs to choose; never matched on. */
+    label: text('label').notNull(),
+    /** Which carrier reaches it. */
+    kind: text('kind', { enum: ['ssh'] })
+      .notNull()
+      .default('ssh'),
+    /**
+     * What the carrier is handed. For `ssh`, a destination `ssh` understands -
+     * and it carries the Unix user, because spike S1 found that a bare MagicDNS
+     * name requests the *client's* username and is refused by the tailnet
+     * policy. `xfor@pc-wsl`, not `pc-wsl`.
+     */
+    target: text('target').notNull(),
+    /**
+     * How an editor on *this* machine names a file over there:
+     * `ssh-remote+<target>` for VS Code, per spike S4. Kept apart from `target`
+     * because the two coincide today and stop coinciding at M5, where the
+     * carrier is `wsl.exe -d Ubuntu` and the editor form is `wsl+Ubuntu`. NULL
+     * means "derive it from the target", which is right until someone's SSH
+     * config aliases differ from their editor's.
+     */
+    editorTarget: text('editor_target'),
+    /**
+     * When this host last answered a request. A fact about the past, so it is
+     * safe to store; whether the host is reachable *now* is not, and is never
+     * written down - the Hosts screen asks the carrier, which knows.
+     */
+    lastSeenAt: text('last_seen_at'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`)
+  },
+  (table) => [
+    /**
+     * One row per target per carrier. Adding `pc-wsl` twice is a mistake worth
+     * catching in the database rather than in the form, since a form is not the
+     * only thing that will insert here once M6 discovers peers.
+     */
+    uniqueIndex('hosts_kind_target_idx').on(table.kind, table.target),
+    /**
+     * And one row per machine. Partial, because NULL is how "not met yet" is
+     * spelled and SQLite treats NULLs in a unique index as all distinct - the
+     * same rule, and the same remedy, as the repositories indexes below.
+     *
+     * This is the index that catches the interesting case: one machine added
+     * twice under two names (`pc-wsl` and `xfor@100.78.0.23`). Neither label
+     * nor target can see that they are the same box; the instance id it reports
+     * on first connect can.
+     */
+    uniqueIndex('hosts_instance_idx')
+      .on(table.instanceId)
+      .where(sql`${table.instanceId} is not null`)
+  ]
+)
+
+export type HostRow = typeof hosts.$inferSelect
+export type NewHostRow = typeof hosts.$inferInsert
+
 export const repositories = sqliteTable(
   'repositories',
   {

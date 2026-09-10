@@ -52,6 +52,7 @@ process.env.GITWARREN_DATA_DIR = dataDir
 
 const { dispatch, handleRequest, isRpcMethod, rpcMethodNames } = await import('../dispatcher.js')
 const { serveStdio } = await import('../stdio.js')
+const { createStdioClient } = await import('../stdio-client.js')
 const { READ_METHODS, resultOf } = await import('../../../shared/rpc.js')
 const { getDatabase, closeDatabase } = await import('../../db/client.js')
 const { comments, commentThreads, repositories, reviewedFiles, reviews } = await import(
@@ -66,7 +67,17 @@ const { AppError } = await import('../../../shared/errors.js')
 interface Carrier {
   name: string
   call<M extends RpcMethod>(method: M, params?: RpcParams<M>): Promise<RpcResult<M>>
-  send(request: RpcRequest): Promise<RpcResponse>
+  /**
+   * The raw message door, for the tests that are about response envelopes
+   * themselves - that an id comes back, that a failure is a message.
+   *
+   * Optional since M4. A carrier built on `rpc/stdio-client.ts` assigns its own
+   * ids and unwraps its own outcomes, so it has no way to ask a question under
+   * a chosen id or to see a response before it becomes a value or a throw. A
+   * `send` faked on top of it would echo back the id the test passed in and
+   * assert nothing at all, which is worse than not running.
+   */
+  send?(request: RpcRequest): Promise<RpcResponse>
 }
 
 const inProcess: Carrier = {
@@ -127,6 +138,35 @@ function stdioCarrier(): Carrier {
         (await send({ id: nextId++, method, params })) as RpcResponse<RpcResult<M>>
       )
     }
+  }
+}
+
+/**
+ * The pair M4 actually ships: `rpc/stdio-client.ts` asking, `rpc/stdio.ts`
+ * answering, with nothing hand-rolled in between.
+ *
+ * The carrier above proves the *protocol* by writing frames itself. This one
+ * proves the *code that will be doing the writing* on every remote host from
+ * M4 onward - and it is the whole reason the client was worth extracting from
+ * the test's private reader: the thing under test is now the thing that ships.
+ *
+ * `ssh` is deliberately not in the picture. What it contributes is a child
+ * process and an argument vector (`core/hosts/ssh.ts`), and the streams it
+ * hands over behave like these two: spike S1 confirmed that against the real
+ * `pc-wsl` node, and the pipe itself was measured byte-exact in S2. Running the
+ * whole contract over a network here would trade forty fast tests for forty
+ * slow ones and one more thing to be flaky.
+ */
+function clientCarrier(): Carrier {
+  const toDaemon = new PassThrough()
+  const fromDaemon = new PassThrough()
+
+  serveStdio({ input: toDaemon, output: fromDaemon })
+  const client = createStdioClient({ input: fromDaemon, output: toDaemon })
+
+  return {
+    name: 'over stdio, through the client',
+    call: (method, params) => client.request(method, params)
   }
 }
 
@@ -280,26 +320,30 @@ function contract(carrier: Carrier): void {
     assert.equal(thread.comments[0]?.author.name, 'Human')
   })
 
-  test(`[${carrier.name}] handleRequest returns the answer under the id it was asked with`, async () => {
-    const response = await carrier.send({ id: 7, method: 'reviews.get', params: { id: reviewId } })
+  // The response envelope itself, which only a carrier holding raw messages can
+  // observe. See the note on `send` above.
+  const envelope = carrier.send?.bind(carrier)
+
+  test(`[${carrier.name}] handleRequest returns the answer under the id it was asked with`, { skip: !envelope }, async () => {
+    const response = await envelope!({ id: 7, method: 'reviews.get', params: { id: reviewId } })
 
     assert.equal(response.id, 7)
     assert.ok('result' in response)
     assert.equal((response.result as { id: number }).id, reviewId)
   })
 
-  test(`[${carrier.name}] handleRequest turns a failure into a message rather than a throw`, async () => {
+  test(`[${carrier.name}] handleRequest turns a failure into a message rather than a throw`, { skip: !envelope }, async () => {
     // A carrier holding a byte stream has nowhere to put an exception, so this
     // has to come back as a response no matter what went wrong.
-    const response = await carrier.send({ id: 8, method: 'reviews.get', params: { id: 999_999 } })
+    const response = await envelope!({ id: 8, method: 'reviews.get', params: { id: 999_999 } })
 
     assert.equal(response.id, 8)
     assert.ok('error' in response)
     assert.equal(response.error.code, 'NOT_FOUND')
   })
 
-  test(`[${carrier.name}] field errors survive the trip, so a form can still put them under an input`, async () => {
-    const response = await carrier.send({
+  test(`[${carrier.name}] field errors survive the trip, so a form can still put them under an input`, { skip: !envelope }, async () => {
+    const response = await envelope!({
       id: 9,
       method: 'reviews.create',
       params: { repositoryId, baseRef: 'main', headRef: 'no-such-branch' }
@@ -312,8 +356,8 @@ function contract(carrier: Carrier): void {
     ])
   })
 
-  test(`[${carrier.name}] an unknown method comes back as a response too`, async () => {
-    const response = await carrier.send({ id: 10, method: 'nope.nope' as RpcMethod })
+  test(`[${carrier.name}] an unknown method comes back as a response too`, { skip: !envelope }, async () => {
+    const response = await envelope!({ id: 10, method: 'nope.nope' as RpcMethod })
 
     assert.ok('error' in response)
     assert.equal(response.error.code, 'INVALID_INPUT')
@@ -413,4 +457,4 @@ function contract(carrier: Carrier): void {
 
 }
 
-for (const carrier of [inProcess, stdioCarrier()]) contract(carrier)
+for (const carrier of [inProcess, stdioCarrier(), clientCarrier()]) contract(carrier)

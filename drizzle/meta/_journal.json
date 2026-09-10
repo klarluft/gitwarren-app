@@ -57,6 +57,13 @@
       "when": 1789030274674,
       "tag": "0007_hosts_and_principals",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1789074697080,
+      "tag": "0008_hosts",
+      "breakpoints": true
     }
   ]
 }

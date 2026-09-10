@@ -1534,6 +1534,121 @@ the uncommitted work Claude Code left there, comment; the agent in WSL reads
 the comment over its local MCP and replies; the reply appears on the Mac after
 refresh. Pull the network cable mid-review and plug it back.
 
+#### How it is being built, and where it has got to
+
+Five changes, each mergeable on its own, in the order that keeps every one of
+them verifiable against the real `pc-wsl` node rather than against a mock:
+
+1. **The hosts table, the carrier and the pool.** What it takes to reach
+   another machine at all. *(done — see below.)*
+2. **The Hosts screen and the installer over SSH.** `uname -sm`, the tarball
+   fetched once and streamed in, the launchers maintained, and the screen that
+   drives it.
+3. **Repositories on hosts.** `fs.list`, the host segment in routes, reviews
+   listed under their host, clones grouped by root commit across hosts.
+4. **Attachments, editors and agent access per host.**
+5. **Disconnection.** The stale banner and the silent refetch.
+
+**M4.1, done on the Mac against the WSL node, 10 September.** The novelty is
+one file and an argument vector. Everything else M4 needs had already been
+built to accept it: `shared/rpc.ts` is the protocol, `core/rpc/ndjson.ts` is
+the framing, `core/rpc/stdio-client.ts` is the asking side, and what answers on
+the far end is the same `gitwarren serve --stdio` M2 shipped. `core/hosts/ssh.ts`
+contributes a child process, and that is genuinely all.
+
+Everything below was proved by hand against `pc-wsl` *before* any of it was
+written, which is the order this milestone rewards: the 44 MB tarball streamed
+into `~/.gitwarren/daemon/<version>/` over the pipe in 2.5 seconds on a box
+with nothing but git, and `{"id":1,"method":"repositories.list"}` came back
+`{"id":1,"result":[]}` — with the two responses arriving *out of order*, which
+is the property the `id` field exists for and the first thing a hand-rolled
+client would have got wrong. `stdout` is pure protocol; the `ready` banner is
+on stderr, where framing cannot be hurt by it.
+
+**The framing moved before it was copied.** M2 read frames in `stdio.ts`
+because only the daemon read them. M4 has a client too, and two implementations
+of "where does a frame end" produce a *hang* rather than an error — both ends
+healthy, both waiting, nothing logged. So `ndjson.ts` came out first and both
+sides are users of it.
+
+**The client's most important decision is not to be clever.** When a connection
+dies mid-flight there is no way to tell "the daemon never saw it" from "it did
+the work and the reply died on the way back". Retrying is safe in the first
+case and posts a second comment in the second, so every in-flight request fails
+with `HOST_OFFLINE` and none is resent; reconnection is about the *next*
+request. The web carrier settled this identically at M3.
+
+**Backoff belongs to the host, not the request.** A screen polling every
+fifteen seconds against a machine that is switched off must not spawn four
+`ssh` processes a minute for an hour, so a failed host refuses immediately for
+a while rather than hopefully — fast is kinder than hopeful, and M4.5's banner
+needs something to render. The one deliberate exception is an explicit probe: a
+person pressing "try now" knows something the timer does not, usually that they
+have just switched the machine on. Ten idle minutes closes the pipe, matching
+`ControlPersist` so the multiplexing master and the daemon expire together, and
+"idle" is measured from when a request *finished* — a naive timer hangs up on a
+large `reviews.diff` halfway through its own answer.
+
+**`hosts.*` is answered here and never forwarded.** A host's list of hosts is
+its own business, and routing these onward would turn a hub and its spokes into
+a mesh where removing a machine from one list could remove it from another.
+`isLocalOnly` in `ssh.ts` refuses to send them, so the rule is structural
+rather than a comment; M4.3's router is where the general local-versus-remote
+decision will live.
+
+**Two things bit, and both are worth keeping.**
+
+*The useful half of a failure arrives after the failure.* The protocol notices
+a dead connection when the far end's stdout ends — which for a failing `ssh` is
+a moment *before* the `exit` that carries the status code and after which
+stderr is complete. Reading the reason at the instant the request failed
+therefore reported "The connection to the host closed." for a hostname that
+does not resolve: true, useless, and exactly the message a person would have
+been left with. `diagnostics()` is now a promise that waits briefly for the
+exit already on its way, and the same host now says `ssh could not connect to
+xfor@no-such-host-here. ssh: Could not resolve hostname no-such-host-here`.
+This was found by running the thing against a real machine and reading the
+output rather than by a test passing.
+
+*`BatchMode=yes` is what turns a hang into an error.* Without it `ssh` waits at
+a passphrase or host-key prompt on a stdin carrying JSON and no human, and the
+GUI spins forever. Key management stays the person's own, in their SSH agent
+and config; GitWarren never asks for a password and has nowhere to keep one.
+
+`instance_id` on a host row is nullable on purpose. Someone types a target and
+presses Add, and at that moment nobody knows which machine that is, or whether
+it answers — so NULL is the honest record of a host *described* but not yet
+*met*, and the identity is learned on the first successful connect and written
+back. It is what catches one machine added twice under two names (`pc-wsl` and
+`xfor@100.78.0.23`), which neither label nor target can see and which is
+reported rather than merged.
+
+Verified end to end against `pc-wsl` through the shipping code, not by hand:
+the host reachable in 178 ms cold and 4 ms warm on the multiplexed channel, its
+instance id learned and written back, a `NOT_FOUND` surviving the wire as
+itself while leaving the host marked up, `hosts.list` refused by the carrier, a
+deliberate hang-up starting no backoff and the host reachable again after it,
+and an unreachable machine failing in 18 ms with what `ssh` actually said. A
+host that answers `ssh` but has no GitWarren exits 127 and is told so by name,
+which is the single most likely outcome of adding a host until M4.2 lands.
+
+The whole protocol contract in `rpc/__tests__/dispatcher.test.ts` now runs a
+third time, through `stdio-client.ts` against `stdio.ts` — so the thing under
+test is the thing that ships, and the test's own hand-rolled client is gone.
+Four assertions about the response *envelope* are skipped for it rather than
+faked: a client that assigns its own ids and unwraps its own outcomes cannot
+ask a question under a chosen id, and a `send` built on top of it would echo
+back whatever the test passed in and assert nothing.
+
+**Not done in M4.1, and why.** There is no Hosts screen yet, so a host is added
+through the dispatcher and not by anyone using the app — that and the installer
+are M4.2, which is why they are one slice: the screen's main job is to drive
+the install. Nothing installs the daemon on a host, so it has to be put there
+by hand for now. Repositories on hosts are M4.3, so `hosts.remove` deliberately
+leaves any repository rows pointing at that host alone rather than cascading —
+a cascade written now would have to be unpicked once there is a remote
+repository to have an opinion about.
+
 ### M5 — WSL from Windows
 
 *Ships: the Windows app reviews WSL repos.*
