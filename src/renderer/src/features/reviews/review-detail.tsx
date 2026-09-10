@@ -213,14 +213,25 @@ export function ReviewDetail({ reviewId, tab, focus }: ReviewDetailProps) {
 
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="flex items-center gap-2">
+            {/* The title wraps here where it truncates in the review list, and
+                the difference is deliberate: in a list it is one row among
+                many and clipping keeps them scannable, but this is the heading
+                of the screen you opened to read it. `items-start` so the icon
+                and the badge stay level with the first line of a title that
+                takes two. */}
+            <div className="flex items-start gap-2">
               <GitPullRequestArrow
-                className={`size-5 shrink-0 ${isOpen ? 'text-success' : 'text-muted-foreground'}`}
+                className={`mt-1 size-5 shrink-0 ${isOpen ? 'text-success' : 'text-muted-foreground'}`}
               />
-              <h1 className="truncate text-xl font-semibold tracking-tight" title={review.title}>
+              <h1 className="min-w-0 break-words text-xl font-semibold tracking-tight">
                 {review.title}
               </h1>
-              <Badge variant={isOpen ? 'success' : 'outline'}>{isOpen ? 'Open' : 'Closed'}</Badge>
+              <Badge
+                variant={isOpen ? 'success' : 'outline'}
+                className="mt-1 shrink-0"
+              >
+                {isOpen ? 'Open' : 'Closed'}
+              </Badge>
             </div>
 
             <p className="mt-1.5 flex flex-wrap items-center gap-1.5 font-mono text-xs text-muted-foreground">

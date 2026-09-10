@@ -4,6 +4,7 @@
  */
 import { useMemo, useState } from 'react'
 import { AlertCircle, ArrowRight, Filter, GitPullRequestArrow, Plus, RefreshCw } from 'lucide-react'
+import { Breakable } from '@/components/breakable'
 import { Badge } from '@/components/ui/badge'
 import { Tooltip } from '@/components/ui/tooltip'
 import { Button } from '@/components/ui/button'
@@ -185,21 +186,26 @@ function ReviewCard({ review }: { review: Review }) {
           </h3>
           {review.status === 'closed' && <Badge variant="outline">Closed</Badge>}
         </div>
-        <p className="mt-1 flex items-center gap-1.5 truncate font-mono text-xs text-muted-foreground">
+        {/* The refs wrap; they do not clip. Two truncating spans on one flex
+            line get half the row each, which on a narrow window rendered
+            `main` as `ma…` - an ellipsis longer than the two letters it kept.
+            A branch name is an identifier, and the whole of it is the point.
+
+            The row is a navigation target, so the refs still cannot be
+            selected here - copying them lives on the review itself - but they
+            can now at least be read. */}
+        <p className="mt-1 flex flex-wrap items-center gap-x-1.5 font-mono text-xs text-muted-foreground">
           {/* One endpoint, not two, when the review is a ref against itself. */}
           {!isSelfReview(review) && (
             <>
-              {/* The row is a navigation target, so the refs cannot be copied
-                  from here - that lives on the review itself. A `title` at
-                  least means a name the card cut off is still readable. */}
-              <span className="truncate" title={review.baseRef}>
-                {review.baseRef}
+              <span className="min-w-0 break-words">
+                <Breakable text={review.baseRef} />
               </span>
               <ArrowRight className="size-3 shrink-0" />
             </>
           )}
-          <span className="truncate" title={review.headRef}>
-            {review.headRef}
+          <span className="min-w-0 break-words">
+            <Breakable text={review.headRef} />
           </span>
         </p>
       </div>

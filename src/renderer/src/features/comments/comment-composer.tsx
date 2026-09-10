@@ -51,6 +51,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Tooltip } from '@/components/ui/tooltip'
 import { api } from '@/lib/api'
 import { errorMessage } from '@/lib/errors'
+import { useKeepAboveKeyboard } from '@/lib/keyboard-inset'
 import { cn } from '@/lib/utils'
 import {
   BULLET,
@@ -94,6 +95,12 @@ export function CommentComposer({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<unknown>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const composerRef = useRef<HTMLDivElement>(null)
+
+  // On a phone the keyboard covers the bottom of the window, which is where a
+  // composer lives; this scrolls the whole box - buttons included - back above
+  // it. Does nothing in a window that has no on-screen keyboard.
+  useKeepAboveKeyboard(composerRef)
 
   /**
    * Where the caret should go once React has painted the new value.
@@ -317,6 +324,7 @@ export function CommentComposer({
 
   return (
     <div
+      ref={composerRef}
       className={cn('flex flex-col gap-2', className)}
       // The whole composer is the drop target, not just the textarea's
       // rectangle. Dropping a screenshot "on the comment box" means the box as
@@ -391,7 +399,10 @@ export function CommentComposer({
         </p>
       )}
 
-      <div className="flex items-center justify-end gap-2">
+      {/* Wraps so the hint and the buttons take a line each rather than
+          squeezing one another; on a narrow window the hint is three lines of
+          its own and left the buttons a sliver. */}
+      <div className="flex flex-wrap items-center justify-end gap-2">
         <span className="mr-auto text-xs text-muted-foreground">
           {dragging
             ? 'Drop to attach'

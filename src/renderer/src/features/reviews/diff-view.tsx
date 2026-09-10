@@ -485,9 +485,15 @@ export function FileDiffCard({
           <CopyPathAction path={file.path} />
         </div>
 
-        {/* Everything else keeps to the far end of the row, and never shrinks:
-            when the path is long it is the path that wraps, not the badges. */}
-        <div className="ml-auto flex shrink-0 items-center gap-2 py-1 pl-2">
+        {/* Everything else keeps to the far end of the row, and where there is
+            room it never shrinks: when the path is long it is the path that
+            wraps, not the badges.
+
+            Below `lg` there is no such room - the badges, the reviewed
+            checkbox and the actions come to more than a phone is wide - so
+            they wrap among themselves instead of running off the end of the
+            card, where nothing could scroll them back into reach. */}
+        <div className="ml-auto flex flex-wrap items-center gap-2 py-1 pl-2 lg:flex-nowrap lg:shrink-0">
           {/* Shown even while the file is folded shut, so a discussion is never
             hidden by a collapse the reviewer did not think about. */}
           {threads.length > 0 && (

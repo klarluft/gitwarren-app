@@ -37,6 +37,7 @@
 import { useRef, useState, type RefObject } from 'react'
 import useSWR from 'swr'
 import { AlertTriangle, ArrowLeft, Check, ChevronDown, Copy, Plug } from 'lucide-react'
+import { Breakable } from '@/components/breakable'
 import { Button } from '@/components/ui/button'
 import { Tooltip } from '@/components/ui/tooltip'
 import { Card } from '@/components/ui/card'
@@ -351,15 +352,19 @@ export function AgentAccessPage() {
           <div className="flex gap-2">
             <dt className="w-24 shrink-0 text-muted-foreground">Command</dt>
             {/* Wraps rather than truncates: a path the user cannot read whole
-                and cannot select is worse than one that takes two lines. */}
-            <dd data-selectable className="font-mono [overflow-wrap:anywhere]">
-              {info.mcp.command}
+                and cannot select is worse than one that takes two lines. And it
+                wraps at its separators - `overflow-wrap: anywhere` on its own
+                broke these mid-segment, turning a launcher path into
+                `/Users/somebody/.gitwar` + `ren/bin/gitwarren-mcp`, which is
+                a thing a reader has to reassemble before they can check it. */}
+            <dd data-selectable className="break-words font-mono">
+              <Breakable text={info.mcp.command} />
             </dd>
           </div>
           <div className="flex gap-2">
             <dt className="w-24 shrink-0 text-muted-foreground">Database</dt>
-            <dd data-selectable className="font-mono [overflow-wrap:anywhere]">
-              {info.databasePath}
+            <dd data-selectable className="break-words font-mono">
+              <Breakable text={info.databasePath} />
             </dd>
           </div>
           <div className="flex gap-2">

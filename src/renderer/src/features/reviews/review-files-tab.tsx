@@ -40,8 +40,10 @@ import { api } from '@/lib/api'
 import { errorMessage } from '@/lib/errors'
 import { formatStep } from '@/lib/keys'
 import { plural } from '@/lib/format'
+import { useNarrow } from '@/lib/narrow'
 import { useStoredFlag, useStoredPreference } from '@/lib/preferences'
 import { revealElement } from '@/lib/reveal'
+import { cn } from '@/lib/utils'
 import { useRegisterCommands, type Command } from '@/features/commands/command-registry'
 import type { DiffFocus } from '@/lib/router'
 import { CommentThreadCard } from '../comments/comment-thread-card'
@@ -270,11 +272,77 @@ function useFocusScroll(focus: DiffFocus | undefined, ready: boolean): DiffFocus
   return marked
 }
 
+/**
+ * Whether the file list is showing, and what picking a file in it does.
+ *
+ * Two layouts behind one button. On a wide window the list is a sidebar
+ * *beside* the diff: it is remembered between visits, and clicking a file
+ * scrolls the diff along behind it, so the list is a place to keep your bearings
+ * from. On a narrow one there is no room for both, so it is the screen
+ * *instead of* the diff, and clicking a file is a navigation - the list goes
+ * away and the diff arrives at that file. Same button, same tree, two meanings
+ * that the width picks between.
+ *
+ * The two get separate state deliberately. They answer different questions -
+ * "do I want a sidebar" against "am I looking at the index right now" - and one
+ * flag for both would carry a remembered `true` off the desktop and open every
+ * review on a phone at its table of contents rather than at the diff.
+ */
+function useFilesLayout(): {
+  narrow: boolean
+  listOpen: boolean
+  setListOpen: (open: boolean) => void
+  selectFile: (path: string) => void
+} {
+  const narrow = useNarrow()
+  const [treeOpen, setTreeOpen] = useStoredFlag('files-tree', true)
+  const [listScreen, setListScreen] = useState(false)
+  // A file to scroll to once the diff is back on screen. The scroll cannot
+  // happen in the click handler: on a narrow window the diff is still the
+  // hidden half at that moment, and `scrollIntoView` on a `display: none`
+  // element silently does nothing. A ref rather than state, and an effect on
+  // the screen that reveals it rather than on the target: what is being waited
+  // for is the diff being painted, and the ref is only the note of where to go
+  // when it is - nothing renders differently for it.
+  const pending = useRef<string | null>(null)
+
+  useEffect(() => {
+    const path = pending.current
+    if (path === null) return
+    pending.current = null
+    // No `smooth`: the diff has only just appeared, and animating a scroll
+    // through content the reader has not seen yet reads as a glitch rather
+    // than as movement.
+    document.getElementById(fileDomId(path))?.scrollIntoView({ block: 'start' })
+  }, [listScreen])
+
+  const selectFile = useCallback(
+    (path: string) => {
+      if (narrow) {
+        pending.current = path
+        setListScreen(false)
+        return
+      }
+      document
+        .getElementById(fileDomId(path))
+        ?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+    },
+    [narrow]
+  )
+
+  return {
+    narrow,
+    listOpen: narrow ? listScreen : treeOpen,
+    setListOpen: narrow ? setListScreen : setTreeOpen,
+    selectFile
+  }
+}
+
 export function ReviewFilesTab({ review, focus }: { review: Review; focus?: DiffFocus }) {
   const [changes, setChanges] = useState<DiffChanges>(DEFAULT_DIFF_CHANGES)
-  const [treeOpen, setTreeOpen] = useStoredFlag('files-tree', true)
   const [editorId, setEditorId] = useStoredPreference('editor', null)
   const [openError, setOpenError] = useState<unknown>(null)
+  const { narrow, listOpen, setListOpen, selectFile } = useFilesLayout()
   const { data, error, isLoading, isRefreshing, refresh } = useReviewDiff(review.id, changes)
   const { threads } = useReviewComments(review.id)
   const mutations = useCommentMutations()
@@ -465,13 +533,13 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
         },
         {
           id: 'files:tree',
-          label: treeOpen ? 'Hide the file list' : 'Show the file list',
+          label: listOpen ? 'Hide the file list' : 'Show the file list',
           group: 'Files changed',
           keys: 't',
           keywords: 'tree sidebar panel toggle',
-          icon: treeOpen ? PanelLeftClose : PanelLeft,
+          icon: listOpen ? PanelLeftClose : PanelLeft,
           disabled: paths.length === 0,
-          run: () => setTreeOpen(!treeOpen)
+          run: () => setListOpen(!listOpen)
         },
         {
           id: 'files:uncommitted',
@@ -559,8 +627,8 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
       [
         paths.length,
         stepFile,
-        treeOpen,
-        setTreeOpen,
+        listOpen,
+        setListOpen,
         nextChanges,
         canReadWorktree,
         refresh,
@@ -599,8 +667,13 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
 
   return (
     <div className="flex flex-col gap-3">
+      {/* Both groups wrap, not just the row between them. A row of controls
+          that only wraps as a block runs off a narrow window and takes the
+          controls at its end out of reach entirely - there is no horizontal
+          scroll here to reveal them, so `Refresh` and the view toggle were
+          simply gone below about 700px. */}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <p className="text-sm text-muted-foreground">
             {plural(data.files.length, 'file')} changed
           </p>
@@ -618,7 +691,7 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
           )}
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           {data.files.length > 0 && (
             <Button
               variant="ghost"
@@ -636,11 +709,11 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setTreeOpen(!treeOpen)}
-              title={treeOpen ? 'Hide the file list' : 'Show the file list'}
-              aria-pressed={treeOpen}
+              onClick={() => setListOpen(!listOpen)}
+              title={listOpen ? 'Hide the file list' : 'Show the file list'}
+              aria-pressed={listOpen}
             >
-              {treeOpen ? <PanelLeftClose /> : <PanelLeft />}
+              {listOpen ? <PanelLeftClose /> : <PanelLeft />}
               Files
             </Button>
           )}
@@ -786,27 +859,42 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
         // `items-start` so the tree can stick to the top of the viewport while
         // the diff beside it scrolls; a stretched column would never stick.
         <div className="flex items-start gap-4">
-          {treeOpen && (
-            // Wider where there is room for it: on a wide window the diff has
-            // width to spare, and every column the tree gains is a file name
-            // that fits on one line instead of wrapping onto two.
-            <aside className="sticky top-2 max-h-[calc(100vh-6rem)] w-56 shrink-0 overflow-y-auto rounded-lg border border-border bg-card/50 px-1 xl:w-64 2xl:w-72">
+          {listOpen && (
+            // Two shapes, one element. Wide: a sticky sidebar that keeps its
+            // own place while the diff scrolls past it, wider still where there
+            // is room, because every column the tree gains is a file name that
+            // fits on one line instead of wrapping onto two. Narrow: the whole
+            // width, in the flow, scrolling with the page - there is no diff
+            // beside it to stay level with, and a 224px column of wrapped names
+            // is not a file list anybody can read.
+            <aside
+              className={cn(
+                'rounded-lg border border-border bg-card/50 px-1',
+                narrow
+                  ? 'w-full'
+                  : 'sticky top-2 max-h-[calc(100dvh-6rem)] w-56 shrink-0 overflow-y-auto xl:w-64 2xl:w-72'
+              )}
+            >
               <ChangedFilesTree
                 files={data.files}
                 activePath={activePath}
                 unresolvedByFile={unresolvedByFile}
                 reviewedPaths={reviewedPaths}
                 changedSincePaths={changedSincePaths}
-                onSelect={(path) => {
-                  document
-                    .getElementById(fileDomId(path))
-                    ?.scrollIntoView({ block: 'start', behavior: 'smooth' })
-                }}
+                onSelect={selectFile}
               />
             </aside>
           )}
 
-          <div className="flex min-w-0 flex-1 flex-col gap-2">
+          {/* Hidden rather than unmounted on the narrow layout: going to the
+              list and back is a step a reader takes often, and unmounting
+              would throw away every hunk they had unfolded to get here. */}
+          <div
+            className={cn(
+              'min-w-0 flex-1 flex-col gap-2',
+              narrow && listOpen ? 'hidden' : 'flex'
+            )}
+          >
             {data.files.map((file) => (
               <div
                 key={`${file.oldPath ?? ''}:${file.path}`}

@@ -2,7 +2,29 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      `interactive-widget=resizes-content` is the whole of the keyboard fix, and
+      it is here rather than in the Electron document because a window has no
+      on-screen keyboard to be resized by.
+
+      The default, `resizes-visual`, leaves the layout viewport at its full
+      height when the keyboard opens and shrinks only the visual one, so the
+      page is unchanged and merely partly hidden behind the keyboard. That is a
+      sensible default for a document that scrolls in the window - the browser
+      pans it and everything is reachable - and it is the wrong one here,
+      because this app scrolls inside `<main>` and the window itself never
+      scrolls at all. A pan cannot move content within a scroller, so the
+      composer stayed under the keyboard with no gesture able to retrieve it.
+
+      `resizes-content` shrinks the layout viewport instead. The `height: 100%`
+      chain in `index.css` comes down with it, `<main>` becomes a shorter
+      scrollport, and there is somewhere for the composer to be scrolled to -
+      which `lib/keyboard-inset.ts` then does.
+    -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content"
+    />
     <!--
       The same lockdown as the Electron window, with one difference that is the
       whole of M3 in a header.
@@ -25,6 +47,25 @@
       http-equiv="Content-Security-Policy"
       content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'"
     />
+    <!--
+      The tab icon, and the reason it is a `<link>` rather than a file dropped
+      at the root.
+
+      A browser with no declared icon asks for `/favicon.ico` on its own, and
+      every verification of this shell since M3.2 has recorded that request
+      404ing - the one failed request in an otherwise clean run, in a project
+      where "no failed requests" is the thing being checked. Answering the probe
+      would mean serving a root path the daemon owns and the app does not: the
+      app mounts this build at `/app/`, so `/favicon.ico` there belongs to the
+      link server, and a build that depends on a sibling route being answered
+      for it is a build that is wrong in one of its two mounts. Naming the icon
+      here instead means the probe never happens: the document says what its
+      icon is before the browser has to guess.
+
+      Relative, like every other asset in this build, so it resolves under `/`
+      and under `/app/` alike - see the note on `base` in vite.web.config.ts.
+    -->
+    <link rel="icon" type="image/png" href="./favicon.png" />
     <title>GitWarren</title>
   </head>
   <body>
