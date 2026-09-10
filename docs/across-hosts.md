@@ -704,11 +704,131 @@ against SQLite.
   sees it. So a beta tag is a safe way to get artifacts, and the draft is a safe
   place to leave them.
 
-  **Still unverified, and needing the PC:** the Windows tray item and its `Run`
-  registry login item with `--hidden`; the Linux
-  `~/.config/autostart/gitwarren.desktop` file on a real desktop; and the
-  hidden relaunch after an update, which by construction cannot be tested until
-  there are two published releases to move between.
+  **The Windows host.** *10 September 2026, Windows 11 Pro 26200 (x64), against
+  the draft's `GitWarren-0.1.7-beta.1-x64.exe`. Driven against the **real**
+  install and the real database rather than a scratch data directory, which is
+  the opposite of how the macOS pass was run and is the point: the tray, the
+  login item and the protocol handler are all machine state living outside the
+  data directory, and a scratch `--user-data-dir` would have exercised none of
+  them. GUI observations are the user's, at the machine; everything else is
+  read from the process table, the registry and the wire.*
+
+  This is the milestone's headline platform - M2 turned GitWarren into a tray
+  app and none of that code had ever run on Windows. It works. Three things
+  about it are wrong anyway, and one of them would have made a careful person
+  report the feature as broken.
+
+  | | |
+  | --- | --- |
+  | Install | No elevation prompt. The manifest declares `requestedExecutionLevel level="asInvoker"`, and it ran from a non-elevated shell (`IsInRole(Administrator)` false) to exit 0 in 13 s |
+  | Where | `%LOCALAPPDATA%\Programs\gitwarren`; nothing in either `Program Files`; uninstall entry under `HKCU`. Per-user throughout, as `oneClick`/`perMachine: false` promises |
+  | Tray | Icon present, tooltip `GitWarren`, left click opens, menu exactly `Open GitWarren` / separator / `Quit GitWarren` |
+  | Closing | Survives. Same four PIDs and the same `instanceId` before and after, so the reopen was a re-show and not a relaunch; the window came back on the screen and the page it was left on |
+  | Quit | Process gone, `daemon-runtime.json` gone, 41427 released, loopback refuses |
+  | Login item | Written, removed and rewritten across four flips, always `"…\GitWarren.exe" --hidden`, with no `StartupApproved` byte to silently disable it |
+  | Hidden start | `GitWarren.exe --hidden` gives four processes with `MainWindowHandle = 0` on every one - no window - while the runtime file and port 41427 come up |
+  | Launcher | `%USERPROFILE%\.gitwarren\bin\gitwarren-mcp.cmd`, correct as the bare command with no args and no env: handshake, `tools/list`, `agent_identity` |
+  | Links | Loopback page 200; clicking through it put the window back on review 2 |
+
+  `daemon-runtime.json` read
+  `{"instanceId":"f563a866-…","pid":36500,"linkPort":41427,"owner":"gui"}` -
+  the four-field shape, on the fixed port rather than a fallback. The same
+  `instanceId` came back after a full quit and again after a hidden start, so
+  it is install-scoped rather than per-launch, which is what lets a link minted
+  while the app is dead resolve to this install later.
+
+  **The launcher writes three errors to stderr on every start.** `#` is not a
+  comment character in a batch file:
+
+  ```
+  '#' is not recognized as an internal or external command,
+  operable program or batch file.
+  ```
+
+  once per banner line, before `[gitwarren-mcp] ready`. The cause is that
+  `launcherScript()` in `src/main/mcp-launch.ts` builds one `banner` with `#`
+  prefixes and shares it across all three branches; the win32 branch translates
+  the line endings to CRLF and nothing else. Batch comments with `REM` or `::`.
+  Nothing breaks - the server starts and answers correctly, and MCP carries the
+  protocol on stdout - but this lands in the log of every harness on Windows on
+  every start, and a harness that treats stderr on startup as a failed spawn
+  would reject the server outright. It is the exact shape of defect the rest of
+  this addendum was written to find: the macOS and Linux branches emit the same
+  bytes into `/bin/sh`, where they are correct, so no reading of the shared
+  string finds it and no test on those platforms can.
+
+  **The `Run` value is not called `GitWarren`.** It is
+  `electron.app.GitWarren`, because that is what `setLoginItemSettings` names
+  it absent an explicit `name` option. So
+
+  ```
+  reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v GitWarren
+  ```
+
+  reports *"unable to find the specified registry key or value"* while the
+  feature is working perfectly, and the honest command is
+
+  ```
+  reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v electron.app.GitWarren
+  ```
+
+  This one is worth more than the noise it causes. The table above in this
+  milestone says "`Run` registry value, with `--hidden`" and that is true, but
+  anyone verifying it the obvious way concludes the login item was never
+  written. Either the check gets documented correctly or `login-item.ts` passes
+  `name: 'GitWarren'`; the latter is one line and makes the obvious check the
+  right one.
+
+  **On Windows 11 the tray icon is hidden by default.** It went into the
+  overflow flyout and stayed there until dragged out - which is Windows 11's
+  behaviour for every new tray icon, not something the app chose. It matters
+  because the justification written into `src/main/tray.ts` is that "with no
+  window and no tray icon, a running GitWarren would be invisible and unkillable
+  except through a task manager", and on a default Windows 11 desktop the icon
+  *is* invisible until the user goes looking. The safety net is one click
+  further away than the design assumes, and there is no API to fix it: Windows
+  11 removed the promotion path, leaving a drag or
+  `Settings → Personalization → Taskbar → Other system tray icons`. Not a bug,
+  but it belongs in whatever tells a Windows user the app is now always on.
+
+  **The protocol handler was exercised here, and was not on macOS.**
+  `HKCU\Software\Classes\gitwarren\shell\open\command` is
+  `"…\GitWarren.exe" "%1"`, registered per-user like the rest of the install.
+  The macOS pass deliberately delivered its link through argv instead, because
+  `gitwarren://` on that machine belonged to the *installed* app and driving it
+  would have hit the real database. Here the click went the whole way -
+  browser, `gitwarren://`, shell, `%1`, the single-instance lock's
+  `second-instance` - so the one hop the macOS run had to simulate is now
+  covered on the platform that always uses it.
+
+  Two smaller notes. With the app fully quit, `create_review` through the
+  launcher wrote to SQLite and returned a non-null
+  `guiUrl` - the half of the acceptance test that would have been `null` before
+  M2 - reproducing the macOS result on Windows. And the loopback link is
+  correctly *dead* while the app is quit: opened then, the browser refuses the
+  connection, which is what `list_reviews`' tool text tells the agent to
+  predict, and it loaded on the same URL once the app was up.
+
+  **Not checked, and why.**
+
+  - **The login-triggered hidden start.** The registry value is correct and
+    `--hidden` was driven by hand to a running tray app with no window, so both
+    halves are verified - but not the join, which is Windows firing the `Run`
+    entry at sign-in. Testing it means signing out, which kills the session
+    doing the testing. The proxy is strong and it is still a proxy.
+  - **SmartScreen.** The installer is **unsigned** (`Get-AuthenticodeSignature`
+    → `NotSigned`). It was fetched with `gh`, which sets no mark-of-the-web, so
+    no `Zone.Identifier` stream existed and SmartScreen never appeared. A
+    browser download does set that mark and would very likely raise "Windows
+    protected your PC", needing *More info → Run anyway*. Not observed either
+    way; it needs a browser download to settle, and it is the first thing a
+    real Windows user meets.
+
+  **Still unverified:** the Linux `~/.config/autostart/gitwarren.desktop` file
+  on a real desktop; the hidden relaunch after an update, which by construction
+  cannot be tested until there are two published releases to move between; and,
+  on Windows, the sign-in that fires the `Run` entry and the SmartScreen prompt
+  a browser download would raise - both detailed above.
 
 ### M3 — The web view, locally
 
