@@ -76,7 +76,39 @@ Record the outcome under each one.
 - **On fail.** Run `sshd` in WSL and reach it through the Windows host's
   tailnet IP (mirrored networking), or place the daemon on the Windows side and
   reach WSL from there (the M5 path).
-- **Outcome.** *(pending)*
+- **Outcome.** *Pass, 10 September 2026. Windows 11, WSL2 Ubuntu, Mac on the
+  same tailnet.* Tailscale 1.102.3 runs inside the distro as its own node,
+  `pc-wsl.tail688c0c.ts.net` / `100.78.0.23`, distinct from the Windows host's
+  `100.96.73.13`. systemd was already enabled (`/etc/wsl.conf` carries
+  `systemd=true`) and networking mode is NAT, so the fallback's mirrored
+  networking is not needed: Tailscale running *inside* the distro is enough to
+  make it a first-class node. After `sudo tailscale up --ssh`, from the Mac:
+
+  ```
+  $ ssh xfor@pc-wsl true; echo "exit=$?"
+  # Tailscale SSH requires an additional check.
+  # To authenticate, visit: https://login.tailscale.com/a/lbaadd3d30abde
+  # Authentication checked with Tailscale SSH.
+  exit=0
+  ```
+
+  Inside WSL, `tailscale status` lists the Mac as `100.96.164.43 mac
+  michal-wrzosek@ macOS active; direct 192.168.178.155:41641`, and `tailscale
+  whois 100.96.164.43` returns `mac.tail688c0c.ts.net` with user
+  `michal-wrzosek@github`. Three things M4 has to account for:
+
+  - **The SSH target carries the Unix user.** Bare `ssh pc-wsl` requests the
+    *client's* username and is refused with `tailscale: tailnet policy does not
+    permit you to SSH as user "michalwrzosek"`. The `hosts` row must store
+    `xfor@pc-wsl`; the MagicDNS name alone is not a usable target.
+  - **The default SSH policy is `"action": "check"`**, which sends the user to a
+    browser roughly every twelve hours. Fine for a human, fatal for a carrier
+    spawned on demand. With the tailnet rule changed to `"action": "accept"` the
+    same command returns `exit=0` with no prompt. The Hosts screen should say so
+    when a check-mode denial is what failed.
+  - **`tailscaled` wins port 22 on the tailnet** even with `sshd` bound to
+    `0.0.0.0:22`, so the fallback's `sshd` can stay installed alongside
+    Tailscale SSH without a `ListenAddress` change.
 
 ### S2 — `wsl.exe` stdio from an Electron main process on Windows
 
@@ -88,7 +120,28 @@ Record the outcome under each one.
   `windowsHide: true`, and a small line round-trips well under 10 ms.
 - **On fail.** Daemon binds a localhost port inside WSL; Windows connects over
   TCP (WSL2 forwards localhost by default).
-- **Outcome.** *(pending)*
+- **Outcome.** *Pass, 10 September 2026.* Run by Windows Node v24.19.0 — the
+  distro's own Node is v22.12.0 and was not used — spawning `wsl.exe -d Ubuntu
+  -- cat` with `windowsHide: true`:
+
+  ```
+  > node C:\Users\micha\s2-wsl-stdio.mjs --distro Ubuntu --mb 10
+  small line round trip: median 0.19ms, min 0.16ms, max 29.97ms
+  bulk: 49696 lines, 10 MB in 0.19s (52.4 MB/s)
+  PASS: all 49716 lines identical
+
+  > node C:\Users\micha\s2-wsl-stdio.mjs --distro Ubuntu --mb 50
+  small line round trip: median 0.19ms, min 0.16ms, max 29.65ms
+  bulk: 248478 lines, 50 MB in 0.89s (56.1 MB/s)
+  PASS: all 248498 lines identical
+  ```
+
+  Byte-exact both times, including the emoji outside the BMP, the Polish
+  diacritics and the escaped CR/LF inside the JSON strings: no encoding or
+  newline translation on the pipe. The median round trip is some fifty times
+  under the 10 ms bar. The ~30 ms maximum is the first trip of each run —
+  `wsl.exe` process start — and does not recur, so M5 pays it once when the
+  carrier starts rather than on every request.
 
 ### S3 — The self-contained daemon tarball
 
@@ -112,7 +165,41 @@ Record the outcome under each one.
 - **Pass.** Both editors open the file at the line from `shell.openExternal`.
 - **On fail.** Use the CLI form `code --remote ssh-remote+host --goto path:42`,
   which `src/main/editors.ts` already knows how to spawn.
-- **Outcome.** *(pending)*
+- **Outcome.** *URL forms pass; the CLI fallback needs more than the plan
+  assumed. 10 September 2026, VS Code 1.136.2 and Cursor 0.40.4 on Windows 11,
+  repo at `/home/xfor/github.com/klarluft/gitwarren-app`.* Both URL forms,
+  opened with `Start-Process`, put the cursor on line 5 of `README.md` in a
+  window connected to `WSL: Ubuntu`:
+
+  - `vscode://vscode-remote/wsl+Ubuntu/<path>/README.md:5` — VS Code. On a cold
+    start the window appears empty, already labelled `WSL: Ubuntu`, for several
+    seconds before the file and the line arrive. `shell.openExternal` needs no
+    retry, but the user sees a blank editor first.
+  - `cursor://vscode-remote/wsl+Ubuntu/<path>/README.md:5` — Cursor, same
+    result.
+
+  `code --remote wsl+Ubuntu --goto <path>/README.md:5`, run by Windows VS Code,
+  also honours the line and is the form `src/main/editors.ts` should prefer on
+  Windows.
+
+  The `code` shim *inside* the distro honours the line too, but not as a daemon
+  would spawn it:
+
+  - Bare invocation fails with `Command is only available in WSL or inside a
+    Visual Studio Code terminal.` It needs `VSCODE_IPC_HOOK_CLI` set to a live
+    `/run/user/<uid>/vscode-ipc-*.sock`, which VS Code exports only into its own
+    integrated terminal.
+  - Both editors create sockets under that same `vscode-ipc-*` name, and the
+    name says nothing about the owner. Choosing the most recent one drove
+    *Cursor* from the `~/.vscode-server` shim. The socket has to be matched to
+    the editor by reading the owning process's exe path — `~/.vscode-server`
+    against `~/.cursor-server`.
+  - The shim path moved from `e4c7e7b1…` to `88e44fa0…` mid-spike, when VS Code
+    updated its server. It must be globbed at
+    `~/.vscode-server/bin/*/bin/remote-cli/code`, never cached.
+
+  There is also no `code` on `PATH` in a plain WSL shell here, so spawning a
+  bare `code` inside the distro is not an option.
 
 ### S5 — How chatty is a screen today?
 
