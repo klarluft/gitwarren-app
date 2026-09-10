@@ -906,7 +906,7 @@ each mergeable on its own:
    `service install`; the S3 tarball, a Homebrew formula, `npx gitwarren`.
    *(done — see below.)*
 4. **The Agent Access page**, one-sentence prompt leading. *(done — see below.)*
-5. **The responsive pass.**
+5. **The responsive pass.** *(done — see below.)*
 
 **M3.1, done on the Mac, 10 September.** One handler (`core/web/handler.ts`)
 mounted by both shells: the app serves it at `/app/` because `/` is the link
@@ -1271,6 +1271,135 @@ done; and the daemon tarballs are unsigned and unnotarised, with `npm publish`
 wired but inert without an `NPM_TOKEN` and the npm name `gitwarren` still
 unregistered. Both of those are deliberate decisions to take on their own.
 
+**M3.5, done on the Mac, 10 September.** The responsive pass, and the first
+slice whose claims are about what a screen *looks* like rather than about what
+it says. That distinction is M3.4's doing: until the `@source` fix, every M3
+verification in Chrome was made against a 6 KB theme-only stylesheet, so
+"verified in the browser" meant the content was right and could not have meant
+anything about the layout. This one was done by taking screenshots at a real
+390px and reading them.
+
+**Measured first, then changed.** Chrome's device metrics rather than a resized
+window — a window has a minimum width and its own chrome inside that, so it
+never reaches the width a phone reports — plus a sweep that lists every element
+whose right edge is past the viewport. The four screens went in with that list
+in hand rather than with a guess about which ones would break, and it was worth
+it: the home screen and the Agent Access page were already fine at 390px, and
+two of the things that were badly broken were not on the bullet's list.
+
+**Two layouts behind one button.** On a wide window the file list is a sidebar
+*beside* the diff, remembered between visits, and clicking a file scrolls the
+diff along behind it. Below `lg` there is no room for both — the tree took 224
+of 390 pixels and left the diff a column rendering one character per line — so
+it becomes the screen *instead of* the diff, and clicking a file is a
+navigation: the list goes away and the diff arrives at that file.
+
+The two keep separate state, which is the decision in this change most likely
+to be undone by someone tidying up. They answer different questions — "do I want
+a sidebar" against "am I looking at the index right now" — and one flag for both
+would carry a remembered `true` off the desktop and open every review on a phone
+at its table of contents rather than at the diff. The diff is hidden rather than
+unmounted while the list is up, because going to the list and back is a step a
+reader takes often and unmounting would throw away every hunk they had unfolded
+to get there; that in turn is why the scroll to the picked file waits for an
+effect, since `scrollIntoView` on a `display: none` element silently does
+nothing.
+
+**A row of controls that wrapped as a block, and hid half of itself.** The bug
+worth keeping, and it had been shipping since long before M3. The files toolbar
+is two groups inside `flex-wrap`, and the wrapping was on the outer row only:
+the groups could move relative to one another but nothing inside a group could,
+so below about 700px the second group ran off the end of the window. It did not
+overflow — the page's `scrollWidth` stayed exactly the viewport width, because
+the row is clipped rather than scrollable — so `Refresh` and the three-way view
+toggle were not merely awkward to reach, they were *gone*, with no scrollbar, no
+console message and nothing on screen suggesting anything was missing. Something
+being off the edge of a page you can scroll is a nuisance; the same thing on a
+page you cannot is a control that does not exist. Both groups wrap now. The same
+shape, and the same fix, on the badges in each diff card's header.
+
+**Paths and refs wrap at their separators.** M2 built `Breakable` and `FilePath`
+for exactly this and several places had never been routed through them: the
+repository card and the repository detail clipped a path to
+`/Users/somebody/.cl…`, the removal dialog — the one screen whose whole question
+is *is this the one you meant* — clipped the path it was asking about, and the
+Agent Access page broke launcher paths mid-segment, turning one into
+`/Users/somebody/.gitwar` + `ren/bin/gitwarren-mcp`. The worst of them was in
+the review rows, where two truncating spans shared one flex line and got half
+the row each: `main` rendered as `ma…`, an ellipsis longer than the text it
+kept. All of them wrap at `/` now and all of them stay selectable.
+
+Titles were left alone where they are prose and fixed where they are the
+identity of a screen: the review heading wraps, the same title in a list row
+still clips. A list of twenty reviews each three lines tall is harder to scan
+than one that clips, and the full title is one tap away.
+
+**The keyboard, which is two fixes in different languages.** The app scrolls
+inside `<main>`, not inside the window — right for a desktop window, and exactly
+what makes a phone keyboard awkward. By default a keyboard shrinks only the
+*visual* viewport, so the browser's own "scroll the focused element into view"
+has nothing but a pan to offer, and a pan cannot move content inside a scroller
+it does not know about. `interactive-widget=resizes-content` in the web shell's
+viewport meta makes the keyboard shrink the *layout* viewport instead, and the
+`height` chain comes down with it — which is also why `html` is now `100dvh`
+rather than `100%`: on a phone `100%` resolves against a viewport measured with
+the URL bar hidden, so every screen sat a bar's worth off the bottom. The usual
+objection to `dvh`, that it relayouts as the bar hides and shows, does not apply
+where nothing scrolls the window.
+
+That gives the scroll somewhere to go; `lib/keyboard-inset.ts` performs it, on
+the composer rather than on the textarea. The browser will bring the focused
+element into view on its own, and the focused element is the box you type in,
+not the `Comment` button under it — landing with the caret visible and the
+submit button still behind the keyboard reads as a composer that cannot be
+submitted.
+
+**A favicon, and where it had to live.** Chrome asks for `/favicon.ico` when a
+document does not say what its icon is, and that 404 has been the one failed
+request in every otherwise-clean verification since M3.2 — in a milestone where
+"no failed requests" is the thing being checked. Answering the probe was the
+wrong fix: the app mounts this build at `/app/`, so `/favicon.ico` there is the
+link server's path and not this build's, and a page that depends on a sibling
+route answering for it is wrong in one of its two mounts. Naming the icon in the
+document means the probe never happens. The href is relative like every other
+asset here, so it resolves under `/` and under `/app/` alike.
+
+Verified in Chrome against a `gitwarren serve` and then, on the same scratch
+directory with the daemon stopped, in the real Electron window — and then the
+app's own `/app/` mount back in Chrome, which is the second mount the favicon
+had to survive. At 390px and at 320px: no page scrolls sideways on any of the
+four screens, and the only elements past the viewport edge are code inside a
+diff's own horizontal scroller and the tab strip, which now scrolls rather than
+wrapping "Files changed" onto two lines under a half-width underline. The file
+list and the diff are separate screens and picking `shortcuts.ts` from the list
+lands on that file's diff, in the browser and in the window both. With the
+viewport dropped by an iPhone keyboard's 336px while the composer had focus, the
+`Comment` button moved from y=844 to y=508 — the bottom of the shrunk viewport —
+instead of being stranded off the end of it. At 1400px the sidebar, the
+single-row toolbar, the single-line tabs and the single-line title are all
+exactly as they were, and the `Files` button still hides the sidebar rather than
+switching screens. **No console errors and no failed requests in any run,
+including the favicon probe, which is the first time that sentence has been
+true without an exception attached to it.**
+
+**Not done in M3.5, and why.** Nothing of the responsive bullet is outstanding.
+Two things carried through the whole of M3 are still open and are neither
+M3.5's to close nor safe to lose:
+
+- Windows' `schtasks` branch of `service install` is written and typed and has
+  been run on neither platform — the one branch no test on this Mac can reach,
+  the same shape as the Windows launcher-banner bug M2 shipped. It wants a run
+  on the PC before M3 is called done.
+- The daemon tarballs are unsigned and unnotarised, `npm publish` is wired but
+  inert without an `NPM_TOKEN`, and the npm name `gitwarren` is still
+  unregistered. Deliberate decisions to take on their own, not side effects of
+  the first tag after this merges.
+
+A phone has not touched this yet, and could not have: the daemon binds
+`127.0.0.1` and there is no route to it from another device until M6 brings the
+tailnet. What M3.5 claims is that when there is one, the screens are ready —
+which is what "only a network away" was asked to mean.
+
 ### M4 — SSH hosts
 
 *Ships: review the PC's WSL repos from the Mac; any VPS.*
@@ -1470,4 +1599,5 @@ least one alternative.
 | Version skew between hosts | M4 | The GUI installs the daemon version it wants; protocol version in the handshake; unknown fields ignored. |
 | Daemon process on headless hosts | M2, M3, M4 | Bundle in M2, `gitwarren service install` in M3.3, spawned on demand over SSH in M4. |
 | Users who will not run Electron | M3 | The same renderer served by the local daemon; the `gitwarren-cli` formula, `npx gitwarren` and the tarball, all from M3.3. |
+| A screen the size of a phone | M3.5, M6 | Files list and diff as separate screens below `lg`, composer above the keyboard, paths that wrap at their separators; the route to the device itself is M6's tailnet. |
 | MCP setup per harness and on remote hosts | M2, M3, M4 | Stable launcher path plus a one-sentence prompt the agent applies to its own config. |

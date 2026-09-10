@@ -104,7 +104,27 @@
     border-color: var(--color-border);
   }
 
-  html,
+  /*
+   * `dvh` on the outermost box, percentages below it.
+   *
+   * In a window these are the same number and always will be. In a browser tab
+   * on a phone they are not: `100%` on `html` resolves against the initial
+   * containing block, which is sized to the viewport with the URL bar *hidden*,
+   * so the app is a bar's worth taller than the space it has and the bottom of
+   * every screen sits just off the end. `dvh` is that measurement done against
+   * whatever the viewport currently is.
+   *
+   * The usual objection to `dvh` - that it changes as the URL bar hides and
+   * shows, and lays the page out twice on every scroll - does not apply here,
+   * because nothing scrolls the window: the scroller is `<main>`, so the bar
+   * never retracts and the value never moves. What does move it is the
+   * on-screen keyboard, and moving for that is the entire point (see the
+   * viewport meta in `src/web/index.html`).
+   */
+  html {
+    height: 100dvh;
+  }
+
   body,
   #root {
     height: 100%;

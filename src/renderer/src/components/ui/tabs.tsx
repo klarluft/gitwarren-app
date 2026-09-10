@@ -8,10 +8,28 @@ import { cn } from '@/lib/utils'
 
 export const Tabs = BaseTabs.Root
 
+/**
+ * The strip scrolls sideways rather than letting its tabs wrap.
+ *
+ * A tab is a fixed set of short labels and there is no useful second row for
+ * them to go to: wrapping turned "Files changed" into two stacked words and
+ * left the underline of the selected tab hanging under half of it. Scrolling
+ * keeps every tab one line and one shape at any width, and the tabs that do not
+ * fit stay reachable by dragging - which on the narrow window this is for is
+ * the gesture already in the reader's hand.
+ *
+ * `scrollbar-width: none` because the strip is a few tabs, not a document, and
+ * a scrollbar under them reads as an error. The overflow is still there for a
+ * pointer to find; it is the bar that is hidden, not the scrolling.
+ */
 export function TabsList({ className, ...props }: ComponentProps<typeof BaseTabs.List>) {
   return (
     <BaseTabs.List
-      className={cn('relative flex items-center gap-1 border-b border-border', className)}
+      className={cn(
+        'relative flex items-center gap-1 overflow-x-auto border-b border-border',
+        '[-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
+        className
+      )}
       {...props}
     />
   )
@@ -27,7 +45,7 @@ export function TabsTab({ className, ...props }: ComponentProps<typeof BaseTabs.
   return (
     <BaseTabs.Tab
       className={cn(
-        'group/tab relative -mb-px flex items-center gap-2 rounded-t-md border-b-2 border-transparent px-3 py-2',
+        'group/tab relative -mb-px flex shrink-0 items-center gap-2 whitespace-nowrap rounded-t-md border-b-2 border-transparent px-3 py-2',
         'text-sm font-medium text-muted-foreground transition-colors',
         'hover:text-foreground',
         'data-[active]:border-primary data-[active]:font-semibold data-[active]:text-foreground',

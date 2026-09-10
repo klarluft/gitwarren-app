@@ -7,6 +7,7 @@
  * the two tabs telling the user the same story.
  */
 import { AlertCircle, CircleDot, FolderGit2 } from 'lucide-react'
+import { Breakable } from '@/components/breakable'
 import { Card } from '@/components/ui/card'
 import { plural } from '@/lib/format'
 import type { ReviewCompare, WorkingTreeChanges } from '@shared/git'
@@ -50,10 +51,13 @@ export function WorkingTreeBanner({ workingTree }: { workingTree: WorkingTreeCha
         <p className="text-sm font-medium text-warning">
           Uncommitted changes — {parts.join(', ')}
         </p>
-        <p className="mt-0.5 flex items-center gap-1.5 truncate text-xs text-muted-foreground">
-          <FolderGit2 className="size-3 shrink-0" />
-          <span data-selectable className="truncate font-mono" title={workingTree.worktreePath}>
-            {workingTree.worktreePath}
+        {/* `items-start` once the path is allowed more than one line, so the
+            folder icon stays level with the first of them rather than floating
+            in the middle of the block. */}
+        <p className="mt-0.5 flex items-start gap-1.5 text-xs text-muted-foreground">
+          <FolderGit2 className="mt-0.5 size-3 shrink-0" />
+          <span data-selectable className="min-w-0 break-words font-mono">
+            <Breakable text={workingTree.worktreePath} />
           </span>
         </p>
       </div>

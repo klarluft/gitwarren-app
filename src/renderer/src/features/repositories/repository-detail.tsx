@@ -8,6 +8,7 @@
 import { useMemo, useState } from 'react'
 import { AlertCircle, ArrowLeft, FolderOpen, Pencil } from 'lucide-react'
 import useSWR from 'swr'
+import { Breakable } from '@/components/breakable'
 import { Button } from '@/components/ui/button'
 import { Tooltip } from '@/components/ui/tooltip'
 import { Card } from '@/components/ui/card'
@@ -125,12 +126,11 @@ export function RepositoryDetail({ repositoryId }: { repositoryId: number }) {
               </h1>
               <GitStateBadge git={repository.git} />
             </div>
-            <p
-              data-selectable
-              className="mt-1 truncate font-mono text-xs text-muted-foreground"
-              title={repository.path}
-            >
-              {repository.path}
+            {/* Wraps rather than truncates, like every other path in the
+                app: the tail is what distinguishes two checkouts of one
+                repository, and an ellipsis eats exactly that. */}
+            <p data-selectable className="mt-1 break-words font-mono text-xs text-muted-foreground">
+              <Breakable text={repository.path} />
             </p>
           </div>
 

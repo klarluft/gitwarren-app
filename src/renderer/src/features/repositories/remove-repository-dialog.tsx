@@ -14,6 +14,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle
 } from '@/components/ui/alert-dialog'
+import { Breakable } from '@/components/breakable'
 import { Button } from '@/components/ui/button'
 import { errorMessage } from '@/lib/errors'
 import { useRepositoryMutations } from './use-repositories'
@@ -64,12 +65,14 @@ export function RemoveRepositoryDialog({
         </AlertDialogHeader>
 
         {repository && (
+          // The one path in the app it is most important to read whole:
+          // this is the dialog that asks "is this the one you meant?", and a
+          // truncated answer to that question is no answer at all.
           <p
             data-selectable
-            className="mt-3 truncate rounded-md bg-muted px-3 py-2 font-mono text-xs text-muted-foreground"
-            title={repository.path}
+            className="mt-3 break-words rounded-md bg-muted px-3 py-2 font-mono text-xs text-muted-foreground"
           >
-            {repository.path}
+            <Breakable text={repository.path} />
           </p>
         )}
 

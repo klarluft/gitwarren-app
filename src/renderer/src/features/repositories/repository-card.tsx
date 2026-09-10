@@ -1,4 +1,5 @@
 import { ChevronRight, FolderOpen, Pencil, Trash2 } from 'lucide-react'
+import { Breakable } from '@/components/breakable'
 import { Button } from '@/components/ui/button'
 import { Tooltip } from '@/components/ui/tooltip'
 import { Card } from '@/components/ui/card'
@@ -42,12 +43,12 @@ export function RepositoryCard({ repository, onEdit, onRemove }: RepositoryCardP
           </h3>
           <GitStateBadge git={repository.git} />
         </div>
-        <p
-          data-selectable
-          className="mt-1 truncate font-mono text-xs text-muted-foreground"
-          title={repository.path}
-        >
-          {repository.path}
+        {/* Wraps rather than truncates. A truncated path loses its tail,
+            and the tail is the half that says which checkout this is - two
+            worktrees of the same repository share every leading segment and
+            differ only at the end. */}
+        <p data-selectable className="mt-1 break-words font-mono text-xs text-muted-foreground">
+          <Breakable text={repository.path} />
         </p>
       </div>
 
