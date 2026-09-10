@@ -34,9 +34,13 @@
     "src/renderer/src/lib/__tests__/fuzzy.test.ts",
     "src/renderer/src/features/reviews/diff-search.ts",
     "src/renderer/src/features/reviews/__tests__/diff-search.test.ts",
+    "src/web/loopback-fragment.ts",
+    "src/web/__tests__/loopback-fragment.test.ts",
     "electron.vite.config.ts",
     "vite.mcp.config.ts",
     "vite.daemon.config.ts",
+    "vite.web.config.ts",
+    "vite.ws-define.ts",
     "drizzle.config.ts",
     "scripts/**/*.ts"
   ]

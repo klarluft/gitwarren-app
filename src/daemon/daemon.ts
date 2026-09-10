@@ -31,22 +31,30 @@
  * quite reasonably running its own GitWarren too.
  *
  * Ownership is about who holds the loopback port and answers links, which in M2
- * is the GUI and in M3 will also be a *listening* `gitwarren serve`. That is
- * where the check belongs, and where it goes.
+ * is the GUI and since M3 is also a *listening* `gitwarren serve`. That is
+ * where the check belongs, and `listen.ts` next door is where it went: that
+ * mode binds a port, claims the runtime file and refuses to start beside a
+ * running app, none of which is true of the pipe this paragraph is about.
  */
 import { closeDatabase, getDatabase } from '../core/db/client.js'
 import { getInstanceId } from '../core/instance.js'
 import { getDatabasePath } from '../core/paths.js'
 import { serveStdio } from '../core/rpc/stdio.js'
 import { RPC_PROTOCOL_VERSION } from '../shared/rpc.js'
+import { runListen } from './listen.js'
 
 const USAGE = `gitwarren serve --stdio
+gitwarren serve --listen
 
-Answers GitWarren's message protocol on stdin and stdout, one JSON object per
-line. Intended to be spawned by a GitWarren app over a pipe - by hand it is a
-way to see what the protocol says:
+--stdio answers GitWarren's message protocol on stdin and stdout, one JSON
+object per line. Intended to be spawned by a GitWarren app over a pipe - by
+hand it is a way to see what the protocol says:
 
   echo '{"id":1,"method":"repositories.list"}' | gitwarren serve --stdio
+
+--listen serves the web view on loopback and prints a URL carrying this
+launch's token. It claims this machine's data directory, so it refuses to
+start while the app is running - see daemon/listen.ts.
 `
 
 /**
@@ -55,6 +63,12 @@ way to see what the protocol says:
  * different mode of its own - `main/index.ts` reuses this for `--serve`.
  */
 export function runDaemon(argv: readonly string[]): boolean {
+  // Checked before `--stdio` only because it is the mode that can *refuse*, and
+  // its refusals are sentences rather than a usage block. The two are exclusive:
+  // one binds a port and owns the machine, the other answers a pipe and owns
+  // nothing.
+  if (argv.includes('--listen')) return runListen()
+
   if (!argv.includes('--stdio')) {
     console.error(USAGE)
     return false

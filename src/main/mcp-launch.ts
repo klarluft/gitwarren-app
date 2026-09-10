@@ -35,19 +35,16 @@
  * has changed - only how it is named.
  */
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { homedir } from 'node:os'
 import { join, relative } from 'node:path'
 import { app } from 'electron'
+import { getLauncherDirectory, getMcpLauncherPath } from '../core/mcp-launcher.js'
 import type { McpLaunchInfo } from '../shared/api.js'
 
-/** `~/.gitwarren/bin`. The same on Windows, where `~` is the user profile. */
-export function getLauncherDirectory(): string {
-  return join(homedir(), '.gitwarren', 'bin')
-}
-
-export function getMcpLauncherPath(): string {
-  return join(getLauncherDirectory(), process.platform === 'win32' ? 'gitwarren-mcp.cmd' : 'gitwarren-mcp')
-}
+// Where the launcher goes now lives in `core/mcp-launcher.ts`, because a
+// `gitwarren serve` with no Electron in it has to name the same path. Writing
+// the file is still this module's job, and still Electron's business - only
+// this process knows where its own MCP server ended up.
+export { getLauncherDirectory, getMcpLauncherPath }
 
 /** Where the built server actually is, for this install. */
 function scriptPath(): string {

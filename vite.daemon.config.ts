@@ -1,5 +1,18 @@
+import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { defineConfig } from 'vite'
+import { WS_PURE_JS } from './vite.ws-define.js'
+
+/**
+ * The app's version, inlined.
+ *
+ * The daemon tells a browser what it is running, and `app.getVersion()` - which
+ * is where the Electron process gets the same string - does not exist here.
+ * Reading a package.json at runtime is not an option either: there is not one
+ * next to a single-file bundle inside a tarball. So the build stamps it, which
+ * is the only moment the two are guaranteed to agree.
+ */
+const { version } = JSON.parse(readFileSync(resolve('package.json'), 'utf8')) as { version: string }
 
 /**
  * Build for the headless daemon.
@@ -23,6 +36,10 @@ import { defineConfig } from 'vite'
  * daemon speaks GitWarren's own protocol, not MCP. Agents never talk to it.
  */
 export default defineConfig({
+  define: {
+    ...WS_PURE_JS,
+    __APP_VERSION__: JSON.stringify(version)
+  },
   resolve: {
     alias: {
       '@core': resolve('src/core'),

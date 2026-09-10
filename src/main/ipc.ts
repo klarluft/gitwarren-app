@@ -22,21 +22,18 @@
  * If you find yourself adding logic to either kind, it almost certainly belongs
  * in a service instead.
  */
-import { BrowserWindow, dialog, ipcMain, shell, app } from 'electron'
+import { BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { dispatch } from '../core/rpc/dispatcher.js'
 import { traced } from '../core/trace.js'
 import { attachmentsService } from '../core/services/attachments.js'
-import { getDataDirectory, getDatabasePath } from '../core/paths.js'
-import { getInstanceId } from '../core/instance.js'
 import { AppError } from '../shared/errors.js'
 import { parseWithSchema as parse } from '../shared/validation.js'
 import { openReviewFileInputSchema } from '../shared/schemas.js'
 import { CHANNEL_METHODS, IPC_CHANNELS, type AppInfo } from '../shared/api.js'
 import type { RpcMethod, RpcOutcome, RpcParams } from '../shared/rpc.js'
+import { describeInstall } from './app-info.js'
 import { listEditors, openInEditor } from './editors.js'
-import { getLinkServerPort } from './link-server.js'
 import { isOpenAtLogin, setOpenAtLogin } from './login-item.js'
-import { getMcpLaunchInfo } from './mcp-launch.js'
 import { checkForUpdates, getUpdateStatus, quitAndInstall } from './updater.js'
 
 /**
@@ -156,16 +153,7 @@ export function registerIpcHandlers(): void {
     return setOpenAtLogin(input)
   })
 
-  handleShell(IPC_CHANNELS.systemAppInfo, (): AppInfo => ({
-    version: app.getVersion(),
-    instanceId: getInstanceId(),
-    platform: process.platform,
-    packaged: app.isPackaged,
-    dataDirectory: getDataDirectory(),
-    databasePath: getDatabasePath(),
-    linkPort: getLinkServerPort(),
-    mcp: getMcpLaunchInfo()
-  }))
+  handleShell(IPC_CHANNELS.systemAppInfo, (): AppInfo => describeInstall())
 
   handleShell(IPC_CHANNELS.updatesGetStatus, () => getUpdateStatus())
   handleShell(IPC_CHANNELS.updatesCheck, () => checkForUpdates({ userInitiated: true }))

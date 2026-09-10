@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      The same lockdown as the Electron window, with one difference that is the
+      whole of M3 in a header.
+
+      `connect-src 'self'` still means "this origin and nothing else", and in a
+      browser that now has to cover the WebSocket as well: CSP level 3 matches a
+      same-origin `ws://` against `'self'`, which is exactly the carrier this
+      shell uses and exactly nothing more. No remote origin can be reached from
+      this page whatever a comment body asks for.
+
+      `img-src` keeps `data:` - image diffs arrive as data URLs from
+      `reviews.image` - and drops the `gitwarren:` scheme, which is a custom
+      protocol only the Electron main process serves. Attachments in markdown
+      come over HTTP from this same origin in M3.2; until then they are the one
+      thing in a comment body that does not render in a tab.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'"
+    />
+    <title>GitWarren</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
