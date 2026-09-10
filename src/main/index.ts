@@ -272,13 +272,18 @@ if (process.argv.includes('--serve')) {
 
     // The tray comes up whether or not a window does. It is the only thing on
     // screen in a hidden start, and the only way to quit.
-    createTray(openWindow)
+    const hasTray = createTray(openWindow)
 
     // A link beats a hidden start: someone clicked something, and the point of
     // clicking it was to see a review. Asked rather than taken - `createWindow`
     // is what consumes the route, and turns it into the window's first paint.
+    //
+    // And a missing tray beats it too. A hidden start on a desktop with no
+    // system tray would leave the user with no window, no icon and no menu -
+    // a running process reachable only through a task manager. Better to
+    // disregard the request to stay out of the way than to be unreachable.
     const hidden = shouldStartHidden(process.argv, wasOpenedAtLogin())
-    if (!hidden || hasPendingRoute()) createWindow()
+    if (!hidden || hasPendingRoute() || !hasTray) createWindow()
 
     // Only now: a link buffered during startup belongs to the window above, not
     // to a second one opened alongside it. From here on a link that arrives

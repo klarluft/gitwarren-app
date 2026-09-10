@@ -40,7 +40,7 @@ function iconSize(): number {
 }
 
 /**
- * Create the tray icon.
+ * Create the tray icon. Returns whether there is now one on screen.
  *
  * `onOpen` rather than a window reference: whether opening means showing a
  * hidden window or building a new one is `index.ts`'s business, and the tray
@@ -50,39 +50,58 @@ function iconSize(): number {
  * a monochrome silhouette, which is right for a glyph and wrong for a logo -
  * GitWarren's would come out as a filled blob. A colour icon in the menu bar is
  * ordinary and is what the app already looks like everywhere else.
+ *
+ * **Nothing here may throw.** A tray is a nicety on a desktop that has one and
+ * an impossibility on a desktop that does not: `new Tray()` needs a
+ * StatusNotifierItem host or an XEmbed tray, and plenty of Linux setups - a
+ * bare window manager, a stripped-down GNOME, WSLg - have neither. This runs
+ * during `whenReady`, ahead of the window, so an exception escaping it would
+ * cost the user the window, the updater and the deep-link factory: GitWarren
+ * would start, show nothing at all, and have to be killed from a task manager.
+ * A missing tray icon is a much smaller problem than that, so it is caught and
+ * reported, and the boolean lets the caller make sure the user is left with
+ * *something*.
  */
-export function createTray(onOpen: () => void): void {
-  if (tray) return
+export function createTray(onOpen: () => void): boolean {
+  if (tray) return true
 
-  const size = iconSize()
-  const image = nativeImage.createFromPath(icon).resize({ width: size, height: size })
+  try {
+    const size = iconSize()
+    const image = nativeImage.createFromPath(icon).resize({ width: size, height: size })
 
-  if (image.isEmpty()) {
-    // Some Linux desktops have no system tray at all, and a Tray built from an
-    // empty image is worse than none. The app still runs; the window is still
-    // reachable from the dock, the taskbar, or by launching it again.
-    console.error('[tray] could not load the icon; running without a tray item')
-    return
+    if (image.isEmpty()) {
+      // A Tray built from an empty image is worse than none: some platforms
+      // render a blank gap the user cannot see but can click.
+      console.error('[tray] could not load the icon; running without a tray item')
+      return false
+    }
+
+    const created = new Tray(image)
+    created.setToolTip('GitWarren')
+
+    const menu = Menu.buildFromTemplate([
+      { label: 'Open GitWarren', click: onOpen },
+      { type: 'separator' },
+      // The only way out now that closing the window does not quit. Labelled
+      // with the app name rather than a bare "Quit" because a tray menu is read
+      // out of context, next to a dozen other icons.
+      { label: 'Quit GitWarren', click: () => app.quit() }
+    ])
+
+    created.setContextMenu(menu)
+
+    // A left click opens the window on Windows and Linux, which is what users
+    // of every other tray app expect. macOS shows the menu on either button and
+    // fires no `click` worth acting on, so it is left alone.
+    if (process.platform !== 'darwin') created.on('click', onOpen)
+
+    tray = created
+    return true
+  } catch (error) {
+    console.error('[tray] this desktop has no system tray; running without one', error)
+    tray = null
+    return false
   }
-
-  tray = new Tray(image)
-  tray.setToolTip('GitWarren')
-
-  const menu = Menu.buildFromTemplate([
-    { label: 'Open GitWarren', click: onOpen },
-    { type: 'separator' },
-    // The only way out now that closing the window does not quit. Labelled with
-    // the app name rather than a bare "Quit" because a tray menu is read out of
-    // context, next to a dozen other icons.
-    { label: 'Quit GitWarren', click: () => app.quit() }
-  ])
-
-  tray.setContextMenu(menu)
-
-  // A left click opens the window on Windows and Linux, which is what users of
-  // every other tray app expect. macOS shows the menu on either button and
-  // fires no `click` worth acting on, so it is left alone.
-  if (process.platform !== 'darwin') tray.on('click', onOpen)
 }
 
 export function destroyTray(): void {
