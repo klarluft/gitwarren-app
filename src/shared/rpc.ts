@@ -194,12 +194,25 @@ export interface ReviewOpen {
  * An image on its way into the store.
  *
  * Bytes rather than a path: the renderer has no filesystem, so a pasted or
- * dropped image has to travel. `ArrayBuffer` survives Electron's structured
- * clone; `number[]` is what a JSON carrier will turn it into. Whoever answers
- * accepts either.
+ * dropped image has to travel. This is the one method whose params are not the
+ * same on every carrier, and M2 is where that became visible - it is the only
+ * change the protocol needed in order to survive a byte stream.
+ *
+ * `ArrayBuffer` survives Electron's structured clone and is what the renderer
+ * sends. It does *not* survive `JSON.stringify`, which turns it into `{}` - so
+ * a carrier over a pipe, a socket or `ssh` cannot use that form at all, and
+ * would previously have produced an `INTERNAL` error from a `Buffer.from({})`
+ * deep inside the dispatcher rather than anything a caller could read.
+ *
+ * `string` is base64 and is the form a JSON carrier should send: about 1.33
+ * bytes on the wire per byte of image. `number[]` also works and is what a
+ * naive `JSON.stringify` of a byte array produces, but it costs about four
+ * bytes per byte and exists for compatibility rather than as a recommendation.
+ *
+ * Whoever answers accepts all three.
  */
 export interface AttachmentIngestParams {
-  bytes: ArrayBuffer | number[]
+  bytes: ArrayBuffer | number[] | string
   /** Only ever used for display and default alt text; the format is sniffed. */
   originalName?: string
 }

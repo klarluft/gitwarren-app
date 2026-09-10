@@ -13,6 +13,7 @@
 import { app, BrowserWindow } from 'electron'
 import electronUpdater from 'electron-updater'
 import { IPC_CHANNELS, type UpdateStatus } from '../shared/api.js'
+import { requestHiddenRelaunch } from './start-hidden.js'
 
 // electron-updater is CommonJS, so the named export has to come off the default.
 const { autoUpdater } = electronUpdater
@@ -99,6 +100,15 @@ export async function checkForUpdates({ userInitiated = false } = {}): Promise<U
 
 export function quitAndInstall(): void {
   if (status.state !== 'ready') return
+
+  // Come back the way we were. Since M2 the app is commonly running in the tray
+  // with no window, and an update is not a reason to put one in front of
+  // someone. There is no way to hand argv to the process the installer starts,
+  // so this is left as a note in the data directory - see `start-hidden.ts`.
+  if (!BrowserWindow.getAllWindows().some((window) => window.isVisible())) {
+    requestHiddenRelaunch()
+  }
+
   // isSilent: true, isForceRunAfter: true - no installer UI, app comes back up.
   autoUpdater.quitAndInstall(true, true)
 }

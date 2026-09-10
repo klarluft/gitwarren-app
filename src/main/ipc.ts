@@ -34,6 +34,8 @@ import { openReviewFileInputSchema } from '../shared/schemas.js'
 import { CHANNEL_METHODS, IPC_CHANNELS, type AppInfo } from '../shared/api.js'
 import type { RpcMethod, RpcOutcome, RpcParams } from '../shared/rpc.js'
 import { listEditors, openInEditor } from './editors.js'
+import { getLinkServerPort } from './link-server.js'
+import { isOpenAtLogin, setOpenAtLogin } from './login-item.js'
 import { getMcpLaunchInfo } from './mcp-launch.js'
 import { checkForUpdates, getUpdateStatus, quitAndInstall } from './updater.js'
 
@@ -143,6 +145,17 @@ export function registerIpcHandlers(): void {
 
   handleShell(IPC_CHANNELS.systemEditors, () => listEditors())
 
+  // Starting with the machine is a property of the machine, not of the app, so
+  // both of these read it back from the OS rather than from anything we store.
+  handleShell(IPC_CHANNELS.systemGetOpenAtLogin, () => isOpenAtLogin())
+
+  handleShell(IPC_CHANNELS.systemSetOpenAtLogin, (input) => {
+    if (typeof input !== 'boolean') {
+      throw new AppError('INVALID_INPUT', 'Start at login is on or off.')
+    }
+    return setOpenAtLogin(input)
+  })
+
   handleShell(IPC_CHANNELS.systemAppInfo, (): AppInfo => ({
     version: app.getVersion(),
     instanceId: getInstanceId(),
@@ -150,6 +163,7 @@ export function registerIpcHandlers(): void {
     packaged: app.isPackaged,
     dataDirectory: getDataDirectory(),
     databasePath: getDatabasePath(),
+    linkPort: getLinkServerPort(),
     mcp: getMcpLaunchInfo()
   }))
 

@@ -18,6 +18,7 @@ import { UpdateBanner } from './components/update-banner'
 import { AgentAccessPanel } from './features/agent/agent-access-panel'
 import { CommandCenter } from './features/commands/command-center'
 import { CommandRegistryProvider } from './features/commands/command-registry'
+import { SettingsPanel } from './features/settings/settings-panel'
 import { RepositoryDetail } from './features/repositories/repository-detail'
 import { RepositoryList } from './features/repositories/repository-list'
 import { ReviewDetail } from './features/reviews/review-detail'
@@ -109,6 +110,7 @@ function HomeScreen() {
       <div className="flex flex-col gap-6">
         <RepositoryList />
         <AgentAccessPanel />
+        <SettingsPanel />
       </div>
     </>
   )

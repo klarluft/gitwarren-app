@@ -91,6 +91,15 @@ export const IPC_CHANNELS = {
   systemRevealPath: 'system:revealPath',
   systemAppInfo: 'system:appInfo',
   systemEditors: 'system:editors',
+  /**
+   * Whether GitWarren starts with the machine. Two channels rather than a
+   * field on `appInfo`, because it is the one piece of app state the user can
+   * change from outside the app - through System Settings, or by deleting a
+   * `.desktop` file - so it is read on demand and never cached alongside
+   * things that cannot change.
+   */
+  systemGetOpenAtLogin: 'system:getOpenAtLogin',
+  systemSetOpenAtLogin: 'system:setOpenAtLogin',
   attachmentsIngest: 'attachments:ingest',
   attachmentsPick: 'attachments:pick',
   updatesGetStatus: 'updates:getStatus',
@@ -156,6 +165,8 @@ export const SHELL_CHANNELS = [
   IPC_CHANNELS.systemRevealPath,
   IPC_CHANNELS.systemEditors,
   IPC_CHANNELS.systemAppInfo,
+  IPC_CHANNELS.systemGetOpenAtLogin,
+  IPC_CHANNELS.systemSetOpenAtLogin,
   IPC_CHANNELS.updatesGetStatus,
   IPC_CHANNELS.updatesCheck,
   IPC_CHANNELS.updatesInstallNow
@@ -183,10 +194,30 @@ export interface AppInfo {
   packaged: boolean
   dataDirectory: string
   databasePath: string
+  /**
+   * The loopback port this install is serving links on, or null when something
+   * else holds it.
+   *
+   * Null does not mean links are broken everywhere - they are minted against
+   * the fixed port whoever reads them, because a link is read on other machines
+   * and on other days. It means links into *this* app will not open until
+   * whatever took the port lets go, which is worth saying out loud rather than
+   * leaving the user to discover in a browser.
+   */
+  linkPort: number | null
   /** Everything an agent needs to be pointed at this install's MCP server. */
   mcp: McpLaunchInfo
 }
 
+/**
+ * How an agent starts this install's MCP server.
+ *
+ * Since M2 `command` is the stable launcher - `~/.gitwarren/bin/gitwarren-mcp`,
+ * a `.cmd` on Windows - which the app maintains and which therefore survives an
+ * update, a move, and the AppImage remounting itself. `args` and `env` are
+ * empty by design: the whole value of the launcher is that the instruction fits
+ * in a sentence, and a sentence with an environment variable in it does not.
+ */
 export interface McpLaunchInfo {
   command: string
   args: string[]
@@ -194,11 +225,21 @@ export interface McpLaunchInfo {
   /** True once the built server file is actually present on disk. */
   available: boolean
   /**
-   * False when the paths above are only valid for the current run. An AppImage
-   * mounts itself at a fresh temporary directory every launch, so a config
-   * copied from a running AppImage would break on the next start.
+   * False when the command above is only valid for the current run.
+   *
+   * Always true since M2, because the launcher is what the command names. Kept
+   * because M4 reintroduces the case from the other end: a remote host whose
+   * daemon has not been installed yet has no launcher to name.
    */
   stable: boolean
+  /**
+   * The binary and script the launcher wraps.
+   *
+   * Shown behind "configure by hand", and the fallback when the launcher could
+   * not be written. It is what every agent config held before M2, so a user who
+   * has one already can see that nothing about it has changed.
+   */
+  direct: { command: string; args: string[]; env: Record<string, string> }
   /** Shown in the UI when the configuration needs a caveat. */
   note?: string
 }
@@ -315,6 +356,14 @@ export interface GitWarrenApi {
      * whatever the platform associates with it.
      */
     editors(): Promise<EditorList>
+    /** Whether GitWarren starts with the machine. Read from the OS each time. */
+    getOpenAtLogin(): Promise<boolean>
+    /**
+     * Turn it on or off. Resolves to what the OS says afterwards rather than to
+     * what was asked for, so a write that silently failed shows as unchanged
+     * instead of as a toggle that springs back on the next read.
+     */
+    setOpenAtLogin(openAtLogin: boolean): Promise<boolean>
   }
   /**
    * Deep links arriving from the OS while the app is running.

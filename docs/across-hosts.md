@@ -469,6 +469,162 @@ the DB has one owner per machine.
 the window comes back on the review. Quit fully: the MCP server still works
 against SQLite.
 
+- **Outcome.** *Done, 10 September 2026, macOS 15 (Darwin 25.6), Electron 44,
+  driven over CDP against a scratch data directory and a scratch
+  `--user-data-dir`.* The acceptance test passes end to end. With the window
+  closed, an agent created review 4 through
+  `~/.gitwarren/bin/gitwarren-mcp` and got back
+
+  ```
+  http://127.0.0.1:41427/#h=d8b0e181-4bb1-4c7b-80e0-aedc58db1de7/review/4/conversation
+  ```
+
+  the served page turned that fragment into
+  `gitwarren://d8b0e181-…/review/4/conversation`, and delivering that URL put
+  the window back on `#/reviews/4/conversation` with the agent's title on it.
+  Then, with the app fully quit - runtime file gone, port 41427 refusing
+  connections - the same launcher wrote a comment on review 4 and still handed
+  back a `guiUrl`, which is the half of the test that would have been a `null`
+  before M2.
+
+  The link was delivered by launching the binary again with the URL in argv -
+  the door Windows and Linux use, which the single-instance lock turns into
+  `second-instance` - rather than through the OS protocol handler, because
+  `gitwarren://` on this Mac is registered to the *installed* GitWarren and
+  asking the OS to open one would have driven that app against the real
+  database. Everything from `receiveDeepLinkFromArgv` on is the same code.
+
+  #### What the protocol needed in order to survive a byte stream
+
+  One thing. The contract tests in `core/rpc/__tests__` run twice since M2 -
+  once as a function call, once over the newline-delimited JSON carrier - and
+  every assertion that existed before M2 passed over the pipe unchanged, first
+  try. That is the result the arrangement was built to produce, and it is the
+  headline: the protocol is carrier-independent as written.
+
+  The gap the tests did *not* catch is `attachments.ingest`, and the reason
+  they did not is instructive - the existing test already sent the `number[]`
+  form, which JSON carries fine. But the params were typed
+  `ArrayBuffer | number[]`, and an `ArrayBuffer` is exactly what
+  `JSON.stringify` destroys: it becomes `{}`, which reaches `Buffer.from` and
+  throws `TypeError: The first argument must be of type string or an instance
+  of Buffer, ArrayBuffer, or Array…`, surfacing as `INTERNAL` from somewhere
+  inside the dispatcher. Over an `ssh` pipe in M4 that is indistinguishable
+  from the daemon being broken. Found by reading the one param type in the map
+  that is not plain data against what JSON can carry, rather than by a failing
+  test - which is an argument for doing that reading at every milestone, not
+  only for adding carriers to the suite.
+
+  So `bytes` gained a `string` form (base64, 1.33 bytes on the wire per byte of
+  image rather than the four a stringified `number[]` costs), and an
+  unrecognised shape is now an `INVALID_INPUT` that names the three accepted
+  forms. Nothing else moved. In particular every timestamp in the schema is
+  already a `text` column, so no result carries a `Date` for JSON to flatten -
+  which is the failure this exercise was most likely to have found.
+
+  The framing itself needed no argument: `JSON.stringify` never emits a raw
+  newline, so `\n` is an unambiguous frame boundary, and S2 had already put
+  50 MB of exactly these frames through `wsl.exe` byte-exact. Responses come
+  back in completion order rather than request order, which the `id` field
+  exists for and which the tests now assert by matching on it.
+
+  #### Tray and login item, per platform
+
+  Closing hides rather than quits, on every platform including macOS, and it is
+  a `close` handler rather than `window-all-closed`: a closed window is
+  destroyed, so hiding is what keeps the review the user was reading on screen
+  for when they come back. Verified over CDP - after a ⌘W the renderer is still
+  attached and `location.hash` is unchanged, which a destroyed window could not
+  manage. The tray menu is two items, Open and Quit; Quit is now the only way
+  out, so it is labelled with the app name.
+
+  | | macOS | Windows | Linux |
+  | --- | --- | --- | --- |
+  | Tray | Menu bar item, 18px, colour rather than a template image - a template renders a logo as a filled blob | Notification area, 16px; left click opens | System tray, 22px; left click opens. Absent on desktops with no tray, and the app says so and carries on |
+  | Login item | `SMAppService` via `setLoginItemSettings` | `Run` registry value, with `--hidden` | `~/.config/autostart/gitwarren.desktop`, `Exec=… --hidden` |
+  | Starting hidden | `wasOpenedAtLogin` - Electron 44 dropped `openAsHidden` when macOS moved to `SMAppService`, so this is what is left, and it means the same thing | `--hidden` in argv | `--hidden` in argv |
+  | Reading it back | `getLoginItemSettings()` | Same, *with the same `args`* - the registry value is keyed by the whole command line, so omitting them reports false for an entry we wrote ourselves | The `.desktop` file exists |
+
+  Toggling it on and off through the panel was checked over CDP on macOS and
+  read back correctly both ways. The `--hidden` and Linux paths were not
+  exercised on their own platforms.
+
+  The updater relaunches hidden by leaving a note in the data directory rather
+  than by passing an argument, because `electron-updater` restarts the app
+  itself and there is no supported way to hand argv to what comes back. The
+  note carries a timestamp and is ignored after five minutes, so a crash
+  between writing it and quitting cannot leave the app starting invisibly
+  forever.
+
+  #### One owner: what the rule actually turned out to be
+
+  The plan said the MCP server would talk to the owner when there is one and
+  open SQLite when there is not. **It opens SQLite in both cases**, and the
+  reason is rule 6 rather than expedience. An agent never crosses the network,
+  so the MCP server is always on the machine holding the database, and WAL is
+  already what makes two local processes safe - it is what `db/client.ts` is
+  configured for. Routing agent reads through the owner would buy nothing and
+  cost the property the milestone is verified on: quit GitWarren, and the agent
+  keeps working. The owner branch would have had to fall back to SQLite the
+  moment the window closed, which is two paths to keep in agreement in exchange
+  for nothing.
+
+  What genuinely needs the owner is a *push* - telling a running GUI that an
+  agent has just written a comment, instead of the window finding out fifteen
+  seconds later. That needs a channel the MCP process may dial, and M2 has
+  none: the link server is inert by design, and the stdio carrier only serves a
+  process someone else spawned. M3's WebSocket is that channel and M6 is where
+  the poke goes in.
+
+  So `daemon-runtime.json` holds `{instanceId, pid, linkPort, owner}` and is
+  written by whoever holds the loopback port - the GUI today, a listening
+  `gitwarren serve` in M3. A `--stdio` daemon deliberately writes nothing and
+  checks nothing: it binds no port, answers one pipe, and lives as long as its
+  parent, so refusing to start next to a running GUI would break the M4 case
+  outright, where the Mac spawns a daemon on a PC that is quite reasonably
+  running its own GitWarren.
+
+  #### Links, and what a fixed port cost
+
+  41427 is bound or nothing is - there is no fallback to an OS-assigned port,
+  because links are now minted against the constant whoever reads them, and
+  falling back would mean handing out URLs that point at whatever else took the
+  port. When it is taken the app starts anyway, logs which port and why, writes
+  `linkPort: null`, and the Agent Access panel says so. Checked by holding the
+  port from another process and starting the app against it.
+
+  The instance id moved into the deep link's authority -
+  `gitwarren://<id>/review/4/…` - which is the position a URL reserves for
+  "whose". `gitwarren://review/4/…` still parses and still means the local
+  install, so every link already sitting in a terminal scrollback keeps
+  working. A link naming *another* install lands on the home screen and logs
+  the id rather than opening the local review with that number, which is the
+  honest failure until M4 has a hosts table to resolve it in. Verified.
+
+  #### The stable launcher
+
+  `~/.gitwarren/bin/gitwarren-mcp` (a `.cmd` on Windows), rewritten whenever its
+  contents would change, so it survives an update and a move. `getMcpLaunchInfo`
+  reports it as the command with no arguments and no environment, which is what
+  makes the one-sentence agent prompt in [Agent setup](#agent-setup) possible -
+  it is now what the Agent Access panel leads with, snippet behind a disclosure.
+
+  The AppImage caveat is retired, with a caveat of its own: an AppImage's only
+  stable path is the `.AppImage` file, which AppRun exports as `APPIMAGE`, so
+  the launcher names that and reaches the script through `APPDIR` at run time.
+  That form is written but **untested** - it needs a Linux box with a packaged
+  AppImage, which this milestone was built on a Mac. Worth ten minutes on the
+  PC before the release.
+
+  #### Not done here
+
+  - The daemon tarball's CI job from S3 is still not written. `out/daemon/serve.cjs`
+    exists, is unpacked from asar, and runs standalone - `echo '{"id":1,…}' |
+    node out/daemon/serve.cjs --stdio` answers - but nothing builds a release
+    asset out of it yet. M4 is where a remote host needs one.
+  - `GitWarren --serve` implies `--stdio`; there is no argv parser worth the
+    name until M3 adds `--listen`.
+
 ### M3 — The web view, locally
 
 *Ships: GitWarren without Electron.*

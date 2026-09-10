@@ -30,6 +30,9 @@
  */
 import { createServer, type Server } from 'node:http'
 import { readFileSync } from 'node:fs'
+import { LINK_SERVER_HOST, LINK_SERVER_PORT } from '../shared/link-port.js'
+import { DEEP_LINK_SCHEME, LOOPBACK_HOST_PREFIX } from '../shared/deep-link.js'
+import { INSTANCE_ID_PATTERN } from '../shared/instance-id.js'
 // `?asset` copies the file next to the bundle so it also exists at runtime -
 // the same mechanism the window icon uses. It is inlined into the page as a
 // data: URI because the page has to be self-contained: serving it as a second
@@ -38,11 +41,20 @@ import { readFileSync } from 'node:fs'
 import logoPath from '../renderer/src/assets/logo.png?asset'
 
 let server: Server | null = null
-let port: number | null = null
 
-/** The loopback origin, or null when the server is not up. */
-export function getLinkServerOrigin(): string | null {
-  return port === null ? null : `http://127.0.0.1:${port}`
+/**
+ * The port actually being served, or null when the bind failed.
+ *
+ * Not the same question as "what port do links use". Links use
+ * `LINK_SERVER_PORT` and nothing else, because they are minted for other
+ * machines and other days; this says whether *this* machine is currently
+ * answering on it, which is what the runtime file publishes and what the Agent
+ * Access panel needs in order to warn.
+ */
+let servedPort: number | null = null
+
+export function getLinkServerPort(): number | null {
+  return servedPort
 }
 
 /**
@@ -150,25 +162,50 @@ a.button:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px;
  * server is never told which review this link is for, so the page has to read
  * it out of its own address and rebuild the `gitwarren://` URL client-side.
  *
+ * Since M2 the fragment also carries the instance id of the install the review
+ * is on - `#h=<id>/review/4/files/...` - and the id goes into the authority of
+ * the deep link the button holds. That is what lets the app the user clicks
+ * through to tell "this is my review" from "this is the other machine's". The
+ * id is optional: a loopback link minted before M2 has a bare route in its
+ * fragment and still builds the deep link it always built.
+ *
  * The fragment is checked before it is used, but only as far as this page needs
  * to: enough to name the review in the line under the button, and no further.
  * The app is the allowlist - `shared/deep-link.ts` re-parses all of this and
  * drops whatever it does not recognise - so a stricter test here would only
  * manage to throw away a review id the app would have honoured. The scheme is a
- * fixed prefix, so nothing that arrives can become a `javascript:` href.
+ * fixed prefix and the id is matched against the instance pattern, so nothing
+ * that arrives can become a `javascript:` href or smuggle a second authority.
  *
  * Written without template literals so it can sit inside one.
  */
 const SCRIPT = `
 var SHAPE = /^review\\/[0-9]{1,15}(?:\\/[a-z]{1,20}(?:\\/[^\\s]{1,4096})?)?$/;
 var FOCUS = /^([^/]+)\\/(?:base|head)\\/([0-9]{1,15})$/;
+var HOST = /${INSTANCE_ID_PATTERN.source}/;
 // Left percent-encoded: a file path is one segment only because its slashes
 // are escaped, and decoding the fragment whole would shatter it into several.
-var path = location.hash.replace(/^#/, '');
+var fragment = location.hash.replace(/^#/, '');
+
+// The id, split off the front if it is there at all. Anything that is not an
+// instance id is not an instance id, and the whole fragment stays the route -
+// which is exactly how a pre-M2 link keeps working.
+var host = '';
+var path = fragment;
+if (path.slice(0, ${JSON.stringify(LOOPBACK_HOST_PREFIX)}.length) === ${JSON.stringify(LOOPBACK_HOST_PREFIX)}) {
+  var rest = path.slice(${JSON.stringify(LOOPBACK_HOST_PREFIX)}.length);
+  var cut = rest.indexOf('/');
+  var candidate = cut === -1 ? rest : rest.slice(0, cut);
+  if (HOST.test(candidate)) {
+    host = candidate;
+    path = cut === -1 ? '' : rest.slice(cut + 1);
+  }
+}
+
 var known = SHAPE.test(path);
 
 var open = document.getElementById('open');
-open.href = 'gitwarren://' + (known ? path : 'review/');
+open.href = ${JSON.stringify(DEEP_LINK_SCHEME + '://')} + (host ? host + '/' : '') + (known ? path : 'review/');
 
 var target = document.getElementById('target');
 if (known) {
@@ -254,26 +291,32 @@ const HEADERS = {
 } as const
 
 /**
- * Start listening on loopback.
+ * Start listening on loopback, on the one port links are minted against.
  *
  * `127.0.0.1` explicitly and never `0.0.0.0`: the default would publish this on
- * every interface the machine has. Port 0 lets the OS pick a free one, which is
- * then written to the runtime file for the MCP server to find - see
- * `core/gui-runtime.ts`.
+ * every interface the machine has.
  *
- * Failure is logged and swallowed. Deep links stop working; the app is
- * otherwise entirely usable, and refusing to start over it would be absurd.
+ * The port is fixed - see `shared/link-port.ts` - and there is deliberately no
+ * fallback to an OS-assigned one. A link now says 41427 whoever minted it and
+ * whenever they minted it, so falling back would mean this app cheerfully
+ * serving on a port nobody links to, while the links it hands out point at
+ * whatever process actually holds 41427. Failing to listen is the honest
+ * outcome, and it is reported: `EADDRINUSE` is named as such so the Agent
+ * Access panel can say the port is taken rather than that links are broken.
+ *
+ * Failure is otherwise logged and swallowed. Deep links stop working; the app
+ * is entirely usable, and refusing to start over it would be absurd.
  */
-export function startLinkServer(onListening?: (port: number) => void): void {
+export function startLinkServer(onSettled?: (port: number | null) => void): void {
   if (server) return
 
   const page = buildPage()
 
-  server = createServer((request, response) => {
+  const listening = createServer((request, response) => {
     // The only Host that can legitimately reach this is the one we handed out.
     // Cheap, and it forecloses DNS rebinding - a name that resolves to 127.0.0.1
     // would otherwise let a web page talk to this from its own origin.
-    if (request.headers.host !== `127.0.0.1:${port}`) {
+    if (request.headers.host !== `${LINK_SERVER_HOST}:${LINK_SERVER_PORT}`) {
       response.writeHead(403).end()
       return
     }
@@ -288,24 +331,36 @@ export function startLinkServer(onListening?: (port: number) => void): void {
     response.end(request.method === 'HEAD' ? undefined : page)
   })
 
-  server.on('error', (error) => {
-    console.error('[links] loopback server failed', error)
+  server = listening
+
+  listening.on('error', (error: NodeJS.ErrnoException) => {
+    if (error.code === 'EADDRINUSE') {
+      console.error(
+        `[links] port ${LINK_SERVER_PORT} is already in use, so links into this app will not ` +
+          `open until whatever holds it releases it. Links are still handed out: they name the ` +
+          `same port on every machine, so an agent's link must not depend on this one's luck.`
+      )
+    } else {
+      console.error('[links] loopback server failed', error)
+    }
+
+    // Only the first failure settles the caller; a later error on a server that
+    // was up is a stop, not a start.
+    const wasListening = servedPort !== null
     server = null
-    port = null
+    servedPort = null
+    if (!wasListening) onSettled?.(null)
   })
 
-  server.listen(0, '127.0.0.1', () => {
-    const address = server?.address()
-    if (address === null || address === undefined || typeof address === 'string') return
-
-    port = address.port
-    console.log(`[links] serving deep links on http://127.0.0.1:${port}`)
-    onListening?.(port)
+  listening.listen(LINK_SERVER_PORT, LINK_SERVER_HOST, () => {
+    servedPort = LINK_SERVER_PORT
+    console.log(`[links] serving deep links on http://${LINK_SERVER_HOST}:${LINK_SERVER_PORT}`)
+    onSettled?.(LINK_SERVER_PORT)
   })
 }
 
 export function stopLinkServer(): void {
   server?.close()
   server = null
-  port = null
+  servedPort = null
 }

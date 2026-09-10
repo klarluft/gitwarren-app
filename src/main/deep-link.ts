@@ -15,12 +15,19 @@
  * `Route` first (see `shared/deep-link.ts` for why that boundary is drawn hard)
  * and the renderer is handed a hash this process generated from that route, so
  * nothing an outside party wrote reaches `loadURL` or `location.hash` intact.
+ *
+ * This is also where a link stops being about "a review" and becomes about "a
+ * review on a particular install". A link minted since M2 names the instance it
+ * came from, and only a process that can read this data directory can say
+ * whether that is us - which is why the shared parser hands back a host-scoped
+ * route either way and `localise` below makes the call.
  */
 import { app, BrowserWindow } from 'electron'
 import { resolve } from 'node:path'
+import { getInstanceId } from '../core/instance.js'
 import { IPC_CHANNELS } from '../shared/api.js'
 import { DEEP_LINK_SCHEME, parseDeepLink } from '../shared/deep-link.js'
-import { hrefFor, type Route } from '../shared/routes.js'
+import { HOME, hrefFor, type Route } from '../shared/routes.js'
 
 /**
  * A route that arrived before there was a window to show it in.
@@ -113,17 +120,61 @@ function show(route: Route): void {
   else send()
 }
 
+/**
+ * Resolve a link's instance id against this install.
+ *
+ * Rule 4: a link resolves where it is clicked. The id in the URL says which
+ * install the review is on, and the three answers are:
+ *
+ *  - no id at all - a link minted before M2, which meant "local" then and means
+ *    "local" now;
+ *  - our own id - the same thing, said explicitly; the segment is dropped so
+ *    the renderer is handed the route it would have been handed anyway;
+ *  - somebody else's id - a review on another machine. There is no way to reach
+ *    another machine until M4, and the one thing that must not happen is
+ *    opening *our* review 4 because the link said 4. The user lands on the home
+ *    screen and the id is logged, which is the honest failure until there is a
+ *    hosts table to look it up in.
+ */
+function localise(route: Route): Route {
+  if (route.host === undefined) return route
+  if (route.host === getInstanceId()) {
+    // Rebuilt without the key rather than set to undefined: `hrefFor` and route
+    // equality both read the presence of the property, not its value.
+    const { host: _host, ...local } = route
+    return local
+  }
+
+  console.log(
+    `[deep-link] ignoring a link for instance ${route.host}, which is not this install. ` +
+      `Reviews on other hosts arrive in M4.`
+  )
+  return HOME
+}
+
 /** Handle one URL from any of the three doors. Unrecognised URLs are ignored. */
 export function receiveDeepLink(url: string): void {
   const route = parseDeepLink(url)
   if (!route) return
-  show(route)
+  show(localise(route))
 }
 
 /** Handle a whole argv, which is how Windows and Linux deliver a link. */
 export function receiveDeepLinkFromArgv(argv: readonly string[]): void {
   const route = routeFromArgv(argv)
-  if (route) show(route)
+  if (route) show(localise(route))
+}
+
+/**
+ * Whether a link is waiting, without taking it.
+ *
+ * Startup has to ask twice about the same route and for different reasons: once
+ * to decide whether a launch that was asked to be hidden should show a window
+ * after all, and once - inside `createWindow` - to turn it into that window's
+ * first paint. Only the second consumes it.
+ */
+export function hasPendingRoute(): boolean {
+  return pending !== null
 }
 
 /**

@@ -68,8 +68,14 @@ test('the channels the shell keeps are the ones that touch this machine', () => 
     'reviews:openInEditor',
     'system:appInfo',
     'system:editors',
+    // Starting with the machine is a property of the machine, and it is set
+    // through the OS - a login item on macOS and Windows, an autostart file on
+    // Linux. Nothing about it may ever become something a remote host is asked
+    // to do on its own.
+    'system:getOpenAtLogin',
     'system:pickDirectory',
     'system:revealPath',
+    'system:setOpenAtLogin',
     'updates:check',
     'updates:getStatus',
     'updates:installNow'

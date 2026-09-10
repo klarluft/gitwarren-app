@@ -13,9 +13,11 @@ files:
 
 # Kept outside the asar archive:
 #  - the MCP server, because an agent spawns it as a real file on disk
+#  - the daemon, for the same reason: another GitWarren spawns it over a pipe
 #  - better-sqlite3, because a native .node addon cannot be loaded from an archive
 asarUnpack:
   - out/mcp/**
+  - out/daemon/**
   - node_modules/better-sqlite3/**
 
 # Migrations must exist as real .sql files at runtime; the migrator reads the
