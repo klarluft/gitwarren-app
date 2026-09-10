@@ -87,12 +87,39 @@ function shellQuote(value: string): string {
  *
  * This is what retires the "extract the AppImage first" caveat.
  */
-function launcherScript(): string {
-  const banner =
-    '# GitWarren MCP server. Rewritten by GitWarren whenever the install moves,\n' +
-    '# so an agent config that names this path keeps working across updates.\n' +
-    '# Generated file - edit GitWarren, not this.\n'
+const BANNER_LINES = [
+  'GitWarren MCP server. Rewritten by GitWarren whenever the install moves,',
+  'so an agent config that names this path keeps working across updates.',
+  'Generated file - edit GitWarren, not this.'
+]
 
+/**
+ * The banner, commented for whichever interpreter is going to read it.
+ *
+ * Commented *per branch* rather than once, because the comment character is not
+ * the same in both. `#` is a comment to `/bin/sh` and is not one to `cmd`,
+ * which tries to run it and writes
+ *
+ *     '#' is not recognized as an internal or external command,
+ *     operable program or batch file.
+ *
+ * to stderr - once per banner line, on every single MCP server start. It cost
+ * nothing at the protocol level, which is on stdout, but it landed in the log
+ * of every Windows harness forever, and a harness strict enough to read output
+ * on stderr during startup as a failed spawn would have rejected the server
+ * outright.
+ *
+ * Worth knowing how it survived review: there was one banner string shared by
+ * all three branches, correct in the two that are shell scripts, and the
+ * Windows branch translated its line endings without touching its comments.
+ * Nothing about reading that string suggests a platform question, and no test
+ * on macOS or Linux can reach it. It was found by running the thing on Windows.
+ */
+function bannerFor(comment: string, eol: string): string {
+  return BANNER_LINES.map((line) => `${comment} ${line}${eol}`).join('')
+}
+
+function launcherScript(): string {
   const appImage = process.env.APPIMAGE
   if (appImage) {
     // `-e` rather than a script argument: the argument would have to be an
@@ -101,7 +128,7 @@ function launcherScript(): string {
     const inside = relative(process.env.APPDIR ?? '/', scriptPath())
     return (
       '#!/bin/sh\n' +
-      banner +
+      bannerFor('#', '\n') +
       `ELECTRON_RUN_AS_NODE=1 exec ${shellQuote(appImage)} \\\n` +
       `  -e 'require(process.env.APPDIR + "/${inside}")' "$@"\n`
     )
@@ -110,7 +137,7 @@ function launcherScript(): string {
   if (process.platform === 'win32') {
     return (
       '@echo off\r\n' +
-      banner.replace(/\n/g, '\r\n') +
+      bannerFor('REM', '\r\n') +
       'setlocal\r\n' +
       'set "ELECTRON_RUN_AS_NODE=1"\r\n' +
       `"${process.execPath}" "${scriptPath()}" %*\r\n`
@@ -119,7 +146,7 @@ function launcherScript(): string {
 
   return (
     '#!/bin/sh\n' +
-    banner +
+    bannerFor('#', '\n') +
     `ELECTRON_RUN_AS_NODE=1 exec ${shellQuote(process.execPath)} ${shellQuote(scriptPath())} "$@"\n`
   )
 }
