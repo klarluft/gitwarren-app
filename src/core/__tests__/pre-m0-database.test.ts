@@ -39,8 +39,18 @@ const { HUMAN_NAME, HUMAN_AUTHOR } = await import('../../shared/actors.js')
  */
 let raw: Database.Database
 
-after(() => {
+after(async () => {
   raw?.close()
+
+  // The app's own connection is a module-level singleton, and the last test in
+  // this file reopens it deliberately, so it is still holding the database file
+  // when this runs. POSIX is happy to unlink a file someone has open and
+  // Windows is not: `rmSync` fails there with EPERM and takes every test in the
+  // file down with it. Closed rather than left to the process exiting, because
+  // the directory has to be gone before that.
+  const { closeDatabase } = await import('../db/client.js')
+  closeDatabase()
+
   rmSync(dataDir, { recursive: true, force: true })
   rmSync(migrationsDir, { recursive: true, force: true })
 })
