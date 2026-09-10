@@ -9,7 +9,8 @@
  */
 import useSWR, { useSWRConfig } from 'swr'
 import { useCallback } from 'react'
-import { api, CACHE_KEYS } from '@/lib/api'
+import { CACHE_KEYS } from '@/lib/api'
+import { useApi, useHost } from '@/lib/host-scope'
 import type {
   AddRepositoryInput,
   Repository,
@@ -27,10 +28,12 @@ export interface UseRepositoriesResult {
 }
 
 export function useRepositories(): UseRepositoriesResult {
+  const api = useApi()
+  const host = useHost()
   const { data, error, isLoading, isValidating, mutate } = useSWR<
     RepositoryWithGitState[],
     unknown
-  >(CACHE_KEYS.repositories, () => api.repositories.list())
+  >(CACHE_KEYS.repositories(host), () => api.repositories.list())
 
   return {
     repositories: data,
@@ -48,8 +51,10 @@ export interface RepositoryMutations {
 }
 
 export function useRepositoryMutations(): RepositoryMutations {
+  const api = useApi()
+  const host = useHost()
   const { mutate } = useSWRConfig()
-  const revalidate = useCallback(() => mutate(CACHE_KEYS.repositories), [mutate])
+  const revalidate = useCallback(() => mutate(CACHE_KEYS.repositories(host)), [host, mutate])
 
   return {
     addRepository: useCallback(
@@ -58,7 +63,7 @@ export function useRepositoryMutations(): RepositoryMutations {
         await revalidate()
         return created
       },
-      [revalidate]
+      [api, revalidate]
     ),
     updateRepository: useCallback(
       async (input) => {
@@ -66,14 +71,14 @@ export function useRepositoryMutations(): RepositoryMutations {
         await revalidate()
         return updated
       },
-      [revalidate]
+      [api, revalidate]
     ),
     removeRepository: useCallback(
       async (id) => {
         await api.repositories.remove({ id })
         await revalidate()
       },
-      [revalidate]
+      [api, revalidate]
     )
   }
 }

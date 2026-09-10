@@ -1,11 +1,19 @@
 /**
  * One machine, and everything that can be done to it from here.
  *
- * Unlike a repository card this one is not a link. A repository leads somewhere
- * - its reviews - and a host leads nowhere until M4.3 puts repositories under
- * one; making the whole row clickable now would mean teaching people a gesture
- * and then changing what it does. The actions are buttons, and the card is a
- * card.
+ * Since M4.3 a host does lead somewhere - `#/h/<instance>/` is its repository
+ * list - so there is a button that goes there. The card is still a card rather
+ * than one big link, because the other five things on it are actions and a row
+ * where clicking anywhere navigates is a row where "Forget" is one slip away.
+ *
+ * ## The way in appears only once the machine has said who it is
+ *
+ * `#/h/<instance>/` needs an instance id, and a host that has been described
+ * but never reached has none - it is a target somebody typed, and this install
+ * cannot yet tell it from any other machine. So the button is absent until the
+ * first successful connect writes the id back, and "Try now" is what makes it
+ * appear. That is not a limitation worked around; it is the same honesty
+ * `instance_id` being nullable buys everywhere else, arriving at the UI.
  *
  * ## Why the failure is on the card and not behind a tooltip
  *
@@ -16,11 +24,12 @@
  * costs two lines on the rows that are failing and nothing at all on the rows
  * that are not.
  */
-import { Download, Loader2, Pencil, Plug, RefreshCw, Trash2 } from 'lucide-react'
+import { ChevronRight, Download, Loader2, Pencil, Plug, RefreshCw, Trash2 } from 'lucide-react'
 import { Breakable } from '@/components/breakable'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Tooltip } from '@/components/ui/tooltip'
+import { navigate } from '@/lib/router'
 import { DaemonVersionBadge, ReachabilityBadge, needsInstall } from './host-status'
 import type { HostWithState } from '@shared/schemas'
 
@@ -127,6 +136,19 @@ export function HostCard({
               ? 'Update GitWarren'
               : 'Reinstall'}
         </Button>
+        {/* The way in. Present only once there is an instance id to route on -
+            see the note at the top of the file. */}
+        {host.instanceId !== null && (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={anythingBusy}
+            onClick={() => navigate({ name: 'repositories', host: host.instanceId as string })}
+          >
+            Repositories
+            <ChevronRight />
+          </Button>
+        )}
         {/* Said here rather than only in the install dialog: it is the sentence
             that explains why a host with nothing on it is a normal starting
             point rather than a problem to solve before adding it. */}

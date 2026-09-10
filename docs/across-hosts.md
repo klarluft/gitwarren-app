@@ -1546,6 +1546,7 @@ them verifiable against the real `pc-wsl` node rather than against a mock:
    drives it. *(done — see below.)*
 3. **Repositories on hosts.** `fs.list`, the host segment in routes, reviews
    listed under their host, clones grouped by root commit across hosts.
+   *(done — see below.)*
 4. **Attachments, editors and agent access per host.**
 5. **Disconnection.** The stale banner and the silent refetch.
 
@@ -1767,6 +1768,215 @@ versions and deleting the other's install is not this one's decision to make.
 Nothing on the screen reaches a *repository* on a host yet — that is M4.3, and
 until it lands a host is a machine you can install onto and prove reachable,
 which is exactly what M4.2 set out to be.
+
+**M4.3, done on the Mac against the WSL node, 11 September.** A host stops
+being a machine you can install onto and becomes a machine you can review. The
+slice is one method, one router and a segment in the URL, and the reason it is
+not more than that is that M4.1 and M4.2 had already built the hard half:
+
+    fs.list                     browse a filesystem you cannot see
+    core/hosts/router.ts        answered here, or answered over there
+    #/h/<instance>/…            which machine a link is about
+
+**A host is a place you go, not rows in this database.** The design question
+this slice actually had to settle was where a remote repository *lives*, and
+`repositories.host_id` — a column M0 added and nothing had ever written — made
+one answer look obvious: keep a row here per repository over there, so a list
+can be drawn without touching the network. It was the wrong answer, and rules 1
+and 2 say so plainly. A host owns its repositories: the row for
+`~/github.com/klarluft/gitwarren-app` on `pc-wsl` is in *that machine's* SQLite,
+its reviews hang off it there, and the agent inside WSL reads them over its own
+local MCP. Nothing syncs. A second row over here would be a copy of a name and a
+path only that machine can keep true, and it would give one repository two ids —
+while `#/h/<instance>/repositories/<id>` has always meant "that id, as that host
+knows it".
+
+So `#/h/<instance>/` is a host's repository list, fetched from the host, when
+somebody asks for it. The Hosts screen is where you ask; M4.2's host card said
+in a comment that it led nowhere "until M4.3", and now it has a button. The
+button appears only once the machine has said who it is, because a route needs
+an instance id and a host that has been described but never met has none — the
+same honesty `instance_id` being nullable buys everywhere else, arriving at the
+UI, and "Try now" is what makes the button appear.
+
+That also settles the question M4.1 left open. **`hosts.remove` has nothing to
+cascade to.** No row in this database names a host, so forgetting one forgets a
+way of reaching a computer and leaves every repository, review and comment over
+there exactly where it was; adding the host again reaches all of it again. The
+column stays, because dropping it is a migration that buys nothing and "this row
+is local" is still a claim worth making in SQL, and its comment now says what
+would have to become true for anything to write it.
+
+**Not fanning out is a feature, and it is the same argument as connect-on-use.**
+A home screen listing every host's repositories would open an `ssh` connection
+to every machine on the list in order to render — which is precisely what
+`core/hosts/pool.ts` exists to avoid, and what M4.2 already refused to do for a
+version number. One host, one visit, one connection.
+
+**The host rides on the envelope.** `RpcRequest.host` is an instance id, and it
+is deliberately not a `hostId` field on every input schema. *Where* a request
+goes is not part of what a method means — `reviews.diff` has one meaning and it
+is the same on every machine — so threading a host through the service, the MCP
+tool and the zod schema would teach three layers about a thing none of them has
+any business knowing. It also has to be *strippable*: the router removes it
+before forwarding, which is what makes a chain of hosts impossible to build by
+accident. What arrives at the far end has no host on it, so the far end answers
+it. A hub cannot be talked into becoming a spoke.
+
+Three ways a request stays here: no host at all, which is nearly every request
+and is byte-for-byte the request it was in M0; *our own* instance id, which is
+what another GitWarren writes when it links to this one and is rule 4 in a
+single comparison; and `hosts.*`, checked before the host is even resolved,
+because a host's list of hosts is its own business. `isLocalOnly` in `ssh.ts` is
+still there as a backstop, and the belt-and-braces is on purpose — a routing bug
+should not be able to put one on a wire.
+
+Carriers now come through `handleRoutedRequest` rather than `handleRequest`, so
+the decision is made once instead of in each of them. The Electron window, the
+daemon over a pipe and a browser tab all get remote hosts from the same change,
+and the tab case is the one that shows the shape is right: a tab reaches the
+core, and the core is the hub whether or not it happens to have a window.
+
+**`fs.list` exists because of a capability, not a domain.** It is the only
+method here that is not about reviews, and the comment
+`repository-form-dialog.tsx` has carried since M3 is why: a browser tab has no
+folder picker, and on a remote host the picker the shell *does* have would
+browse the wrong machine and produce a path `pc-wsl` has never heard of. So the
+gesture splits — opening a window stays in the shell, "what is inside this
+folder" becomes a method — and the native dialog is now used in exactly one
+case, a local form in the Electron window.
+
+A listing carries more than names, because the asking side has to draw a picker
+for a filesystem it has never seen: the parent (null at the root, which is how
+the screen knows to stop offering "Up"), where home is, the separator, and
+whether each folder holds a `.git`. That last one is what makes it beat a text
+field — it answers "is this the folder I want" without descending into it. One
+column rather than a tree, because every expanded node in a tree is a round
+trip over an `ssh` pipe and the thing being looked for is one folder, not a
+structure worth understanding. The path stays editable throughout, since for
+someone who knows where they are going, typing beats any number of clicks.
+
+Hidden folders are listed and flagged rather than filtered, and the decision is
+the screen's: dotfile repositories are a real thing people review, and a listing
+that silently dropped rows would be one you could not trust when what you wanted
+was not in it. A leading `~` is expanded by whoever answers, because that is the
+only machine that knows what it stands for — someone adding a repository on
+`pc-wsl` knows it is under `~/github.com` and has no reason to know that is
+`/home/xfor` over there.
+
+There is no sandbox, and that is a decision rather than an oversight.
+`repositories.add` already takes any absolute path on the host and reads git
+there, so a caller who can reach the dispatcher can already name any directory
+on the machine; a traversal check on this one method would be theatre next to an
+open door. The real boundary is who may reach the dispatcher — `core/web/token.ts`
+for a tab, the person's own SSH keys for a host.
+
+**Clones are grouped by the commit their history starts at.** Two checkouts of
+one project on two machines share a root commit and nothing else — not their
+path, and usually not their name — so `rootCommit` joins `RepositoryGitState`
+and a row on a host's list that matches one here becomes a link to the local
+clone. `--first-parent` is what makes it a single answer rather than a set: a
+history that has ever absorbed another project by merge has two roots, and a set
+is not a key, while the root of the first-parent chain is. It is cached per path
+for the run, because it is the one thing in that module that cannot change while
+the app is open and `rev-list` walks to the beginning of time to find it.
+
+The comparison runs from the host towards this computer and not the other way,
+and the reason is what each list costs. This machine's repositories are one
+local SQLite read, free from anywhere; another machine's are a connection. The
+grouping is made where it is free.
+
+**What a remote screen deliberately does not offer.** Three controls disappear
+rather than doing something plausible: revealing a path, which would open a
+Finder window on this Mac at a path only WSL has; opening a file in an editor,
+which would join the two halves M1 kept apart across a network and hand a Mac
+editor a path from a different filesystem; and attaching an image, because an
+attachment is a file in the owning host's store and the *displaying* half of
+that is M4.4 — ingesting now would put a real image on `pc-wsl` and render it
+here as a broken one, in a comment nobody could fix except by editing markdown
+by hand. Absent rather than disabled, which is the rule M3 set for a browser
+tab: a disabled control is a promise the shell cannot keep.
+
+**Three things bit.**
+
+*Emptying the editor list did not remove the button.* The open-in-editor control
+in `diff-view.tsx` is drawn when it is given a *callback*, not when there is an
+editor to name — so a remote review lost its editor picker and kept its buttons,
+and pressing one asked *this* install for `reviews.filePath` of a review id that
+means something else over there. On a machine with no review of that number it
+is a `NOT_FOUND`; on one that has a review of that number it opens an unrelated
+local file, which is the single failure shape this slice set out to prevent.
+Found by pressing it against `pc-wsl` and reading what happened, not by a test.
+The callback is now undefined on a host, so the button has nothing to be drawn
+from.
+
+*Two lists, one cache key.* A read-coalescing key and an SWR key that ignore the
+host make "the repositories on `pc-wsl`" and "the repositories on this Mac" the
+same question, and hand the second asker the first one's answer. Every id in
+this app is a per-host autoincrement integer — the point `shared/routes.ts`
+makes about links is just as true of a cache — so the host is part of the key in
+both carriers and in `CACHE_KEYS`. It goes on the *end*, after the prefix, so
+that the family-wide `startsWith` invalidation still works.
+
+*The host was running a daemon older than the method.* The first run against
+`pc-wsl` answered `fs.list` with `Unknown method "fs.list"` in twelve
+milliseconds, and reported no `rootCommit` — because the daemon over there was
+the published 0.1.7-beta.1 and both are new here. That is version skew behaving
+exactly as `RPC_PROTOCOL_VERSION` was reserved for: an unknown method comes back
+as an error a caller can read rather than as a hang, and an absent field is
+absent rather than wrong. It is also the case a person will hit, so it is worth
+saying plainly: **a host has to be reinstalled from the GUI before M4.3's
+screens work against it**, which is one button on the Hosts screen and four
+seconds.
+
+**Verified end to end against `pc-wsl` through the shipping code.** The daemon
+reinstalled from this build (46.4 MB in 4.5 s), then: `fs.list` on the host in
+129 ms cold and 6 ms warm on the multiplexed channel, answering `/home/xfor`
+with `/` as its separator and `/home` as its parent; `~/github.com/klarluft`
+expanded over there into five folders, every one of them marked as a repository;
+the same method with no host answering `/Users/michalwrzosek`, which is the
+whole point of it being a method. A folder that is not there came back as
+`PATH_NOT_FOUND` with its own sentence intact after the round trip. Two
+repositories added on the host and listed from the Mac with their WSL paths; the
+clone marker on exactly one of the two rows, naming this machine's checkout of
+the same project, and clicking it landing on `#/repositories/1` — a local route,
+no host segment. `hosts.list` with a host on the envelope answered here. A stale
+link to a machine nobody knows failing as a lookup rather than a network wait,
+with the id in the message. A review created on the host from the Mac, opened at
+`#/h/<instance>/reviews/2/files`, commented into `pc-wsl`'s database and read
+back — while review 2 *here* was a different review entirely, which is the
+clearest possible demonstration of why the segment had to exist. No console
+errors, and no horizontal scroll at 390 px.
+
+**What M4.3 found and left alone.** Electron's `contextBridge` strips everything
+but `message` off a rejected promise, so `AppError.code` and `fieldErrors` do
+not survive the preload: in the packaged window `errorCode(error)` is always
+null and `firstFieldError` always undefined. This predates the milestone —
+adding an already-tracked repository has been showing its duplicate-path message
+in the form's general slot rather than under the field since M1 — and it is not
+specific to hosts; the shell channels lose their codes the same way. A browser
+tab is unaffected, because its carrier throws in the same world it is caught in.
+The fix is to stop throwing across the bridge: the preload's carrier should hand
+back the `RpcOutcome` it already has and let the renderer call `resultOf`, which
+is what `shared/rpc.ts` says that function is for. It is its own change, with
+its own reasoning about where the M1 boundary sits, so it was not folded into
+this one — the cost meanwhile is that the "this host is not answering" state
+renders in a tab and not in the window, where the same sentence arrives under a
+more generic heading.
+
+**Not done in M4.3, and why.** Attachments, editors and per-host agent access
+are M4.4, and the three controls above are switched off rather than half-built
+in the meantime. `attachments.ingest` would route to a host correctly today, but
+the renderer sends an `ArrayBuffer` and `stdio-client.ts` still serialises with
+plain `JSON.stringify` — the web carrier solved this in `web/wire.ts` and that
+encoder wants to move somewhere both can use it, which is M4.4's first job.
+Deep links still carry no host: an agent's `gitwarren://` link written on
+`pc-wsl` is a local link, and opening it on the Mac shows the Mac's review of
+that number. That is rule 4 needing the loopback fragment to grow a host
+segment, and it belongs with M6's live links rather than here. There is no
+disconnection banner and no silent refetch — a host that goes away mid-review
+still empties the screen — which is M4.5, and the reason its error state already
+has a shape to grow into.
 
 ### M5 — WSL from Windows
 

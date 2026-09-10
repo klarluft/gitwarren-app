@@ -50,13 +50,21 @@ async function invoke<T>(channel: string, payload?: unknown): Promise<T> {
 const inFlight = new Map<string, Promise<unknown>>()
 
 const carrier: Carrier = {
-  request<M extends RpcMethod>(method: M, params: RpcParams<M>): Promise<RpcResult<M>> {
+  request<M extends RpcMethod>(
+    method: M,
+    params: RpcParams<M>,
+    host?: string
+  ): Promise<RpcResult<M>> {
     const send = (): Promise<RpcResult<M>> =>
-      invoke<RpcResult<M>>(IPC_CHANNELS.rpcRequest, { method, params })
+      invoke<RpcResult<M>>(IPC_CHANNELS.rpcRequest, { method, params, host })
 
     if (!isReadMethod(method)) return send()
 
-    const key = `${method}:${JSON.stringify(params ?? null)}`
+    // The host is part of the key, not a detail of it. Without it the
+    // repository list of `pc-wsl` and the repository list of this Mac are the
+    // same question asked twice, and the second component to ask would be
+    // handed the first one's answer.
+    const key = `${host ?? ''}:${method}:${JSON.stringify(params ?? null)}`
     const existing = inFlight.get(key) as Promise<RpcResult<M>> | undefined
     if (existing) return existing
 

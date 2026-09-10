@@ -27,14 +27,14 @@
  * Deliver bytes, and nothing else. It does not know what a method means, it
  * does not validate `params`, and it does not decide who a comment belongs to -
  * see the note at the top of `dispatcher.ts`. Every request goes through
- * `handleRequest`, which is the same door `main/ipc.ts` uses, so a review
+ * `handleRoutedRequest`, which is the same door `main/ipc.ts` uses, so a review
  * opened over a pipe is the review the window would have shown.
  *
  * Its tests are `rpc/__tests__/dispatcher.test.ts`. That is deliberate: a
  * carrier with its own test suite would be asserting its own opinions about the
  * protocol, which is the failure this whole arrangement exists to prevent.
  */
-import { handleRequest } from './dispatcher.js'
+import { handleRoutedRequest } from '../hosts/router.js'
 import { MAX_FRAME_BYTES, readFrames } from './ndjson.js'
 import { AppError } from '../../shared/errors.js'
 import type { RpcRequest, RpcResponse } from '../../shared/rpc.js'
@@ -103,10 +103,10 @@ export function serveStdio({ input, output, onEnd }: StdioCarrierOptions): void 
       return
     }
 
-    // `handleRequest` never throws - that is its contract, and it is what makes
+    // `handleRoutedRequest` never throws - that is its contract, and it is what makes
     // it usable here at all, since there is nowhere on a pipe to put an
     // exception. The catch is for the write.
-    void handleRequest(request)
+    void handleRoutedRequest(request)
       .then(write)
       .catch((error: unknown) => {
         console.error('[stdio] could not answer a request', error)

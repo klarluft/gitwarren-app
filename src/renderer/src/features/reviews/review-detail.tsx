@@ -37,6 +37,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsCount, TabsList, TabsPanel, TabsTab } from '@/components/ui/tabs'
 import { errorMessage } from '@/lib/errors'
 import { plural } from '@/lib/format'
+import { useHostScope } from '@/lib/host-scope'
 import { useRegisterCommands, type Command } from '@/features/commands/command-registry'
 import { navigate, replace, REVIEW_TABS, type DiffFocus, type ReviewTab } from '@/lib/router'
 import { useReviewComments } from '../comments/use-comments'
@@ -78,6 +79,10 @@ interface ReviewDetailProps {
 }
 
 export function ReviewDetail({ reviewId, tab, focus }: ReviewDetailProps) {
+  // Every link out of this screen has to carry the host, or a reviewer three
+  // clicks into a machine's diff is walked back to their own repositories by a
+  // breadcrumb.
+  const scope = useHostScope()
   const { data: review, error, isLoading } = useReview(reviewId)
   const { updateReview } = useReviewMutations()
   const commits = useReviewCommits(reviewId)
@@ -124,7 +129,7 @@ export function ReviewDetail({ reviewId, tab, focus }: ReviewDetailProps) {
                   keywords: 'tab',
                   icon: TAB_ICONS[name],
                   disabled: tab === name,
-                  run: () => replace({ name: 'review', reviewId, tab: name })
+                  run: () => replace({ name: 'review', reviewId, tab: name, ...scope })
                 })
               ),
               {
@@ -154,7 +159,8 @@ export function ReviewDetail({ reviewId, tab, focus }: ReviewDetailProps) {
                 keys: 'g r',
                 keywords: 'repository parent',
                 icon: ArrowLeft,
-                run: () => navigate({ name: 'repository', repositoryId: review.repositoryId })
+                run: () =>
+                  navigate({ name: 'repository', repositoryId: review.repositoryId, ...scope })
               },
               {
                 id: 'review:remove',
@@ -167,7 +173,7 @@ export function ReviewDetail({ reviewId, tab, focus }: ReviewDetailProps) {
                 run: () => setRemoving(review)
               }
             ],
-      [review, reviewId, tab, statusBusy, toggleStatus]
+      [review, reviewId, scope, tab, statusBusy, toggleStatus]
     )
   )
 
@@ -185,7 +191,7 @@ export function ReviewDetail({ reviewId, tab, focus }: ReviewDetailProps) {
             {error === undefined ? 'It may have been deleted.' : errorMessage(error)}
           </p>
         </div>
-        <Button variant="outline" onClick={() => navigate({ name: 'repositories' })}>
+        <Button variant="outline" onClick={() => navigate({ name: 'repositories', ...scope })}>
           <ArrowLeft />
           Back to repositories
         </Button>
@@ -205,7 +211,9 @@ export function ReviewDetail({ reviewId, tab, focus }: ReviewDetailProps) {
           variant="ghost"
           size="sm"
           className="-ml-2 mb-2 text-muted-foreground"
-          onClick={() => navigate({ name: 'repository', repositoryId: review.repositoryId })}
+          onClick={() =>
+            navigate({ name: 'repository', repositoryId: review.repositoryId, ...scope })
+          }
         >
           <ArrowLeft />
           {review.repository.name}
@@ -299,7 +307,7 @@ export function ReviewDetail({ reviewId, tab, focus }: ReviewDetailProps) {
         onValueChange={(next) =>
           // No focus: clicking a tab is a fresh arrival, not a jump to a line
           // someone asked for a moment ago.
-          replace({ name: 'review', reviewId, tab: next as ReviewTab })
+          replace({ name: 'review', reviewId, tab: next as ReviewTab, ...scope })
         }
       >
         <TabsList>
@@ -339,7 +347,9 @@ export function ReviewDetail({ reviewId, tab, focus }: ReviewDetailProps) {
         onOpenChange={(open) => {
           if (!open) setRemoving(null)
         }}
-        onRemoved={() => navigate({ name: 'repository', repositoryId: review.repositoryId })}
+        onRemoved={() =>
+          navigate({ name: 'repository', repositoryId: review.repositoryId, ...scope })
+        }
       />
     </div>
   )

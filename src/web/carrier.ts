@@ -158,11 +158,18 @@ export function createWebCarrier(): WebCarrier {
 
   const inFlight = new Map<string, Promise<unknown>>()
 
-  const ask = <M extends RpcMethod>(method: M, params: RpcParams<M>): Promise<RpcResult<M>> => {
+  const ask = <M extends RpcMethod>(
+    method: M,
+    params: RpcParams<M>,
+    host?: string
+  ): Promise<RpcResult<M>> => {
     const id = nextId++
     const answered = new Promise<RpcOutcome>((resolve, reject) => {
       pending.set(id, { resolve, reject })
-      send({ id, method, params })
+      // Spread rather than always set, so a local request is byte-for-byte the
+      // frame it was before hosts existed - which is what lets a tab served by
+      // an older daemon go on working.
+      send({ id, method, params, ...(host === undefined ? {} : { host }) })
     })
 
     // A response carries whatever its method returns, and the socket cannot
@@ -173,14 +180,19 @@ export function createWebCarrier(): WebCarrier {
   }
 
   return {
-    request<M extends RpcMethod>(method: M, params: RpcParams<M>): Promise<RpcResult<M>> {
-      if (!isReadMethod(method)) return ask(method, params)
+    request<M extends RpcMethod>(
+      method: M,
+      params: RpcParams<M>,
+      host?: string
+    ): Promise<RpcResult<M>> {
+      if (!isReadMethod(method)) return ask(method, params, host)
 
-      const key = `${method}:${JSON.stringify(params ?? null)}`
+      // Keyed by host as well as method: see the same note in the preload.
+      const key = `${host ?? ''}:${method}:${JSON.stringify(params ?? null)}`
       const existing = inFlight.get(key) as Promise<RpcResult<M>> | undefined
       if (existing) return existing
 
-      const promise = ask(method, params).finally(() => inFlight.delete(key))
+      const promise = ask(method, params, host).finally(() => inFlight.delete(key))
       inFlight.set(key, promise)
       return promise
     },

@@ -30,6 +30,7 @@ import { getInstanceId } from '../instance.js'
 import { APP_VERSION } from '../version.js'
 import { attachmentsService } from '../services/attachments.js'
 import { commentsService } from '../services/comments.js'
+import { fsService } from '../services/fs.js'
 import { hostsService } from '../services/hosts.js'
 import { repositoriesService } from '../services/repositories.js'
 import { reviewedFilesService } from '../services/reviewed-files.js'
@@ -160,6 +161,10 @@ const handlers: {
   'hosts.probe': (params) => hostsService.probe(params),
   'hosts.install': (params) => hostsService.install(params),
 
+  // Answered by whoever owns the folder, which is the whole point of it being
+  // a method - see the note in `shared/rpc.ts`.
+  'fs.list': (params) => fsService.list(params),
+
   'repositories.list': () => repositoriesService.list(),
   'repositories.get': (params) => repositoriesService.get(params),
   'repositories.add': (params) => repositoriesService.add(params),
@@ -238,12 +243,18 @@ export async function dispatch<M extends RpcMethod>(
 }
 
 /**
- * The carrier's entry point: a request in, a response out, never a throw.
+ * A request in, a response out, never a throw - answered *here*.
  *
  * A carrier holding a byte stream has no way to report an exception - there is
  * only the wire - so every failure has to come back as a message. Errors keep
  * their `AppError` code and their field errors, which is what lets a form on
  * the other side of an `ssh` pipe still put a message under the right input.
+ *
+ * Carriers do not use this one. Since M4.3 they come through
+ * `handleRoutedRequest` in `core/hosts/router.ts`, which honours the host on
+ * the envelope and then arrives back here for everything that stays local. The
+ * split is what keeps this file's promise true: the dispatcher decides what the
+ * core can *do*, and has never had an opinion about which machine does it.
  */
 export async function handleRequest(request: RpcRequest): Promise<RpcResponse> {
   try {

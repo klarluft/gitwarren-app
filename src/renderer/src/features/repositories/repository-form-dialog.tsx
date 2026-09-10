@@ -11,9 +11,27 @@
  * That is what resets it between openings: fresh mount, fresh `useState`, no
  * effect writing state back on open and no values left over from a previous
  * attempt.
+ *
+ * ## Which machine the folder is on
+ *
+ * There is no host picker on this form, and there was very nearly one. The
+ * reason there is not is that the form is already *on* a machine: it is opened
+ * from a repository list, and a repository list belongs to exactly one install.
+ * Adding a host dropdown here would be a second way to say the same thing, and
+ * two ways to say it means they can disagree - a form set to `pc-wsl` sitting
+ * on this Mac's list, submitting a row that then does not appear above it. The
+ * way to add a repository on `pc-wsl` is to be looking at `pc-wsl`, which is
+ * one click from the Hosts screen and is also where the result shows up.
+ *
+ * What that leaves is the folder, and browsing for it is the part that had to
+ * be built: `api.system.pickDirectory` opens a window on the machine the person
+ * is sitting at, which is the wrong machine whenever this form is on a host.
+ * So the native picker is used in exactly one case - a local form in the
+ * Electron window - and `DirectoryBrowserDialog` covers the other two, a
+ * browser tab and any host. See the note at the top of that file.
  */
 import { useState, type FormEvent } from 'react'
-import { FolderOpen, Loader2 } from 'lucide-react'
+import { FolderOpen, FolderSearch, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -27,7 +45,9 @@ import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui
 import { Input } from '@/components/ui/input'
 import { api } from '@/lib/api'
 import { errorCode, errorMessage, firstFieldError } from '@/lib/errors'
+import { useHost } from '@/lib/host-scope'
 import { basename } from '@/lib/path'
+import { DirectoryBrowserDialog } from './directory-browser-dialog'
 import { useRepositoryMutations } from './use-repositories'
 import { addRepositoryInputSchema, updateRepositoryInputSchema } from '@shared/schemas'
 import { parseWithSchema } from '@shared/validation'
@@ -67,16 +87,27 @@ interface RepositoryFormProps {
 
 function RepositoryForm({ repository, onDone }: RepositoryFormProps) {
   const isEditing = repository !== undefined
+  const host = useHost()
   const { addRepository, updateRepository } = useRepositoryMutations()
 
   const [path, setPath] = useState(repository?.path ?? '')
   const [name, setName] = useState(repository?.name ?? '')
+  const [browsing, setBrowsing] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<unknown>(null)
 
-  async function browse(): Promise<void> {
+  // The native dialog only where it would open on the right machine. See the
+  // note at the top of the file.
+  const nativePicker = api.capabilities.pickDirectory && host === undefined
+
+  async function browseNatively(): Promise<void> {
     const picked = await api.system.pickDirectory()
     if (!picked) return
+    setPath(picked)
+    setError(null)
+  }
+
+  function chose(picked: string): void {
     setPath(picked)
     setError(null)
   }
@@ -132,11 +163,11 @@ function RepositoryForm({ repository, onDone }: RepositoryFormProps) {
         <DialogDescription>
           {isEditing
             ? 'Rename this repository, or point it at a new location if you moved it.'
-            : api.capabilities.pickDirectory
+            : host === undefined
               ? 'Choose any folder inside a git repository. GitWarren stores the repository root.'
-              : // No Browse button to choose with, so the sentence says what the
-                // remaining half of the form actually wants.
-                'Type the path of any folder inside a git repository. GitWarren stores the repository root.'}
+              : // Said plainly, because the path about to be typed is a path on
+                // a machine that is not the one under the keyboard.
+                'Choose a folder on that machine. GitWarren stores the repository root.'}
         </DialogDescription>
       </DialogHeader>
 
@@ -154,17 +185,28 @@ function RepositoryForm({ repository, onDone }: RepositoryFormProps) {
               autoComplete="off"
               spellCheck={false}
             />
-            {/* A tab has no folder picker, so the field beside this is the
-                whole of the interaction there - which is also what adding a
-                repository on a remote host will look like in M4. */}
-            {api.capabilities.pickDirectory && (
+            {/* Two buttons that do the same job on two different machines, and
+                never both: the shell's own dialog when the folder is on the
+                machine with the window, and a listing read over the carrier
+                otherwise - a browser tab, or any host. */}
+            {nativePicker ? (
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => void browse()}
+                onClick={() => void browseNatively()}
                 className="shrink-0"
               >
                 <FolderOpen />
+                Browse
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setBrowsing(true)}
+                className="shrink-0"
+              >
+                <FolderSearch />
                 Browse
               </Button>
             )}
@@ -207,6 +249,13 @@ function RepositoryForm({ repository, onDone }: RepositoryFormProps) {
           </p>
         )}
       </div>
+
+      <DirectoryBrowserDialog
+        open={browsing}
+        onOpenChange={setBrowsing}
+        initialPath={path.trim() === '' ? undefined : path.trim()}
+        onChoose={chose}
+      />
 
       <DialogFooter>
         <Button type="button" variant="ghost" onClick={onDone}>

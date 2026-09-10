@@ -43,6 +43,20 @@ export const repositoryGitStateSchema = z.object({
   detachedAt: z.string().nullable(),
   /** True for a freshly `git init`-ed repo with no commits yet. */
   isEmpty: z.boolean(),
+  /**
+   * The commit this history starts at, or null in a repository with no commits.
+   *
+   * The one field here that is not about *this* checkout. It is the same forty
+   * characters in every clone of a project on every machine, which makes it the
+   * only honest way to say "the thing on `pc-wsl` under `~/github.com` and the
+   * thing on this Mac under `~/github.com` are the same repository". Neither
+   * the path nor the name can say that: two clones are usually in different
+   * places and are often called different things.
+   *
+   * Null is not a group. Two repositories with no commits yet are two empty
+   * repositories, not one repository seen twice.
+   */
+  rootCommit: z.string().nullable(),
   /** Human-readable reason the state could not be read, if any. */
   error: z.string().nullable()
 })
@@ -678,3 +692,53 @@ export type ReplyToThreadInput = z.input<typeof replyToThreadInputSchema>
 export type UpdateCommentInput = z.input<typeof updateCommentInputSchema>
 export type RemoveCommentInput = z.input<typeof removeCommentInputSchema>
 export type SetThreadResolvedInput = z.input<typeof setThreadResolvedInputSchema>
+
+/* -------------------------------------------------------------------------- */
+/* Browsing a filesystem                                                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Which folder to look inside. Absent means "wherever a person starts", which
+ * is the answering machine's home directory.
+ *
+ * A leading `~` is expanded by whoever answers, because that is the only
+ * machine that knows what it stands for - see `core/services/fs.ts`.
+ */
+export const listDirectoryInputSchema = z.object({
+  path: z.string().max(4096).optional()
+})
+
+/** One subdirectory of the folder being listed. */
+export const directoryEntrySchema = z.object({
+  name: z.string(),
+  /** Absolute, on the answering machine. What goes into the path field. */
+  path: z.string(),
+  /** It holds a `.git`, so it can be added without going any deeper. */
+  isRepository: z.boolean(),
+  /** Whether the screen should keep it behind the "show hidden" switch. */
+  isHidden: z.boolean()
+})
+
+/**
+ * One folder, as seen from a machine that cannot look at it itself.
+ *
+ * More than a list of names, because the asking side has to draw a picker for a
+ * filesystem it has never seen: `parent` is the way up (null at the root, which
+ * is how the screen knows to stop offering it), `home` is where the "Home"
+ * button goes, and `separator` is the difference between a Mac driving a Linux
+ * host and a Windows one.
+ */
+export const directoryListingSchema = z.object({
+  /** The folder actually listed, resolved - `~` expanded, `..` collapsed. */
+  path: z.string(),
+  parent: z.string().nullable(),
+  home: z.string(),
+  separator: z.string(),
+  entries: z.array(directoryEntrySchema),
+  /** True when there were more subdirectories than one listing may carry. */
+  truncated: z.boolean()
+})
+
+export type ListDirectoryInput = z.input<typeof listDirectoryInputSchema>
+export type DirectoryEntry = z.infer<typeof directoryEntrySchema>
+export type DirectoryListing = z.infer<typeof directoryListingSchema>

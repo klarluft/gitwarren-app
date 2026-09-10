@@ -4,6 +4,13 @@
  * Routing is a hash and a switch (see `lib/router`). The screens are given
  * different amounts of the window - see `reviewWidth` - because a diff needs
  * the room and the rest of the app reads better narrow.
+ *
+ * Since M4.3 the route may also name a *machine*, and this is the only place
+ * that reads it. `HostScopeProvider` puts it where every screen below can get
+ * at the api bound to it (`lib/host-scope`), so nothing in `features/` takes a
+ * host as a prop and nothing has to remember to pass one on. A route with no
+ * host - which is every route this app produced before M4 - provides the local
+ * api, and the tree below is byte-for-byte the tree it was.
  */
 import { useRef } from 'react'
 // `?inline` rather than a bundled file URL: the packaged renderer is loaded
@@ -19,12 +26,14 @@ import { AgentAccessCard } from './features/agent/agent-access-card'
 import { AgentAccessPage } from './features/agent/agent-access-page'
 import { CommandCenter } from './features/commands/command-center'
 import { CommandRegistryProvider } from './features/commands/command-registry'
+import { HostBanner } from './features/hosts/host-banner'
 import { HostsCard } from './features/hosts/hosts-card'
 import { HostsPage } from './features/hosts/hosts-page'
 import { SettingsPanel } from './features/settings/settings-panel'
 import { RepositoryDetail } from './features/repositories/repository-detail'
 import { RepositoryList } from './features/repositories/repository-list'
 import { ReviewDetail } from './features/reviews/review-detail'
+import { HostScopeProvider } from './lib/host-scope'
 import { useRoute, type ReviewTab } from './lib/router'
 import { cn } from './lib/utils'
 
@@ -53,40 +62,58 @@ export function App() {
     // the first one waits and moving along a row of icon buttons then shows
     // each immediately - which is the behaviour that makes a toolbar readable.
     <TooltipProvider>
-      {/* Wraps the screens, because a screen contributes its own commands while
-          it is mounted and the palette has to outlive any one of them. */}
-      <CommandRegistryProvider>
-        <div className="flex h-full flex-col">
-          {/* Draggable strip so the frameless macOS title bar still moves the window. */}
-          <div className="titlebar-drag h-11 shrink-0" />
+      {/* The machine every screen below is about. Read here and nowhere else:
+          the route is the only thing that knows, and one reader means no
+          component can disagree with another about which host it is showing. */}
+      <HostScopeProvider host={route.host}>
+        {/* Wraps the screens, because a screen contributes its own commands
+            while it is mounted and the palette has to outlive any one of them. */}
+        <CommandRegistryProvider>
+          <div className="flex h-full flex-col">
+            {/* Draggable strip so the frameless macOS title bar still moves the window. */}
+            <div className="titlebar-drag h-11 shrink-0" />
 
-          <main
-            ref={scroller}
-            // Focusable only under program control, so returning to the top can
-            // put the keyboard back there too without adding a tab stop.
-            tabIndex={-1}
-            className={cn(
-              'mx-auto w-full flex-1 overflow-y-auto px-6 pb-10 outline-none',
-              route.name === 'review' ? reviewWidth(route.tab) : 'max-w-3xl'
-            )}
-          >
-            <div className="mb-6">
-              <UpdateBanner />
-            </div>
+            <main
+              ref={scroller}
+              // Focusable only under program control, so returning to the top can
+              // put the keyboard back there too without adding a tab stop.
+              tabIndex={-1}
+              className={cn(
+                'mx-auto w-full flex-1 overflow-y-auto px-6 pb-10 outline-none',
+                route.name === 'review' ? reviewWidth(route.tab) : 'max-w-3xl'
+              )}
+            >
+              <div className="mb-6">
+                <UpdateBanner />
+              </div>
 
-            {route.name === 'repositories' && <HomeScreen />}
-            {route.name === 'agent' && <AgentAccessPage />}
-            {route.name === 'hosts' && <HostsPage />}
-            {route.name === 'repository' && <RepositoryDetail repositoryId={route.repositoryId} />}
-            {route.name === 'review' && (
-              <ReviewDetail reviewId={route.reviewId} tab={route.tab} focus={route.focus} />
-            )}
-          </main>
+              {/* Above every screen rather than on each of them: whichever one
+                  you are looking at, the first thing worth knowing is whose
+                  machine it belongs to. Renders nothing when the answer is
+                  "this one". */}
+              <HostBanner />
 
-          <ScrollToTop target={scroller} />
-          <CommandCenter scroller={scroller} />
-        </div>
-      </CommandRegistryProvider>
+              {/* The home screen is this machine's, and only this machine's -
+                  the logo, the agent prompt and the settings are all about the
+                  install you are sitting at. A host's home is its repositories
+                  and nothing else, which is what `#/h/<instance>/` means. */}
+              {route.name === 'repositories' &&
+                (route.host === undefined ? <HomeScreen /> : <RepositoryList />)}
+              {route.name === 'agent' && <AgentAccessPage />}
+              {route.name === 'hosts' && <HostsPage />}
+              {route.name === 'repository' && (
+                <RepositoryDetail repositoryId={route.repositoryId} />
+              )}
+              {route.name === 'review' && (
+                <ReviewDetail reviewId={route.reviewId} tab={route.tab} focus={route.focus} />
+              )}
+            </main>
+
+            <ScrollToTop target={scroller} />
+            <CommandCenter scroller={scroller} />
+          </div>
+        </CommandRegistryProvider>
+      </HostScopeProvider>
     </TooltipProvider>
   )
 }

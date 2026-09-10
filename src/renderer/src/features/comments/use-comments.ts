@@ -16,7 +16,8 @@
  */
 import { useSWRConfig } from 'swr'
 import { useCallback } from 'react'
-import { api, CACHE_PREFIXES } from '@/lib/api'
+import { CACHE_PREFIXES } from '@/lib/api'
+import { useApi } from '@/lib/host-scope'
 import { useReviewThreads } from '@/features/reviews/use-reviews'
 import type {
   Comment,
@@ -48,6 +49,7 @@ export interface CommentMutations {
 }
 
 export function useCommentMutations(): CommentMutations {
+  const api = useApi()
   const { mutate } = useSWRConfig()
 
   // A comment also bumps its review's `updatedAt`, which reorders every review
@@ -70,7 +72,7 @@ export function useCommentMutations(): CommentMutations {
         await revalidate()
         return thread
       },
-      [revalidate]
+      [api, revalidate]
     ),
     reply: useCallback(
       async (input) => {
@@ -78,7 +80,7 @@ export function useCommentMutations(): CommentMutations {
         await revalidate()
         return comment
       },
-      [revalidate]
+      [api, revalidate]
     ),
     edit: useCallback(
       async (id, body) => {
@@ -86,21 +88,21 @@ export function useCommentMutations(): CommentMutations {
         await revalidate()
         return comment
       },
-      [revalidate]
+      [api, revalidate]
     ),
     remove: useCallback(
       async (id) => {
         await api.comments.remove({ id })
         await revalidate()
       },
-      [revalidate]
+      [api, revalidate]
     ),
     setResolved: useCallback(
       async (threadId, resolved) => {
         await api.comments.setResolved({ threadId, resolved })
         await revalidate()
       },
-      [revalidate]
+      [api, revalidate]
     )
   }
 }
