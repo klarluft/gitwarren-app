@@ -1,0 +1,16 @@
+{
+  "name": "gitwarren",
+  "version": "__VERSION__",
+  "description": "Local-only code review for your git repositories, served on loopback",
+  "keywords": ["code-review", "git", "diff", "mcp", "local-first"],
+  "homepage": "https://github.com/klarluft/gitwarren-app",
+  "repository": { "type": "git", "url": "git+https://github.com/klarluft/gitwarren-app.git" },
+  "bugs": "https://github.com/klarluft/gitwarren-app/issues",
+  "license": "GPL-3.0-or-later",
+  "author": { "name": "Klarluft B.V.", "email": "contact@klarluft.com", "url": "https://klarluft.com" },
+  "type": "module",
+  "bin": { "gitwarren": "bin/gitwarren.mjs" },
+  "files": ["bin", "lib", "drizzle", "web", "README.md"],
+  "engines": { "node": ">=22" },
+  "dependencies": { "better-sqlite3": "^13.0.3" }
+}

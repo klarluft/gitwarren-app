@@ -27,6 +27,7 @@
     "src/core/**/*",
     "src/mcp/**/*",
     "src/daemon/**/*",
+    "src/cli/**/*",
     "src/shared/**/*",
     "src/renderer/src/lib/keys.ts",
     "src/renderer/src/lib/fuzzy.ts",

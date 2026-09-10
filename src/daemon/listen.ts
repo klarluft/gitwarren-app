@@ -47,7 +47,7 @@ import type { AppInfo, McpLaunchInfo } from '../shared/api.js'
 declare const __APP_VERSION__: string
 
 /**
- * `typeof` rather than the identifier: `tsx src/daemon/serve.ts --listen` runs
+ * `typeof` rather than the identifier: `tsx src/cli/gitwarren.ts serve` runs
  * this file with no build in front of it, so the define does not exist and a
  * bare reference would be a crash on startup in the one mode used for
  * development.
@@ -59,9 +59,9 @@ const VERSION = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : '0.0.0-d
  *
  * The env var is first so a tarball that puts the files somewhere else - or
  * someone debugging a build - can say so without a code change. Then the
- * sibling of this file, which is `out/web` next to `out/daemon/serve.cjs`, and
- * finally the repository's own `out/`, which is what `tsx src/daemon/serve.ts`
- * has to fall back to.
+ * sibling of this file, which is `out/web` next to `out/daemon/gitwarren.cjs`,
+ * and finally the repository's own `out/`, which is what `tsx
+ * src/cli/gitwarren.ts` has to fall back to.
  *
  * ## Why "has an index.html" is not the test
  *
@@ -78,7 +78,13 @@ function isWebBuild(directory: string): boolean {
   return existsSync(join(directory, 'index.html')) && !existsSync(join(directory, 'main.ts'))
 }
 
-function resolveWebRoot(): string | null {
+/**
+ * Exported because `service install` has to name this directory in a file
+ * rather than find it later. See the header of `cli/install.ts`: the third
+ * candidate below is relative to the working directory, and a login item has
+ * no working directory worth the name.
+ */
+export function resolveWebRoot(): string | null {
   const here = dirname(fileURLToPath(import.meta.url))
   const candidates = [
     process.env.GITWARREN_WEB_ROOT,
@@ -133,7 +139,7 @@ function describeInstall(linkPort: number | null): AppInfo {
 /**
  * Bind, publish, and print the one URL that works.
  *
- * Returns false when it could not start, so `serve.ts` can exit with something
+ * Returns false when it could not start, so the CLI entry can exit with something
  * a script can read. Every refusal prints a sentence naming what to do about
  * it: this is a command someone typed, and an exit code on its own is not an
  * answer.

@@ -1,15 +1,19 @@
 /**
  * The daemon: the core, with a pipe instead of a window.
  *
- * Its entry point is `serve.ts` next door, which is the file that becomes
- * `out/daemon/serve.cjs`. The split is so that `GitWarren --serve` can import
- * `runDaemon` without a module that parses argv and calls `process.exit` on
- * import running inside the Electron main process.
+ * Its entry point is `cli/gitwarren.ts`, which is the file that becomes
+ * `out/daemon/gitwarren.cjs`. The split is so that `GitWarren --serve` can
+ * import `runDaemon` without a module that parses argv and calls `process.exit`
+ * on import running inside the Electron main process. Since M3.3 that entry is
+ * a whole CLI rather than this file's own `serve.ts`, which is why the two
+ * moved apart: `serve`, `open` and `service install` are not all carriers, and
+ * only one of them belongs in here.
  *
- * `serve.cjs` is what a GitWarren on another machine will spawn - over `ssh` in
- * M4, over `wsl.exe` in M5 - and what `gitwarren serve` will be in M3. It runs
- * on a box with no display, no Electron and, thanks to the tarball from spike
- * S3, no Node installation either.
+ * `gitwarren serve --stdio` is what a GitWarren on another machine spawns -
+ * over `ssh` in M4, over `wsl.exe` in M5 - through the stable launcher path
+ * `~/.gitwarren/bin/gitwarren` that M3.3 writes. It runs on a box with no
+ * display, no Electron and, thanks to the tarball from spike S3, no Node
+ * installation either.
  *
  * There is deliberately very little here. Everything a caller can ask for is in
  * `core/rpc/dispatcher.ts` and everything about getting the question across the
