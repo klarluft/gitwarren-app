@@ -67,18 +67,51 @@ async function openReview(params: unknown): Promise<ReviewOpen> {
  *
  * The only method whose params need touching before a service sees them, and
  * the reason is transport: `Buffer` is not something a renderer or a JSON
- * carrier can send, so an image arrives as an `ArrayBuffer` or a plain array
- * and is turned back into bytes here, at the edge, once.
+ * carrier can send, so an image arrives in whatever form its carrier could
+ * manage and is turned back into bytes here, at the edge, once.
+ *
+ * Three forms, because there are two kinds of carrier. `ArrayBuffer` is what
+ * the renderer sends and what Electron's structured clone preserves; it is also
+ * exactly what `JSON.stringify` destroys, turning it into `{}`. So a carrier
+ * over a byte stream sends base64, or the `number[]` a naive stringify of a
+ * byte array produces. Which one arrived is decided here rather than by a flag
+ * in the params: the shapes are already distinguishable, and a caller that had
+ * to declare its encoding would be a caller that could declare it wrongly.
+ *
+ * The explicit rejection at the end matters more than it looks. Before M2 an
+ * unrecognised shape reached `Buffer.from` and came back as an `INTERNAL` from
+ * somewhere deep in the dispatcher - which over a pipe is indistinguishable
+ * from the daemon being broken. It is an `INVALID_INPUT` naming the forms, so
+ * the far end of an `ssh` connection can read what it did wrong.
  */
 function toIngestSource(params: unknown): { bytes: Buffer; originalName?: string } {
   if (typeof params !== 'object' || params === null || !('bytes' in params)) {
     throw new AppError('INVALID_INPUT', 'An image is required.')
   }
+
   const { bytes, originalName } = params as AttachmentIngestParams
-  return {
-    bytes: Buffer.from(bytes as ArrayBuffer),
-    ...(typeof originalName === 'string' ? { originalName } : {})
+  const name = typeof originalName === 'string' ? { originalName } : {}
+
+  // `base64` decoding ignores anything outside the alphabet rather than
+  // throwing, so a string that is not base64 becomes a short buffer and fails
+  // the format sniff in the service - which is the right place for it to fail.
+  if (typeof bytes === 'string') return { bytes: Buffer.from(bytes, 'base64'), ...name }
+  if (Array.isArray(bytes)) return { bytes: Buffer.from(bytes), ...name }
+  if (bytes instanceof ArrayBuffer) return { bytes: Buffer.from(bytes), ...name }
+  // A typed array, which is what a `Uint8Array` sent over structured clone
+  // arrives as. Its own byte range, not the whole underlying buffer.
+  if (ArrayBuffer.isView(bytes)) {
+    const view = bytes as ArrayBufferView
+    return {
+      bytes: Buffer.from(view.buffer, view.byteOffset, view.byteLength),
+      ...name
+    }
   }
+
+  throw new AppError(
+    'INVALID_INPUT',
+    'An image must be sent as bytes: base64, an array of byte values, or an ArrayBuffer.'
+  )
 }
 
 /**

@@ -77,7 +77,12 @@ export const api: GitWarrenApi = {
     pickDirectory: () => shell.system.pickDirectory(),
     revealPath: (path) => shell.system.revealPath(path),
     appInfo: once(() => shell.system.appInfo()),
-    editors: once(() => shell.system.editors())
+    editors: once(() => shell.system.editors()),
+    // Not memoised, unlike the two above: the user can turn this on in System
+    // Settings while the window is open, and a value cached for the life of the
+    // document would show them a switch that disagrees with their machine.
+    getOpenAtLogin: () => shell.system.getOpenAtLogin(),
+    setOpenAtLogin: (openAtLogin) => shell.system.setOpenAtLogin(openAtLogin)
   },
   navigation: shell.navigation,
   updates: shell.updates
@@ -133,7 +138,13 @@ export const CACHE_KEYS = {
    * are memoised in `api` above and happen at most once per window.
    */
   appInfo: 'app-info',
-  editors: 'editors'
+  editors: 'editors',
+  /**
+   * Whether GitWarren starts with the machine. Not one of the two above: it can
+   * change while the window is open, and it changes outside the app - so it has
+   * a key of its own and is revalidated like anything else.
+   */
+  openAtLogin: 'open-at-login'
 } as const
 
 /** Prefixes used by the family-wide invalidation above. */

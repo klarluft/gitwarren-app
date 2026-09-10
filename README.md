@@ -415,12 +415,13 @@ Other scripts:
 | Command | Does |
 | --- | --- |
 | `npm run dev` | Run the app in development with HMR |
-| `npm run build` | Typecheck, then build main / preload / renderer / MCP |
+| `npm run build` | Typecheck, then build main / preload / renderer / MCP / daemon |
 | `npm test` | Integration tests against a real SQLite file and real `git` |
 | `npm run typecheck` | `tsc --noEmit` for both the Node and web projects |
 | `npm run lint` | ESLint (type-aware) |
 | `npm run db:generate` | Regenerate migrations after editing the Drizzle schema |
 | `npm run mcp:dev` | Run the MCP server from source against your dev database |
+| `npm run serve:dev` | Run the headless daemon from source, protocol on stdin/stdout |
 | `npm run package` | Build installers for the current platform, no publish |
 | `npm run release` | Build **and publish** to GitHub Releases |
 
@@ -444,11 +445,15 @@ src/
 │   ├── errors.ts        AppError + the error-code vocabulary
 │   ├── routes.ts        the hash grammar, as data — parsed by three processes
 │   ├── deep-link.ts     gitwarren:// URL ⇄ Route, the hostile-input boundary
+│   ├── link-port.ts     41427: the one port every install agrees on
+│   ├── rpc.ts           the message protocol — requests, responses, events
 │   └── api.ts           IPC channel names and the bridge's type
 │
 ├── core/              The shared service layer. Never imports electron.
 │   ├── paths.ts         per-platform data directory (+ env override)
-│   ├── gui-runtime.ts   the running GUI's loopback port, for other processes
+│   ├── instance.ts      this install's id, minted once into the data directory
+│   ├── daemon-runtime.ts  who owns this machine right now, for other processes
+│   ├── rpc/             the dispatcher, and one carrier per way of asking
 │   ├── git-exec.ts      the one place `git` is spawned
 │   ├── git.ts           live repository state; root resolution
 │   ├── git-compare.ts   worktrees, refs, commits, diffs, dirty state
@@ -467,18 +472,26 @@ src/
 │   ├── link-server.ts   the loopback page holding the "Open GitWarren" button
 │   ├── updater.ts       electron-updater wiring
 │   ├── editors.ts       finds the user's code editor and opens a file in it
-│   └── mcp-launch.ts    computes this install's MCP launch command
+│   ├── tray.ts          the menu bar / notification area item: Open, Quit
+│   ├── login-item.ts    start at login, per platform; opt-in
+│   ├── start-hidden.ts  whether this launch should come up without a window
+│   └── mcp-launch.ts    maintains ~/.gitwarren/bin/gitwarren-mcp
 │
 ├── preload/           The only bridge into the renderer
+├── daemon/            The core with a pipe instead of a window
+│   ├── serve.ts         argv, signals, exit code → out/daemon/serve.cjs
+│   └── daemon.ts        opens the database, picks a carrier
 ├── mcp/               stdio MCP server
 │   ├── server.ts        tool definitions
-│   ├── gui-link.ts      the `guiUrl` on every review and comment payload
+│   ├── gui-link.ts      the `guiUrl` on every review and comment payload —
+│   │                    always a link, whether or not the app is running
 │   └── identity.ts      naming an agent from its MCP handshake
 └── renderer/          React app (no Node access)
     └── src/
         ├── assets/          logo.png, inlined as a data: URI by the CSP
         ├── components/      markdown.tsx + ui/ (shadcn-style, on Base UI)
-        ├── features/        repositories/, reviews/, comments/, agent/
+        ├── features/        repositories/, reviews/, comments/, agent/,
+        │                     settings/
         └── lib/             api access, error helpers, hash router
 ```
 
@@ -649,9 +662,30 @@ kind of failure rather than parsing prose.
 Every payload that carries a review or a comment also carries a **`guiUrl`** —
 an address that opens the app on exactly that review, and on the commented line
 where there is one. It is there so an agent can end its turn with a link instead
-of "I've left three comments on review 4, have a look". When GitWarren is not
-running it is **`null`**, and the tool descriptions say what that means, because
-an agent acts on a documented null far more reliably than on an absent field.
+of "I've left three comments on review 4, have a look".
+
+It is **never null**. It used to be, whenever the app was not running, because
+the port it named was one the OS had handed that particular launch. But a
+`guiUrl` outlives the call that made it — pasted into a chat, left in a commit
+message, read on Thursday — so deciding at mint time that the user has nothing
+to open it with is a guess about a moment that has not happened yet, and it was
+wrong in the ordinary case: the user closes the window, the agent works for
+twenty minutes, the user opens it again. A dead link costs one refused
+connection in a browser. A null cost an agent telling the user there was
+nothing to click. The tool descriptions now say what a refused connection means
+instead.
+
+The URL names the instance that minted it, in the fragment:
+
+```
+http://127.0.0.1:41427/#h=<instance-id>/review/4/conversation
+```
+
+which the page turns into `gitwarren://<instance-id>/review/4/conversation`.
+That is what lets a link resolve on whichever GitWarren the user clicked from —
+the app can tell its own review 4 from another machine's. A link naming an
+install this one is not lands on the home screen rather than opening the local
+review with that number; reaching another host arrives in M4.
 
 The link is a chain of three hops, and each one is load-bearing:
 
@@ -689,12 +723,27 @@ repository or drove IPC would be a capability handed out to the whole world. It
 validates the `Host` header, and the route it is linking to never even reaches
 it: that rides in the URL fragment, which browsers do not send.
 
-The port is chosen by the OS (`listen(0)` on `127.0.0.1`, never `0.0.0.0`) and
-written to `gui-runtime.json` in the data directory alongside the GUI's pid, so
-the MCP server — a separate process — can find it. Readers treat that file as a
-hint and never as a fact: a crash leaves it behind, so the pid is checked with
-`process.kill(pid, 0)` before the port is believed, and it is re-read on every
-call rather than cached. An MCP server routinely outlives several GUI launches.
+The port is **41427**, fixed, on `127.0.0.1` and never `0.0.0.0`. It used to be
+whatever the OS handed out (`listen(0)`), written to a runtime file for the MCP
+server to read — which meant a link could only be minted while the app was
+running, and only for this machine. Neither survives contact with a second
+machine: a link written on one is read on another, and a link left in a comment
+on Tuesday is clicked on Thursday. So the port is a constant every install
+agrees on (`src/shared/link-port.ts`, chosen in spike S6 for being outside every
+default ephemeral range, absent from `/etc/services`, and not on Chromium's
+restricted-port list), and `guiUrl` no longer depends on anything being up.
+
+If something else holds 41427, the app starts anyway and says which port and
+why; links are still handed out, because they name the same port on every
+machine and must not depend on this one's luck. The *Agent access* panel shows
+the warning.
+
+`daemon-runtime.json` in the data directory still records who owns this machine
+— instance id, pid, link port, and whether the owner is the GUI or a daemon —
+but nothing needs it to build a link any more. Readers treat it as a hint and
+never as a fact: a crash leaves it behind, so the pid is checked with
+`process.kill(pid, 0)` before it is believed, and it is re-read on every call
+rather than cached.
 
 The incoming URL is **parsed to a `Route` before anything acts on it**, never
 forwarded as a string, using the same grammar the hash router uses
@@ -872,54 +921,67 @@ comment is worth more than the link.
 
 **The app shows you the exact configuration for your install** — open the
 *Agent access* panel at the bottom of the window and copy it. The paths depend
-on where the app was installed, so prefer the panel over the templates below.
+on where the app was installed, so prefer the panel over the notes below.
 
-The server is launched using the app's own Electron binary in Node mode. That is
+### One command, everywhere
+
+GitWarren maintains a launcher at a path that is the same on every machine:
+
+| | |
+| --- | --- |
+| macOS, Linux | `~/.gitwarren/bin/gitwarren-mcp` |
+| Windows | `%USERPROFILE%\\.gitwarren\\bin\\gitwarren-mcp.cmd` |
+
+It takes no arguments and needs no environment, and the app rewrites it
+whenever the install moves — after an update, after dragging the app to a
+different folder, after switching between a packaged build and a source
+checkout. So an agent config that names it keeps working, and the *Agent
+access* panel leads with a sentence you paste into whatever agent you use
+rather than with JSON you paste into a file:
+
+> Set up the GitWarren MCP server for yourself. It speaks MCP over stdio and is
+> started with the command `~/.gitwarren/bin/gitwarren-mcp` (no arguments, no
+> environment). Register it under the name "gitwarren" in your own MCP
+> configuration, then call its `agent_identity` tool to confirm it works.
+
+Agents know their own configuration format better than a panel can. What they
+need from us is a stable command.
+
+To configure it by hand instead, that command is all a `mcpServers` entry
+needs:
+
+```json
+{
+  "mcpServers": {
+    "gitwarren": { "command": "/Users/you/.gitwarren/bin/gitwarren-mcp" }
+  }
+}
+```
+
+Codex wants the same under `[mcp_servers.gitwarren]` in TOML; VS Code calls the
+object `servers`.
+
+### What the launcher wraps
+
+Two lines around the app's own Electron binary in Node mode. That is
 deliberate: `better-sqlite3` is a native addon that must be loaded by a runtime
 whose ABI it matches, and it has to resolve out of the app's unpacked
 `node_modules`. Using the bundled binary satisfies both, and means **no Node
 installation is required**.
 
-macOS:
-
-```json
-{
-  "mcpServers": {
-    "gitwarren": {
-      "command": "/Applications/GitWarren.app/Contents/MacOS/GitWarren",
-      "args": [
-        "/Applications/GitWarren.app/Contents/Resources/app.asar.unpacked/out/mcp/server.cjs"
-      ],
-      "env": { "ELECTRON_RUN_AS_NODE": "1" }
-    }
-  }
-}
-```
-
-Windows (per-user install):
-
-```json
-{
-  "mcpServers": {
-    "gitwarren": {
-      "command": "%LOCALAPPDATA%\\Programs\\GitWarren\\GitWarren.exe",
-      "args": [
-        "%LOCALAPPDATA%\\Programs\\GitWarren\\resources\\app.asar.unpacked\\out\\mcp\\server.cjs"
-      ],
-      "env": { "ELECTRON_RUN_AS_NODE": "1" }
-    }
-  }
-}
-```
-
-Linux — see [Known limitations](#known-limitations); an AppImage needs to be
-extracted once first.
+An AppImage is the interesting case, and the reason this path exists at all: it
+re-mounts itself at a new `/tmp/.mount_*` directory on every launch, so nothing
+inside it is worth writing down. Its one stable path is the `.AppImage` file,
+which AppRun exports as `APPIMAGE` and whose mount point it exports as
+`APPDIR`, so the launcher names the former and finds the server through the
+latter at run time. Nothing needs extracting.
 
 From a source checkout, `npm run mcp:dev` runs the same server against your dev
 database.
 
 The app does not need to be running for the MCP server to work — both open the
-same database independently.
+same database independently, and since 0.1.7 an agent gets a working `guiUrl`
+either way.
 
 ---
 
@@ -1435,16 +1497,6 @@ these two are unrelated and both need updating if the branding moves.
 
 ## Known limitations
 
-- **Linux AppImage + MCP.** An AppImage is re-mounted at a new
-  `/tmp/.mount_*` directory on every launch, so the paths inside it are not
-  stable and cannot be pasted into an agent config that will be reused. The
-  *Agent access* panel detects this and says so. Extract the AppImage once and
-  point the agent at the result:
-  ```bash
-  ./GitWarren-0.1.0-x64.AppImage --appimage-extract
-  # then use squashfs-root/gitwarren and
-  #      squashfs-root/resources/app.asar.unpacked/out/mcp/server.cjs
-  ```
 - **git must be installed** and on the PATH. GitWarren shells out to it rather
   than bundling an implementation. If it is missing, the app says so explicitly
   (`GIT_UNAVAILABLE`) instead of showing an empty list.

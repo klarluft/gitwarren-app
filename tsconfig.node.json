@@ -26,6 +26,7 @@
     "src/preload/**/*",
     "src/core/**/*",
     "src/mcp/**/*",
+    "src/daemon/**/*",
     "src/shared/**/*",
     "src/renderer/src/lib/keys.ts",
     "src/renderer/src/lib/fuzzy.ts",
@@ -35,6 +36,7 @@
     "src/renderer/src/features/reviews/__tests__/diff-search.test.ts",
     "electron.vite.config.ts",
     "vite.mcp.config.ts",
+    "vite.daemon.config.ts",
     "drizzle.config.ts",
     "scripts/**/*.ts"
   ]

@@ -73,7 +73,10 @@ const bridge: GitWarrenBridge = {
       pickDirectory: () => invoke<string | null>(IPC_CHANNELS.systemPickDirectory),
       revealPath: (path: string) => invoke<void>(IPC_CHANNELS.systemRevealPath, path),
       appInfo: () => invoke<AppInfo>(IPC_CHANNELS.systemAppInfo),
-      editors: () => invoke<EditorList>(IPC_CHANNELS.systemEditors)
+      editors: () => invoke<EditorList>(IPC_CHANNELS.systemEditors),
+      getOpenAtLogin: () => invoke<boolean>(IPC_CHANNELS.systemGetOpenAtLogin),
+      setOpenAtLogin: (openAtLogin: boolean) =>
+        invoke<boolean>(IPC_CHANNELS.systemSetOpenAtLogin, openAtLogin)
     },
     updates: {
       getStatus: () => invoke<UpdateStatus>(IPC_CHANNELS.updatesGetStatus),

@@ -29,8 +29,10 @@
  *
  * Every review and comment payload also carries a `guiUrl`, so an agent can
  * hand the user a clickable way into the app rather than telling them to go and
- * find the review themselves. It is null when the GUI is not running, and the
- * descriptions say so - see `gui-link.ts`.
+ * find the review themselves. Since M2 it is always a link - the port is fixed
+ * and the instance id is a file - so there is nothing for the agent to check
+ * before showing it, and the descriptions say what a refused connection means
+ * instead. See `gui-link.ts`.
  *
  * One hard rule: stdout belongs to the protocol. Diagnostics go to stderr.
  */

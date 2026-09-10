@@ -9,7 +9,13 @@
  */
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { deepLinkFor, deepLinkPathFor, parseDeepLink } from '../deep-link.js'
+import {
+  deepLinkFor,
+  deepLinkPathFor,
+  loopbackFragmentFor,
+  LOOPBACK_HOST_PREFIX,
+  parseDeepLink
+} from '../deep-link.js'
 import { hrefFor, type ReviewRoute } from '../routes.js'
 
 const HOME = { name: 'repositories' } as const
@@ -122,4 +128,79 @@ test('the loopback fragment and the app hash describe the same place', () => {
   assert.equal(deepLinkPathFor(route), 'review/9/commits')
   assert.equal(hrefFor(route), '#/reviews/9/commits')
   assert.deepEqual(parseDeepLink(`gitwarren://${deepLinkPathFor(route)}`), route)
+})
+
+/*
+ * M2: the instance id in the authority. A link now says which install the
+ * review is on, so that the GitWarren the user clicks through to can tell its
+ * own review 4 from another machine's review 4 - which is the whole of rule 4.
+ */
+
+const INSTANCE = '0f8fad5b-d9cb-469f-a165-70867728950e'
+
+test('an instance-scoped link comes back host-scoped', () => {
+  assert.deepEqual(parseDeepLink(`gitwarren://${INSTANCE}/review/12/files`), {
+    name: 'review',
+    reviewId: 12,
+    tab: 'files',
+    host: INSTANCE
+  })
+})
+
+test('the id survives a round trip with a focus on it', () => {
+  const route: ReviewRoute = {
+    name: 'review',
+    reviewId: 7,
+    tab: 'files',
+    focus: { filePath: 'src/main/index.ts', side: 'head', line: 94 }
+  }
+
+  const url = deepLinkFor(route, INSTANCE)
+  assert.equal(url, `gitwarren://${INSTANCE}/review/7/files/src%2Fmain%2Findex.ts/head/94`)
+  assert.deepEqual(parseDeepLink(url), { ...route, host: INSTANCE })
+})
+
+test('a link minted before M2 still means the local install', () => {
+  // The compatibility that matters: these are sitting in terminal scrollback
+  // and comment bodies right now, and they have to keep meaning what they meant.
+  const parsed = parseDeepLink('gitwarren://review/12/files')
+  assert.deepEqual(parsed, { name: 'review', reviewId: 12, tab: 'files' })
+  // Not merely absent from the comparison - absent from the object, so nothing
+  // comparing routes sees a host key at all.
+  assert.equal('host' in (parsed as object), false)
+})
+
+test('an authority that is neither `review` nor an instance id is not for us', () => {
+  // The same answer the parser gave before instance ids existed. A near-miss id
+  // is the case worth naming: one character short is not an instance id, and
+  // treating it as one would mean inventing a host nothing can resolve.
+  assert.equal(parseDeepLink('gitwarren://attachment/abc'), null)
+  assert.equal(parseDeepLink(`gitwarren://${INSTANCE.slice(0, -1)}/review/12`), null)
+  assert.equal(parseDeepLink(`gitwarren://${INSTANCE.toUpperCase()}x/review/12`), null)
+})
+
+test('an instance with something other than a review under it is not for us', () => {
+  assert.equal(parseDeepLink(`gitwarren://${INSTANCE}/attachment/abc`), null)
+  assert.equal(parseDeepLink(`gitwarren://${INSTANCE}/repositories/2`), null)
+})
+
+test('an instance with nothing under it is that install`s home', () => {
+  // A truncated link - chat clients do this - should land somewhere real on the
+  // machine it names rather than being swallowed.
+  assert.deepEqual(parseDeepLink(`gitwarren://${INSTANCE}/`), {
+    name: 'repositories',
+    host: INSTANCE
+  })
+})
+
+test('the loopback fragment is the deep link path with the id in front', () => {
+  const route: ReviewRoute = { name: 'review', reviewId: 4, tab: 'conversation' }
+
+  assert.equal(loopbackFragmentFor(INSTANCE, route), `h=${INSTANCE}/review/4/conversation`)
+  // The page at the other end pastes the scheme back on, and what it produces
+  // has to be the URL this module would have built itself.
+  assert.equal(
+    `gitwarren://${loopbackFragmentFor(INSTANCE, route).slice(LOOPBACK_HOST_PREFIX.length)}`,
+    deepLinkFor(route, INSTANCE)
+  )
 })

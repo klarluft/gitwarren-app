@@ -31,8 +31,9 @@
   "scripts": {
     "dev": "electron-vite dev",
     "start": "electron-vite preview",
-    "build": "npm run typecheck && electron-vite build && npm run build:mcp",
+    "build": "npm run typecheck && electron-vite build && npm run build:mcp && npm run build:daemon",
     "build:mcp": "vite build --config vite.mcp.config.ts",
+    "build:daemon": "vite build --config vite.daemon.config.ts",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "typecheck:node": "tsc -p tsconfig.node.json --noEmit",
     "typecheck:web": "tsc -p tsconfig.web.json --noEmit",
@@ -41,6 +42,7 @@
     "test": "node scripts/run-tests.mjs",
     "db:generate": "drizzle-kit generate",
     "mcp:dev": "tsx src/mcp/server.ts",
+    "serve:dev": "tsx src/daemon/serve.ts --stdio",
     "package": "npm run build && electron-builder --publish never",
     "package:dir": "npm run build && electron-builder --dir --publish never",
     "release": "npm run build && electron-builder --publish always",
