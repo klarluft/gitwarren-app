@@ -980,8 +980,7 @@ From a source checkout, `npm run mcp:dev` runs the same server against your dev
 database.
 
 The app does not need to be running for the MCP server to work — both open the
-same database independently, and since 0.1.7 an agent gets a working `guiUrl`
-either way.
+same database independently, and an agent gets a working `guiUrl` either way.
 
 ---
 
@@ -1033,6 +1032,7 @@ npm run package:dir    # unpacked app only, much faster
 | Windows | `GitWarren-<v>-x64.exe`, `-arm64.exe` (NSIS), `.blockmap` each, `latest.yml` |
 | macOS | `-arm64.dmg`, `-x64.dmg`, `-arm64.zip`, `-x64.zip`, `.blockmap` each, `latest-mac.yml` |
 | Linux | `-x64.AppImage`, `-arm64.AppImage`, `latest-linux.yml` |
+| Any host | `gitwarren-daemon-<v>-linux-x64.tar.gz`, `-linux-arm64.tar.gz` |
 
 The `.blockmap` files are what make updates differential: electron-updater
 compares block hashes with the installed version and downloads only the changed
@@ -1041,6 +1041,19 @@ ranges.
 The macOS **zip is required** — electron-updater reads the zip, not the dmg.
 Dropping that target still produces a working installer but silently breaks
 auto-update.
+
+The **daemon tarballs** are not installers and electron-updater ignores them.
+Each carries a Node binary, the daemon and MCP bundles, the one matching
+`better_sqlite3.node` and the migrations — about 44 MB, and enough to run
+GitWarren's core on a Linux box with nothing installed on it. They are built by
+the `daemon` job in `release.yml` from `scripts/build-daemon-tarball.mjs`, on
+one runner for both architectures, and nothing in them is compiled.
+
+Their **file names are a contract**. A GitWarren installing a daemon on a
+remote host runs `uname -sm` there, maps the answer to `linux-x64` or
+`linux-arm64`, and fetches `gitwarren-daemon-<version>-<target>.tar.gz` from
+the release by URL — one request, no listing and no search. Renaming them
+breaks that.
 
 Cross-building for every platform from one machine is not reliable (Windows
 code signing and macOS notarization both need their own host). Run the release
