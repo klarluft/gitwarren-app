@@ -1663,9 +1663,11 @@ these two are unrelated and both need updating if the branding moves.
   rather than the moment it goes. Keeping a socket open to every host would mean
   connecting to every machine you own, which is the thing the pool exists to
   avoid.
-- **`tailscale serve` needs to be allowed to run.** On Linux it refuses without
+- **On Linux, `tailscale serve` needs to be allowed to run.** It refuses without
   root unless `sudo tailscale set --operator=$USER` has been run once; GitWarren
   reports what Tailscale said rather than silently failing to turn the switch on.
+  macOS and Windows both apply it as the ordinary user, so this is a Linux-only
+  step.
   HTTPS is a tailnet-wide setting: with it off, your machines are reachable over
   plain HTTP inside the tailnet, which WireGuard is encrypting either way.
 - **Repo-relative images are not rendered.** `![](docs/arch.png)` in a comment

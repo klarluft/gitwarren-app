@@ -189,11 +189,26 @@ export const TAILSCALE_USER_HEADER = 'tailscale-user-login'
  *
  * ## What this does and does not protect against
  *
- * `tailscaled` sets the header, and it proxies to loopback - so a *local*
- * process could send the header itself with a `Host` naming the tailnet
- * authority and get in without the token. That grants it nothing: a local
- * process running as the user can already read the 0600 token file and open the
- * database directly, which is the principal `token.ts` says loopback has.
+ * The whole check rests on one property of `tailscale serve`, and it was
+ * measured rather than assumed, because everything here is worthless without
+ * it: **`tailscaled` overwrites a client-supplied `Tailscale-User-Login` with
+ * the authenticated peer's real identity.** A request sent from `pc-wsl` to
+ * this Mac carrying `Tailscale-User-Login: attacker@evil.example` arrived with
+ * `michal-wrzosek@github` - the header the client set was discarded, not merged
+ * or appended. So a peer on the tailnet cannot claim to be the owner, which is
+ * what makes "the same login as the owner" an authorisation decision rather
+ * than a request for a password nobody checks.
+ *
+ * That matters most for a *shared* tailnet node, which is the case this would
+ * fail open on: another person's machine on the same tailnet is refused because
+ * `tailscaled` tells us who they actually are, not because they were polite
+ * about it.
+ *
+ * `tailscaled` also proxies to loopback, so a *local* process could send the
+ * header itself with a `Host` naming the tailnet authority and get in without
+ * the token. That grants it nothing: a local process running as the user can
+ * already read the 0600 token file and open the database directly, which is the
+ * principal `token.ts` says loopback has.
  *
  * The door that matters stays shut. A web page cannot set `Host` and cannot set
  * `Tailscale-User-Login` - both are forbidden header names - so the DNS
