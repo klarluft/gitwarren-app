@@ -67,10 +67,15 @@ function tsxCli() {
  * the symlink test skips is a property of the machine and not of the operating
  * system - Windows allows an unprivileged process to create a symlink once
  * Developer Mode is on - so `win32 ? 5 : 4` would fail on a correctly
- * configured Windows box, which is the wrong machine to punish, and would have
- * had to be guessed at for the CI runner before anyone had watched one run.
- * "No test skips unless it is on this list" needs no platform branch and is
- * true everywhere.
+ * configured Windows box, which is the wrong machine to punish.
+ *
+ * That is not hypothetical, and it is worth writing down because the obvious
+ * design would have been wrong: `windows-latest` reports **4** skips, not 5.
+ * The GitHub runner does allow the symlink, so the M5.0 test runs there, while
+ * the Windows PC this project is developed against skips it. A count keyed on
+ * `process.platform` would have been red on the very first CI run, for a suite
+ * that was entirely correct. "No test skips unless it is on this list" needs no
+ * platform branch and is true on all of them.
  *
  * What it does not do is notice a test that stopped running by being deleted,
  * renamed out of `*.test.ts`, or never reached because the file it lives in

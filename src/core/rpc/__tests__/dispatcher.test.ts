@@ -47,7 +47,19 @@ import type {
 const dataDir = mkdtempSync(join(tmpdir(), 'gitwarren-rpc-data-'))
 // Realpathed because a repository is stored under its resolved root, and on
 // macOS the temporary directory is reached through a symlink.
-const workDir = realpathSync(mkdtempSync(join(tmpdir(), 'gitwarren-rpc-work-')))
+//
+// `.native`, and not plain `realpathSync`, because that is what the code under
+// test uses: `canonicalise` in `core/git-exec.ts` calls `realpath.native`,
+// which resolves symlinks *and* reports the true on-disk name. The expected
+// value has to be produced by the same function as the actual one or the two
+// disagree wherever they differ. Plain `realpathSync` was enough on macOS and
+// Linux, where the difference is only the symlink, and wrong on the GitHub
+// Windows runner, where `tmpdir()` is `C:\Users\RUNNER~1\…` - an 8.3 short
+// name that only the native call expands to `runneradmin`. Nine tests compared
+// a stored path against the unexpanded spelling and failed. It does not
+// reproduce on a Windows machine whose profile has no short name, which is why
+// running the suite on a PC did not find it and the first CI run did.
+const workDir = realpathSync.native(mkdtempSync(join(tmpdir(), 'gitwarren-rpc-work-')))
 process.env.GITWARREN_DATA_DIR = dataDir
 
 const { dispatch, handleRequest, isRpcMethod, rpcMethodNames } = await import('../dispatcher.js')

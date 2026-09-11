@@ -99,10 +99,16 @@ Two things worth knowing when you read a green check:
 
 - **A skip is reported by name.** `npm test` fails if a test skips itself
   without being listed in `MAY_SKIP` in `scripts/run-tests.mjs`. Four tests skip
-  everywhere and a fifth skips on a Windows machine without Developer Mode, and
-  before this the two were the same line of output — so a test that quietly
-  stopped running on one platform looked exactly like the one that is meant not
-  to run there. Every run now prints what it did *not* check.
+  everywhere, and M5.0's symlink test skips itself on a Windows machine that
+  will not let an unprivileged process create one — before this, `skipped 4` and
+  `skipped 5` were the same line of output, so a test that quietly stopped
+  running on one platform looked exactly like the one that is meant not to run
+  there. Every run now prints what it did *not* check.
+
+  The list holds names rather than a count per platform because the fifth skip
+  is a property of the *machine*, not the operating system: the GitHub Windows
+  runner allows the symlink and reports four skips, while the Windows PC this
+  project is developed against reports five. Both are correct.
 - **Green means the lockfile installs, not that your `node_modules` is right.**
   CI installs with `npm ci`, from the lockfile. A developer's `node_modules`
   drifts on its own — `ws` went missing from one for two milestones without CI
