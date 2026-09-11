@@ -36,11 +36,11 @@ import {
   SelectValue
 } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
-import { api } from '@/lib/api'
+
 import { errorMessage } from '@/lib/errors'
 import { formatStep } from '@/lib/keys'
 import { plural } from '@/lib/format'
-import { useHost } from '@/lib/host-scope'
+import { useApi, useHost } from '@/lib/host-scope'
 import { useNarrow } from '@/lib/narrow'
 import { useStoredFlag, useStoredPreference } from '@/lib/preferences'
 import { revealElement } from '@/lib/reveal'
@@ -62,6 +62,7 @@ import {
   useReviewedFiles
 } from './use-reviews'
 import { fileDiffDigest } from '@shared/diff-digest'
+import { remotelyOpenable } from '@shared/editors'
 import { findAnchorFile, isInlineAnchor, resolveAnchor } from '@shared/comment-anchors'
 import { threadSnippet } from '@shared/comment-snippets'
 import type { DiffChanges, FileDiff as FileDiffData } from '@shared/git'
@@ -340,6 +341,7 @@ function useFilesLayout(): {
 }
 
 export function ReviewFilesTab({ review, focus }: { review: Review; focus?: DiffFocus }) {
+  const api = useApi()
   const host = useHost()
   const [changes, setChanges] = useState<DiffChanges>(DEFAULT_DIFF_CHANGES)
   const [editorId, setEditorId] = useStoredPreference('editor', null)
@@ -350,17 +352,23 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
   const mutations = useCommentMutations()
   const localEditors = useEditors()
   /**
-   * No editors on a review that belongs to another machine, and therefore no
-   * open-in-editor buttons and no editor picker.
+   * The editors on *this* machine that can open a file on *that* one.
    *
-   * `reviews.filePath` answers with a path on the *host*, and `openInEditor` is
-   * this machine's shell - so the two halves that M1 deliberately kept separate
-   * would be joined across a network and hand a Mac editor a path only WSL has.
-   * The honest form of that is an editor list with nothing in it, which every
-   * control below already knows how to render: this is the same shape a browser
-   * tab has had since M3.
+   * Two different questions, and both have to be asked. Detection is local -
+   * these are the applications the person has installed - while whether an
+   * editor can be pointed at another machine at all is a property of the
+   * editor, which is why `remotelyOpenable` lives in `shared/editors.ts` and is
+   * not a second detection pass. A Mac with only Zed on it gets an empty list
+   * and therefore no button, which is the honest answer rather than a button
+   * that opens nothing.
    */
-  const editors = host === undefined ? localEditors : undefined
+  const editors = useMemo(
+    () =>
+      host === undefined || localEditors === undefined
+        ? localEditors
+        : remotelyOpenable(localEditors),
+    [host, localEditors]
+  )
 
   const threadsByFile = useMemo(
     () => anchorByFile(data?.files ?? [], threads),
@@ -445,13 +453,19 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
    *
    * `FileActions` in `diff-view.tsx` decides whether to draw the button from
    * whether it was given a *callback*, not from whether there is an editor
-   * list - so leaving the list empty for a remote host turned off the picker
-   * and left the button, and pressing it asked *this* install for
+   * list - so in M4.3, emptying the list for a remote host turned off the
+   * picker and left the button, and pressing it asked *this* install for
    * `reviews.filePath` of a review id that means something else over there.
-   * Found by pressing it against `pc-wsl`, which is the one failure shape this
+   * Found by pressing it against `pc-wsl`, which is the one failure shape that
    * slice set out to avoid: doing something plausible to the wrong file.
+   *
+   * The callback is bound to the host now rather than withheld - `useApi()`
+   * asks the owning machine for the path, and the main process tells a local
+   * editor which machine that path is on - but the two names stay, because the
+   * rule they encode still holds: when there is no editor that can do it, the
+   * *callback* has to be absent, not merely the list.
    */
-  const openLocally = useCallback(
+  const openOnItsHost = useCallback(
     (path: string, line: number) => {
       setOpenError(null)
       api.reviews
@@ -464,11 +478,24 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
         })
         .catch(setOpenError)
     },
-    [review.id, changes, editorId]
+    [api, review.id, changes, editorId]
   )
 
-  // Undefined on a review that belongs to another machine - see the note above.
-  const openInEditor = host === undefined ? openLocally : undefined
+  /**
+   * Absent when nothing installed here can open a file over *there*, which is
+   * the only thing that draws the button. See the note above.
+   *
+   * Two conditions and not one. An empty list on a *local* review is a machine
+   * with no editor detected at all, and that case has always fallen through to
+   * `shell.openPath` - the platform's own handler for the file, usually the
+   * right application and merely without the line number. Withholding the
+   * callback there would remove a working control from every machine that has
+   * no VS Code on it. A list still loading is not an empty one either.
+   */
+  const openInEditor =
+    host !== undefined && editors !== undefined && editors.editors.length === 0
+      ? undefined
+      : openOnItsHost
 
   const marked = useFocusScroll(focus, !isLoading && data !== undefined)
 

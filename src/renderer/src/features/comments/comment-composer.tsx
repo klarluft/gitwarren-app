@@ -24,14 +24,17 @@
  *
  * ## Images, on a review that belongs to another machine
  *
- * Attaching is off on a host, and that is a decision rather than an oversight.
- * An attachment is a file in the store of whoever owns the review, and the
- * comment body names it by a token that only that store can resolve; the
- * *displaying* half of that - `main/attachment-protocol.ts` resolving
- * `(host, id)` - is M4.4. Ingesting now would put a real image on `pc-wsl` and
- * render it here as a broken one, in a comment that cannot be fixed by
- * anything but editing markdown by hand. Refusing is the kinder failure, and
- * the text comment underneath it still works perfectly.
+ * Nothing here knows about that, and that is the design rather than a gap.
+ * `api` comes from `useApi()`, so `attachments.ingest` and `attachments.pick`
+ * are already bound to the machine the screen is about: the bytes of a pasted
+ * screenshot travel to that machine's store, the token comes back naming it,
+ * and the same token resolves when the comment is read because
+ * `main/attachment-protocol.ts` now asks the same host for the bytes.
+ *
+ * It was switched off in M4.3 for the half of that which did not exist yet -
+ * ingesting worked, displaying did not, so an image really did land on `pc-wsl`
+ * and render here as a broken one. M4.4 is that other half, and turning this
+ * back on is deleting a guard rather than adding a path.
  */
 import {
   useCallback,
@@ -60,8 +63,7 @@ import { Markdown } from '@/components/markdown'
 import { Tabs, TabsList, TabsPanel, TabsTab } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { Tooltip } from '@/components/ui/tooltip'
-import { api } from '@/lib/api'
-import { useHost } from '@/lib/host-scope'
+import { useApi } from '@/lib/host-scope'
 import { errorMessage } from '@/lib/errors'
 import { useKeepAboveKeyboard } from '@/lib/keyboard-inset'
 import { cn } from '@/lib/utils'
@@ -101,7 +103,10 @@ export function CommentComposer({
   onCancel,
   className
 }: CommentComposerProps) {
-  const host = useHost()
+  // The app as reached on the machine this review is on. `useApi()` rather than
+  // the module-scope `api`, which is always this install - the difference being
+  // whether a pasted screenshot lands in the store that can serve it back.
+  const api = useApi()
   const [value, setValue] = useState(initialValue)
   const [tab, setTab] = useState<'write' | 'preview'>('write')
   const [dragging, setDragging] = useState(false)
@@ -248,11 +253,6 @@ export function CommentComposer({
       const images = files.filter((file) => file.type.startsWith('image/'))
       if (images.length === 0) return
 
-      if (host !== undefined) {
-        setError(new Error(REMOTE_IMAGES_UNSUPPORTED))
-        return
-      }
-
       const state = readState()
       if (!state) return
 
@@ -284,7 +284,7 @@ export function CommentComposer({
         setBusy(false)
       }
     },
-    [applyEdit, host, readState]
+    [api, applyEdit, readState]
   )
 
   /**
@@ -336,7 +336,7 @@ export function CommentComposer({
     } finally {
       setBusy(false)
     }
-  }, [applyEdit, readState])
+  }, [api, applyEdit, readState])
 
   const disabled = busy
 
@@ -382,7 +382,7 @@ export function CommentComposer({
             <Toolbar
               disabled={disabled}
               transform={transform}
-              onAttach={host === undefined ? () => void pickFile() : undefined}
+              onAttach={() => void pickFile()}
             />
             <Textarea
               ref={textareaRef}
@@ -542,16 +542,6 @@ function Toolbar({
     </div>
   )
 }
-
-/**
- * Said when someone drops a screenshot onto a review that lives elsewhere.
- *
- * Written as a fact about where the file would have to go rather than as
- * "unsupported", because that is the part a person can do something about:
- * the same picture pasted into a review on this computer works.
- */
-const REMOTE_IMAGES_UNSUPPORTED =
-  'Images cannot be attached to a review on another machine yet. The comment text works as usual.'
 
 /**
  * A default alt text, used only when nothing better is available.

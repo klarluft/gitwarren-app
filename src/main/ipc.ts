@@ -23,13 +23,17 @@
  * in a service instead.
  */
 import { BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { readFileSync, statSync } from 'node:fs'
+import { basename } from 'node:path'
 import { dispatch } from '../core/rpc/dispatcher.js'
 import { route } from '../core/hosts/router.js'
 import { traced } from '../core/trace.js'
-import { attachmentsService } from '../core/services/attachments.js'
+import { attachmentsService, MAX_ATTACHMENT_BYTES } from '../core/services/attachments.js'
+import { requireInstance } from '../core/services/hosts.js'
+import { editorTargetFor } from '../shared/editors.js'
 import { AppError } from '../shared/errors.js'
 import { parseWithSchema as parse } from '../shared/validation.js'
-import { openReviewFileInputSchema } from '../shared/schemas.js'
+import { openReviewFileInputSchema, pickAttachmentInputSchema } from '../shared/schemas.js'
 import { CHANNEL_METHODS, IPC_CHANNELS, type AppInfo } from '../shared/api.js'
 import type { RpcMethod, RpcOutcome, RpcParams } from '../shared/rpc.js'
 import { describeInstall } from './app-info.js'
@@ -110,15 +114,24 @@ export function registerIpcHandlers(): void {
   // host across the network - while launching an application is a capability
   // only the machine with the screen on it has.
   handleShell(IPC_CHANNELS.reviewsOpenInEditor, async (input) => {
-    const { id, path, changes, line, editorId } = parse(openReviewFileInputSchema, input)
-    const absolute = await dispatch('reviews.filePath', { id, path, changes })
-    await openInEditor(absolute, line, editorId)
+    const { id, path, changes, line, editorId, host } = parse(openReviewFileInputSchema, input)
+    // `route` rather than `dispatch`, which is the whole of M4.4 here: the
+    // review id means something on the machine that owns it, and asking this
+    // install for `reviews.filePath` of a remote id is the bug M4.3 found by
+    // pressing the button. The path that comes back is on that filesystem.
+    const absolute = await route(host, 'reviews.filePath', { id, path, changes })
+    // And this is the other half: the editor is on *this* machine and has to be
+    // told which computer the path belongs to, because to it `/home/xfor/…` is
+    // a local path that happens not to exist.
+    const remote = host === undefined ? undefined : editorTargetFor(requireInstance(host))
+    await openInEditor(absolute, line, editorId, remote)
   })
 
   // The native picker is the shell's; what it picks goes through the same
   // service an agent's file path goes through, so both produce the same row and
   // the same token. Not a dispatcher method, because it opens a window.
-  handleShell(IPC_CHANNELS.attachmentsPick, async () => {
+  handleShell(IPC_CHANNELS.attachmentsPick, async (input) => {
+    const { host } = parse(pickAttachmentInputSchema, input)
     const window = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
     const options: Electron.OpenDialogOptions = {
       title: 'Attach an image',
@@ -132,7 +145,26 @@ export function registerIpcHandlers(): void {
       ? await dialog.showOpenDialog(window, options)
       : await dialog.showOpenDialog(options)
     const path = result.canceled ? null : (result.filePaths[0] ?? null)
-    return path === null ? null : await attachmentsService.ingest({ path })
+    if (path === null) return null
+    if (host === undefined) return await attachmentsService.ingest({ path })
+
+    // A path is only a name on the machine that holds the file, so what travels
+    // is bytes - the same shape a pasted screenshot has had since M1, and the
+    // reason `AttachmentIngestParams` takes either. The size is checked from
+    // the stat rather than after reading, exactly as the store does, so a wrong
+    // file is refused without being pulled into memory on its way to a wire.
+    const { size } = statSync(path)
+    if (size > MAX_ATTACHMENT_BYTES) {
+      throw new AppError(
+        'INVALID_INPUT',
+        `That file is ${Math.round(size / 1024 / 1024)} MB. Attachments are limited to ` +
+          `${MAX_ATTACHMENT_BYTES / 1024 / 1024} MB.`
+      )
+    }
+    return await route(host, 'attachments.ingest', {
+      bytes: readFileSync(path),
+      originalName: basename(path)
+    })
   })
 
   handleShell(IPC_CHANNELS.systemPickDirectory, async () => {

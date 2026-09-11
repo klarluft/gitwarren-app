@@ -63,3 +63,37 @@ export function parseAttachmentUrl(url: string): { sha: string; ext: string } | 
   const dot = name.lastIndexOf('.')
   return { sha: name.slice(0, dot), ext: name.slice(dot + 1) }
 }
+
+/**
+ * The query parameter that says which machine's store to read from.
+ *
+ * A body holds `gitwarren://attachment/<name>` whoever wrote it and whoever
+ * reads it - that is the point of the token, and M4.3 kept it true for remote
+ * reviews by simply not rendering their images. The host cannot go in the token
+ * for the same reason a review id cannot: the body is stored text on one
+ * machine, and the machine it is stored on is not something the text should
+ * have an opinion about. A comment copied from one review to another, or read
+ * by an agent over its own local MCP, would carry a stale instance id.
+ *
+ * So the host is attached at the `<img src>` and nowhere else - the one place
+ * that already differs between the two shells, and the one place that knows
+ * which screen the image is being drawn on. A local image is the token
+ * unchanged, byte for byte, which is what makes every comment written before
+ * M4.4 render exactly as it did.
+ *
+ * A query rather than a path segment, so the pathname of a scheme URL is still
+ * `/<sha>.<ext>` and the whitelist above is still the whole of what is
+ * resolved against the filesystem.
+ */
+export const ATTACHMENT_HOST_PARAM = 'host'
+
+/**
+ * The token, addressed to the machine whose store holds it.
+ *
+ * `undefined` gives the token back unchanged, which is the local case and is
+ * therefore the case that must not be touched.
+ */
+export function attachmentSrcOnHost(url: string, host: string | undefined): string {
+  if (host === undefined || attachmentName(url) === null) return url
+  return `${url}?${ATTACHMENT_HOST_PARAM}=${encodeURIComponent(host)}`
+}

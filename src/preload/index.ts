@@ -56,6 +56,7 @@ import {
   type RpcParams,
   type RpcResult
 } from '../shared/rpc.js'
+import { attachmentSrcOnHost } from '../shared/attachments.js'
 import type { Attachment, OpenReviewFileInput } from '../shared/schemas.js'
 
 /**
@@ -142,10 +143,14 @@ const bridge: GitWarrenBridge = {
         return () => ipcRenderer.off(IPC_CHANNELS.navigationDeepLink, handler)
       }
     },
-    pickAttachment: () => invoke<Attachment | null>(IPC_CHANNELS.attachmentsPick),
-    // The token as stored. This window has a custom scheme registered for it -
-    // see `main/attachment-protocol.ts` - so there is nothing to rewrite.
-    attachmentSrc: (url: string) => url,
+    pickAttachment: (host?: string) =>
+      invoke<Attachment | null>(IPC_CHANNELS.attachmentsPick, { host }),
+    // The token as stored, for a local image: this window has a custom scheme
+    // registered for it - see `main/attachment-protocol.ts` - so there is
+    // nothing to rewrite. A remote one gains the host as a query, which is the
+    // same thing a tab does to the same token and is written once, in
+    // `shared/attachments.ts`.
+    attachmentSrc: (url: string, host?: string) => attachmentSrcOnHost(url, host),
     openInEditor: (input: OpenReviewFileInput) =>
       invoke<void>(IPC_CHANNELS.reviewsOpenInEditor, input)
   }

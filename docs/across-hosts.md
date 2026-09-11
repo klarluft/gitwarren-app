@@ -223,6 +223,44 @@ Record the outcome under each one.
   There is also no `code` on `PATH` in a plain WSL shell here, so spawning a
   bare `code` inside the distro is not an option.
 
+- **Outcome, the `ssh-remote` half.** *Checked before M4.4 was written, because
+  the form the milestone actually ships had never been run. 11 September 2026,
+  VS Code 1.135.0 on macOS 26.6 (arm64), against `xfor@pc-wsl`.* The spike above
+  verified `wsl+Ubuntu` *from Windows*; a Mac opening
+  `ssh-remote+xfor@pc-wsl` is a different extension over a different transport,
+  and it passes:
+
+  `vscode://vscode-remote/ssh-remote+xfor@pc-wsl/home/xfor/…/README.md:5`,
+  handed to `open`, brings up a window whose workspace storage records
+  `resource.authority.os.ssh-remote+xfor@pc-wsl`, starts
+  `~/.vscode-server/code-08d4889f…` on the host — the Mac's own VS Code commit,
+  not the one the WSL spike left there — and puts the cursor on line 5. The line
+  is not a claim about what was on screen: VS Code writes its own
+  `memento/workbench.editors.files.textFileEditor` per window, and that entry
+  reads `lineNumber: 5` against the `vscode-remote://ssh-remote%2Bxfor@pc-wsl/…`
+  URI. The same memento later recorded `lineNumber: 3` for
+  `docs/across-hosts.md`, which was GitWarren's own button rather than a URL
+  typed by hand.
+
+  **Nothing happens at all without the Remote-SSH extension, and it is silent.**
+  With a stock VS Code the URL opens no window, starts no `ssh`, and leaves no
+  server on the host — the first run of this check produced exactly nothing, and
+  it took looking at `ps` on `pc-wsl` to establish that rather than a message.
+  `ms-vscode-remote.remote-ssh` was installed on the Mac for the check and is
+  what makes the form work; a person without it sees a prompt from VS Code
+  rather than a review file. That is not something GitWarren can detect —
+  `main/editors.ts` can see that VS Code is installed and cannot see which
+  extensions it has — so the honest position is that the button opens the
+  editor and the editor says what it needs.
+
+  Two things this did *not* separate. Both the URL form and
+  `code --remote ssh-remote+xfor@pc-wsl --goto <path>:5` were fired within
+  twenty seconds of each other on a cold start, and the server took ninety
+  seconds to appear, so which of them brought it up is unknown; the URL form is
+  what ships, and the memento above proves it lands. And a remote window already
+  connected cannot be closed from a script, so the "first ever connection"
+  timing was measured once and is not repeatable here.
+
 ### S5 — How chatty is a screen today?
 
 - **Question.** Count IPC calls and their dependency depth for: the repository
@@ -1547,7 +1585,7 @@ them verifiable against the real `pc-wsl` node rather than against a mock:
 3. **Repositories on hosts.** `fs.list`, the host segment in routes, reviews
    listed under their host, clones grouped by root commit across hosts.
    *(done — see below.)*
-4. **Attachments, editors and agent access per host.**
+4. **Attachments, editors and agent access per host.** *(done — see below.)*
 5. **Disconnection.** The stale banner and the silent refetch.
 
 **M4.1, done on the Mac against the WSL node, 10 September.** The novelty is
@@ -1998,6 +2036,169 @@ segment, and it belongs with M6's live links rather than here. There is no
 disconnection banner and no silent refetch — a host that goes away mid-review
 still empties the screen — which is M4.5, and the reason its error state already
 has a shape to grow into.
+
+**M4.4, done on the Mac against the WSL node, 11 September.** The three controls
+M4.3 switched off rather than half-built are back on, and each of them turned out
+to be the same shape: a thing that used to mean "this computer" implicitly, made
+to say which computer it means.
+
+    frame()                     a request becomes bytes, once
+    attachments.read            the store is over there
+    (host, path, line)          the editor is here, the file is not
+    app.mcp                     that machine's launcher, as it resolves it
+
+**One encoder, because two answers to "how does a request become bytes" is a
+hang.** `attachments.ingest` routed to a host correctly in M4.3 and still could
+not work, because `stdio-client.ts` wrote `JSON.stringify` and that is the one
+function an `ArrayBuffer` does not survive: the image arrived as `{}` and was
+refused for not being a PNG, which is a sentence about the *file* for a fault in
+the *wire*. The web carrier had already solved this in `web/wire.ts`, so the fix
+was to move it rather than to write it — `shared/rpc-wire.ts` now, read by the
+WebSocket carrier and by the stdio client. It is the same argument `ndjson.ts`
+records about framing, one layer up, and it is worth noticing that the two
+failures differ only in how loud they are: two framings hang, two encodings lie.
+
+**A body may not name a machine.** The obvious place for the host is the token —
+`gitwarren://attachment/<host>/<sha>.<ext>` — and it is wrong for the reason
+`repositories.host_id` was wrong in M4.3. A comment body is stored text on one
+machine; it is read by that machine's own agent over its local MCP, quoted into
+other comments, and edited by hand. An instance id inside it would be a claim
+about somewhere else that nothing keeps true. So the token is untouched and the
+host is attached at the `<img src>` — the one place that already differs between
+the two shells and the one place that knows which screen is being drawn. The
+local case is then the token byte for byte, which is what makes every comment
+written before this milestone render exactly as it did.
+
+A query rather than a path segment, so the pathname a server resolves is still
+`<sha>.<ext>` and the whitelist in `shared/attachments.ts` is still the whole of
+what reaches a filesystem. Both servers ask `isAnsweredLocally` rather than
+their own question, so "no host", "our own instance id" and "somebody else's"
+cannot come to mean something different in the custom scheme from what they mean
+in the router.
+
+**base64 on the way out, and one buffered read.** `attachments.read` answers
+with the file encoded, because the response is `JSON.stringify`d onto an ndjson
+frame and the carrier under it has no notion of a partial body. That costs a
+third in size and gives up streaming for remote images; the ingest limit bounds
+it at ten megabytes, and the name being the hash of the bytes means the
+`immutable` cache header is honest, so a tab or a window pays once. Inventing
+range requests over an `ssh` pipe for pictures that are already bounded would be
+a second protocol for no one.
+
+**Every fallback in an editor launch ends at this machine's filesystem, so each
+one had to be asked whether it can say "over there".** `main/editors.ts` has a
+URL form, a CLI form and the `GITWARREN_EDITOR` template, and the shape the host
+argument forces is that the ones with no remote spelling must *fail* rather than
+fall through: `shell.openPath('/home/xfor/…')` on a Mac opens a different file or
+none, which is precisely the failure M4.3 hid the button to avoid. Three editors
+have a remote form, so a Mac with only Zed on it gets an empty list and no
+button — the honest answer, and the thing M4.3 got wrong in the other direction
+by emptying the list while leaving the callback.
+
+`remotelyOpenable` is in `shared/editors.ts` and not in either shell, because two
+different questions are being asked and only one of them is about this machine.
+What is installed is detection; whether an editor can be pointed at another
+computer is a property of the editor.
+
+**`{host}` in the custom template expands to the editor target, and an argument
+that becomes empty is dropped.** That is what lets one template serve both cases:
+`--remote={host}` disappears on a local file, where `--remote {host}` as two
+arguments would leave the flag behind with nothing after it. `custom` counts as
+remote-capable on purpose — whether somebody's `emacsclient` wrapper works is
+theirs to find out, and refusing to offer it would remove the only way to try.
+
+**The editor target is a second name for a machine, and it is kept apart from the
+first.** `hosts.editor_target` has existed since M0 with nothing writing it; NULL
+means derive `ssh-remote+<target>`, which is right until somebody's SSH config
+aliases differ from their editor's, and stops coinciding by default at M5 where
+the carrier is `wsl.exe -d Ubuntu` and the editor form is `wsl+Ubuntu`.
+`editorTargetFor` sits next to `routeFor` in spirit — how the carrier names it,
+how an editor names it — but lives in `shared/` because a browser tab builds the
+same URL and cannot read a database.
+
+**Agent access per host is a fact travelling, not a capability.** `app.mcp`
+returns `~/.gitwarren/bin/gitwarren-mcp` *as the host resolves it*, which is the
+whole point: a Mac has no way to know what `~` is on `pc-wsl`, and a page that
+guessed would hand somebody a command that confidently does not exist. It says
+where a launcher is and does not start one, which is the line `shared/web.ts`
+draws and the reason it may be on the dispatcher at all. `describeMcpLaunch`
+moved into `core/mcp-launcher.ts` so the daemon's `app-info` and this method are
+one answer, and `gitwarren agent-setup` on the host prints the same sentence from
+the same `shared/agent-setup.ts` — verified by running both.
+
+What changes around the prompt matters as much as the prompt. This page is an
+instruction, and the one way it can do harm is by being confidently about the
+wrong computer — so a host's copy says "an agent running on that machine", and
+everything this install knows only about *itself* is left out rather than
+repeated under another machine's heading: the database path, the version, and
+the link-port warning, which is about whether a `gitwarren://` link will open on
+the computer you are sitting at.
+
+**Verified end to end against `pc-wsl` through the shipping code**, with every
+call made over `window.gitwarren.carrier` in the real window so that the preload,
+the router, the pool and the `ssh` carrier were all in the path. The daemon was
+reinstalled from this build first (46.4 MB in 5 s) and answered `Unknown method
+"app.mcp"` and `Unknown method "attachments.read"` before it — version skew
+behaving as designed, and the same reinstall M4.3 needed.
+
+A 5,035-byte PNG made in the renderer went out as an `ArrayBuffer`, crossed the
+pipe and landed in `/home/xfor/.config/GitWarren/attachments/…` with its
+dimensions read correctly on the far side, which is the proof the bytes were
+bytes rather than `{}`. `attachments.read` fetched it back in 11 ms warm;
+the same name asked of *this* machine answered `NOT_FOUND`, which is the
+clearest statement that nothing was copied here. The token in a comment body on
+the host rendered in the window as a 320×200 image in 15 ms, with the host in
+the `src` and the token unchanged in the body, and again after a cold reload. The
+same bytes came back over the loopback HTTP endpoint as `image/png`, 5,035
+bytes, behind the session cookie. The same token with no host, with an unknown
+host, and a percent-encoded traversal in place of the name all failed.
+`reviews.filePath` on the host answered a WSL path in 19 ms and
+`shell.openInEditor` opened it — line 3 of `docs/across-hosts.md`, per VS Code's
+own per-window memento, in a window whose authority is `ssh-remote+xfor@pc-wsl`.
+`app.mcp` answered `/home/xfor/.gitwarren/bin/gitwarren-mcp` in 18 ms and
+`/Users/michalwrzosek/…` with no host; `#/h/<instance>/agent` showed the first
+and no trace of the second. The remote files tab draws *Open in VS Code* again
+and no reveal button; the remote conversation tab draws *Attach an image*. A
+local paste still produces a `src` identical to its token and still renders. No
+console errors, and no horizontal scroll at 390 px.
+
+**Three things bit, and one of them is mine rather than the code's.**
+
+*The Agent Access page was reading the wrong machine by construction, and so was
+every image.* `agent-access-page.tsx` and `components/markdown.tsx` both imported
+the module-scope `api` — which is `apiFor()`, this install, always. M4.3's
+`useApi()` exists precisely so that a screen does not have to think about hosts,
+and the two files that predate it were quietly opting out. `markdown.tsx` needed
+a component extracted to call a hook at all, which is the small cost of the
+pattern and worth paying: there is now nowhere in a comment body's rendering
+path that *can* name the wrong store.
+
+*A picked file is a path on the machine with the picker, not on the machine with
+the store.* `attachments.pick` used to end in `attachmentsService.ingest({ path })`,
+and a path is the one form that cannot travel — `/Users/…/screenshot.png` means
+nothing on `pc-wsl`. So the shell channel takes a host, and for a remote review
+reads the bytes and sends those, stat-checking the size first exactly as the
+store does so that a wrong file is refused without being pulled into memory on
+its way to a wire. It is the same asymmetry M4.3 found with `fs.list`: the shell
+can open a window, and only the owning machine can hold the result.
+
+*`fetch` cannot test an `<img>`.* Probing the custom scheme with `fetch` from the
+renderer failed with `connect-src 'self'`, which for some minutes looked like the
+scheme being broken rather than the CSP doing its job — `img-src` is what an
+attachment is allowed under, and an `Image()` load is the only check that
+exercises the path the app actually uses. Worth writing down because the next
+person to verify this will reach for `fetch` too.
+
+**Not done in M4.4, and why.** The native picker's dialog cannot be driven from
+a script, so the remote branch behind it was exercised by sending the same bytes
+over the same carrier rather than by pressing the button; the stat guard and the
+basename are covered by nothing but reading. The editor picker never appeared
+during verification because this Mac has exactly one editor installed and it is
+remote-capable, so `remotelyOpenable` reducing a list is covered by its unit
+tests and not by the machine. A browser tab was checked at the HTTP endpoint and
+not with a browser open in front of it. And deep links still carry no host, so a
+`gitwarren://` link written on `pc-wsl` opens the Mac's review of that number —
+unchanged from M4.3, and still M6's.
 
 ### M5 — WSL from Windows
 

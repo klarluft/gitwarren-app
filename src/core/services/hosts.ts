@@ -75,6 +75,29 @@ export function routeFor(row: HostRow): HostRoute {
   return { id: row.id, kind: row.kind, target: row.target }
 }
 
+/**
+ * The host a route or a link names, by the only name that survives a rename, a
+ * new address and a change of carrier.
+ *
+ * Exported because two callers outside this service resolve an instance id and
+ * must fail the same way when it is not there: `core/hosts/router.ts`, which is
+ * about to forward a request, and the editor launch in `main/ipc.ts`, which
+ * needs to know how an editor names that machine. The sentence names the id
+ * rather than saying "unknown host", because the id is what the link contained
+ * and the only thing a person can compare against their Hosts screen.
+ */
+export function requireInstance(instanceId: string): HostRow {
+  const row = getDatabase().select().from(hosts).where(eq(hosts.instanceId, instanceId)).get()
+  if (!row) {
+    throw new AppError(
+      'NOT_FOUND',
+      `This GitWarren does not know a host with id ${instanceId}. ` +
+        'It may have been removed, or the link may have come from somewhere else.'
+    )
+  }
+  return row
+}
+
 function requireRow(id: number): HostRow {
   const row = getDatabase().select().from(hosts).where(eq(hosts.id, id)).get()
   if (!row) throw new AppError('NOT_FOUND', `No host with id ${id}.`)

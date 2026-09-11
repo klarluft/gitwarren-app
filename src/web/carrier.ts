@@ -27,8 +27,9 @@
  * here: two components asking the same question in the same tick is one frame
  * on the wire instead of two.
  *
- * A request is turned into text by `wire.ts` rather than by `JSON.stringify`,
- * because one of them holds an image. See the note there.
+ * A request is turned into text by `shared/rpc-wire.ts` rather than by
+ * `JSON.stringify`, because one of them holds an image. See the note there -
+ * since M4.4 the stdio client reads the same encoder, for the same reason.
  */
 import { AppError } from '@shared/errors'
 import {
@@ -43,7 +44,7 @@ import {
   type RpcResult
 } from '@shared/rpc'
 import { WEB_PATHS } from '@shared/web'
-import { frame } from './wire'
+import { frame } from '@shared/rpc-wire'
 
 /** Backoff between reconnects: quick at first, then out of the way. */
 const RETRY_MS = [250, 500, 1000, 2000, 5000] as const

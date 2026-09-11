@@ -17,10 +17,25 @@
  * alongside an array of byte values and an `ArrayBuffer` - so this is a choice
  * among the encodings that end is known to take, not a new one.
  *
+ * ## Why this is in `shared/` and not next to a carrier
+ *
+ * It was `web/wire.ts` until M4.4, when the second carrier over a byte stream
+ * arrived: `core/rpc/stdio-client.ts` was still writing `JSON.stringify`, so an
+ * image attached to a review on another machine crossed the `ssh` pipe as `{}`
+ * and was refused on the far side for not being an image. That is the same
+ * argument `core/rpc/ndjson.ts` makes about framing, one layer up: two answers
+ * to "how does a request become bytes" is a disagreement nobody can see, and
+ * the failure it produces names the wrong thing. So there is one encoder, and
+ * the WebSocket carrier and the stdio client are both users of it.
+ *
+ * `shared/` is where it can be: one of those two readers is compiled into a
+ * browser bundle and the other runs in Node, and this file has to be importable
+ * by both.
+ *
  * Plain JS and no DOM: `btoa` is the one global it needs, and it is a global in
  * Node too.
  */
-import type { RpcRequest } from '../shared/rpc.js'
+import type { RpcRequest } from './rpc.js'
 
 /**
  * `btoa` wants a string of char codes, and a call stack to build it with.

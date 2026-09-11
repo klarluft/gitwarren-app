@@ -1,6 +1,6 @@
 /**
- * Coverage for the encoding that makes pasting a screenshot into a browser tab
- * work at all.
+ * Coverage for the encoding that makes pasting a screenshot work at all - in a
+ * browser tab, and since M4.4 onto a review on another machine.
  *
  * `JSON.stringify` turns an `ArrayBuffer` into `{}` and says nothing about it.
  * The image then reaches the dispatcher as an empty object, fails the format
@@ -11,12 +11,12 @@
  *
  * The decode side is the dispatcher's `toIngestSource`, which has taken base64
  * since M2 for the stdio carrier. Nothing new is being agreed here; this is the
- * browser end learning to speak what the daemon already listened for.
+ * asking ends learning to speak what the daemon already listened for.
  */
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { frame } from '../wire.js'
-import type { RpcRequest } from '../../shared/rpc.js'
+import { frame } from '../rpc-wire.js'
+import type { RpcRequest } from '../rpc.js'
 
 /** What the dispatcher does with what arrives, in one line. */
 function bytesOf(text: string): Buffer {

@@ -27,6 +27,7 @@
  * never enter this map.
  */
 import { getInstanceId } from '../instance.js'
+import { describeMcpLaunch } from '../mcp-launcher.js'
 import { APP_VERSION } from '../version.js'
 import { attachmentsService } from '../services/attachments.js'
 import { commentsService } from '../services/comments.js'
@@ -148,6 +149,7 @@ const handlers: {
   [M in RpcMethod]: (params: unknown) => Promise<RpcResult<M>> | RpcResult<M>
 } = {
   'app.instance': () => describeThisInstance(),
+  'app.mcp': () => describeMcpLaunch(),
 
   // Answered by whoever is asked, and never forwarded onward - see the note on
   // these in `shared/rpc.ts`. They are in the map because a screen reaches the
@@ -199,7 +201,8 @@ const handlers: {
   'comments.remove': (params) => commentsService.remove(params, HUMAN_AUTHOR),
   'comments.setResolved': (params) => commentsService.setResolved(params, HUMAN_AUTHOR),
 
-  'attachments.ingest': (params) => attachmentsService.ingest(toIngestSource(params))
+  'attachments.ingest': (params) => attachmentsService.ingest(toIngestSource(params)),
+  'attachments.read': (params) => attachmentsService.read(params)
 }
 
 /** Derived from the map above rather than written out again next to it. */

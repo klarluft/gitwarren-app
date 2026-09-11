@@ -31,7 +31,9 @@ import { attachments, comments, reviews } from '../db/schema.js'
 import { getDataDirectory } from '../paths.js'
 import { attachmentUrl, parseAttachmentUrl } from '../../shared/attachments.js'
 import { AppError } from '../../shared/errors.js'
-import type { Attachment } from '../../shared/schemas.js'
+import { readAttachmentInputSchema } from '../../shared/schemas.js'
+import { parseWithSchema as parse } from '../../shared/validation.js'
+import type { Attachment, AttachmentBytes } from '../../shared/schemas.js'
 
 /**
  * The ceiling on a single attachment.
@@ -326,6 +328,61 @@ export const attachmentsService = {
       height,
       originalName
     })
+  },
+
+  /**
+   * The bytes behind a token, for a reader that cannot open the file itself.
+   *
+   * Every shell served attachments straight off its own disk until M4.4, which
+   * is exactly why an image on a remote review rendered as a broken one: the
+   * store holding it is on the machine that owns the review, and the two
+   * schemes that serve it - `gitwarren://attachment/…` in the window,
+   * `/gitwarren/attachments/…` in a tab - both resolve against wherever they
+   * happen to be running. So reading becomes a method, and *which* store to
+   * read from becomes the router's question rather than the filesystem's.
+   *
+   * It stays a plain read of the store and nothing more. There is no fallback
+   * to fetching from anywhere, no cache written here, and no row invented for a
+   * file that is not on disk: a token whose bytes the sweep has collected is a
+   * `NOT_FOUND`, which is what both shells already turn into a 404.
+   *
+   * The name is matched against `ATTACHMENT_FILE_NAME` by the schema before it
+   * reaches this line, which is the whole of the traversal story - the same
+   * whitelist both servers state, now stated once more on the far side of a
+   * wire. Nothing here builds a path out of anything but a sha and an
+   * extension.
+   */
+  // eslint-disable-next-line @typescript-eslint/require-await
+  async read(input: unknown): Promise<AttachmentBytes> {
+    const { name } = parse(readAttachmentInputSchema, input)
+    const dot = name.lastIndexOf('.')
+    const sha = name.slice(0, dot)
+    const ext = name.slice(dot + 1)
+
+    // The row rather than the extension is what says what this is, for the
+    // reason `FORMATS` exists: the extension was chosen by sniffing the bytes
+    // at ingest, and the row is where that conclusion was written down.
+    const row = getDatabase().select().from(attachments).where(eq(attachments.sha, sha)).get()
+    if (!row || row.ext !== ext) {
+      throw new AppError('NOT_FOUND', `No attachment named ${name}.`)
+    }
+
+    let bytes: Buffer
+    try {
+      bytes = readFileSync(attachmentPath(sha, ext))
+    } catch {
+      // A row whose file is gone. Reported as missing rather than as a failure
+      // of this machine, because from the reader's point of view it is the same
+      // answer as a token that was never ingested.
+      throw new AppError('NOT_FOUND', `The bytes of ${name} are no longer in the store.`)
+    }
+
+    return {
+      name,
+      mimeType: row.mimeType,
+      byteSize: bytes.byteLength,
+      base64: bytes.toString('base64')
+    }
   },
 
   /**

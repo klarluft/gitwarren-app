@@ -35,13 +35,13 @@ import {
   writeDaemonRuntime
 } from '../core/daemon-runtime.js'
 import { getInstanceId } from '../core/instance.js'
-import { getMcpLauncherPath } from '../core/mcp-launcher.js'
+import { describeMcpLaunch } from '../core/mcp-launcher.js'
 import { getDatabasePath, getDataDirectory } from '../core/paths.js'
 import { createWebHandler } from '../core/web/handler.js'
 import { clearWebToken, mintWebToken, publishWebToken } from '../core/web/token.js'
 import { LINK_SERVER_HOST, LINK_SERVER_PORT } from '../shared/link-port.js'
 import { TOKEN_PARAM } from '../shared/web.js'
-import type { AppInfo, McpLaunchInfo } from '../shared/api.js'
+import type { AppInfo } from '../shared/api.js'
 
 /** Stamped by `vite.daemon.config.ts`. Nothing reads a package.json out of a bundle. */
 declare const __APP_VERSION__: string
@@ -108,21 +108,12 @@ export function resolveWebRoot(): string | null {
  * instruction that works on one of them - hence `core/mcp-launcher.ts`.
  */
 function describeInstall(linkPort: number | null): AppInfo {
-  const launcher = getMcpLauncherPath()
-  const mcp: McpLaunchInfo = {
-    command: launcher,
-    args: [],
-    env: {},
-    available: existsSync(launcher),
-    stable: true,
-    // The daemon does not write the launcher - M3.3's `gitwarren service
-    // install` does - so it reports the same path and lets `available` say
-    // whether anything is there yet.
-    direct: { command: launcher, args: [], env: {} },
-    note: existsSync(launcher)
-      ? undefined
-      : 'No MCP launcher on this machine yet. `gitwarren service install` writes it.'
-  }
+  // `describeMcpLaunch` rather than built here, because since M4.4 the same
+  // answer goes out over `app.mcp` to a GUI on another machine looking at this
+  // one's Agent Access page. The daemon does not write the launcher - M3.3's
+  // `gitwarren service install` does - so it reports the path and lets
+  // `available` say whether anything is there yet.
+  const mcp = describeMcpLaunch()
 
   return {
     version: VERSION,

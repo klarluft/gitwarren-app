@@ -16,7 +16,10 @@ import { net, protocol } from 'electron'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { ATTACHMENT_FILE_NAME } from '../core/services/attachments.js'
+import { isAnsweredLocally, route } from '../core/hosts/router.js'
 import { getDataDirectory } from '../core/paths.js'
+import { ATTACHMENT_HOST_PARAM } from '../shared/attachments.js'
+import { AppError } from '../shared/errors.js'
 
 /** The scheme, and the one host under it that resolves to anything. */
 export const ATTACHMENT_SCHEME = 'gitwarren'
@@ -46,16 +49,54 @@ export function registerAttachmentScheme(): void {
  * genuinely receive one day. A sha and a short extension is the entire
  * vocabulary of a legitimate name, so anything else is refused outright rather
  * than being resolved and then reasoned about.
+ *
+ * ## Which machine's store
+ *
+ * Since M4.4 the URL may carry `?host=<instance>`, put there by the renderer
+ * when the screen is about another machine (see `ATTACHMENT_HOST_PARAM`). The
+ * decision of what that means is not made here: `isAnsweredLocally` is the
+ * router's, so "no host", "our own instance id" and "somebody else's" mean
+ * exactly what they mean for every other request, and this scheme cannot drift
+ * from them.
+ *
+ * A remote image comes back as base64 on the answer and is turned into a
+ * `Response` here rather than streamed. It is the one place this app buffers an
+ * attachment whole, and the ingest limit is what makes that acceptable - a
+ * range request over an `ssh` pipe would be a second protocol for the sake of
+ * images that are already bounded at ten megabytes.
  */
-export function attachmentResponse(url: string): Response | Promise<Response> {
-  const { host, pathname } = new URL(url)
+export async function attachmentResponse(url: string): Promise<Response> {
+  const { host, pathname, searchParams } = new URL(url)
   if (host !== ATTACHMENT_HOST) return new Response(null, { status: 404 })
 
   const name = pathname.slice(1)
   if (!ATTACHMENT_FILE_NAME.test(name)) return new Response(null, { status: 400 })
 
-  const file = join(getDataDirectory(), 'attachments', name.slice(0, 2), name)
-  return net.fetch(pathToFileURL(file).toString())
+  const instance = searchParams.get(ATTACHMENT_HOST_PARAM) ?? undefined
+  if (isAnsweredLocally(instance, 'attachments.read')) {
+    const file = join(getDataDirectory(), 'attachments', name.slice(0, 2), name)
+    return await net.fetch(pathToFileURL(file).toString())
+  }
+
+  try {
+    const image = await route(instance, 'attachments.read', { name })
+    return new Response(Buffer.from(image.base64, 'base64'), {
+      headers: {
+        'Content-Type': image.mimeType,
+        // Content-addressed, so these bytes can never become different bytes.
+        // Worth saying on this branch in particular: without it every re-render
+        // of a comment would be another round trip over `ssh`.
+        'Cache-Control': 'private, max-age=31536000, immutable'
+      }
+    })
+  } catch (error) {
+    // An `<img>` has nowhere to put a sentence, so the code is all that can be
+    // said - and the reason is worth logging, because "the host is not
+    // answering" and "that token is not in its store" look identical on screen.
+    console.error(`[attachments] could not read ${name} from host ${instance}`, error)
+    const missing = error instanceof AppError && error.code === 'NOT_FOUND'
+    return new Response(null, { status: missing ? 404 : 502 })
+  }
 }
 
 /** Wire the handler up. Call once, after the app is ready. */

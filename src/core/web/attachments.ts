@@ -20,6 +20,15 @@
  * reason - comment bodies are written by agents, and an agent may have just
  * read untrusted content out of the repository under review.
  *
+ * ## Which machine's store
+ *
+ * Since M4.4 a request may name a host, and then the bytes come back over the
+ * carrier instead of off this disk. The decision is `isAnsweredLocally`, the
+ * router's own, so this endpoint cannot develop a private opinion about what
+ * "no host" or "our own instance id" mean. Note what does *not* change: the
+ * name is matched before the host is looked at, so a malformed name is refused
+ * here and never travels.
+ *
  * The content type comes from the extension, which is not the usual mistake:
  * the extension was chosen at ingest by sniffing the bytes (see
  * `core/services/attachments.ts`), so it is this app's own conclusion about the
@@ -30,7 +39,9 @@
  */
 import { createReadStream, statSync } from 'node:fs'
 import type { ServerResponse } from 'node:http'
+import { isAnsweredLocally, route } from '../hosts/router.js'
 import { attachmentPath } from '../services/attachments.js'
+import { AppError } from '../../shared/errors.js'
 import { attachmentNameFromWebPath, WEB_PATHS } from '../../shared/web.js'
 
 /**
@@ -76,7 +87,8 @@ export interface AttachmentResult {
 export function serveAttachment(
   pathname: string,
   method: string,
-  response: ServerResponse
+  response: ServerResponse,
+  host?: string
 ): AttachmentResult {
   if (!pathname.startsWith(WEB_PATHS.attachments)) return { served: false }
 
@@ -90,6 +102,11 @@ export function serveAttachment(
   const contentType = CONTENT_TYPES[name.slice(dot + 1)]
   if (contentType === undefined) {
     response.writeHead(404, HEADERS).end()
+    return { served: true }
+  }
+
+  if (!isAnsweredLocally(host, 'attachments.read')) {
+    serveFromHost(host as string, name, contentType, method, response)
     return { served: true }
   }
 
@@ -123,4 +140,46 @@ export function serveAttachment(
   })
   stream.pipe(response)
   return { served: true }
+}
+
+/**
+ * The same image, out of another machine's store.
+ *
+ * Buffered whole rather than streamed, which is the one thing this endpoint
+ * does differently for a remote host and is a property of the answer rather
+ * than a shortcut: `attachments.read` returns base64 in a single response
+ * frame, because the carrier underneath it is a request/response protocol on a
+ * pipe and has no notion of a partial body. The ingest limit bounds it, and the
+ * immutable cache header above means a tab pays for it once.
+ *
+ * Fire-and-forget on purpose. The caller has already reported the path as
+ * served, exactly as it does for the local stream - by the time anything is
+ * known about the far end there is no status code left to reconsider.
+ */
+function serveFromHost(
+  host: string,
+  name: string,
+  contentType: string,
+  method: string,
+  response: ServerResponse
+): void {
+  void route(host, 'attachments.read', { name })
+    .then((image) => {
+      const bytes = Buffer.from(image.base64, 'base64')
+      response.writeHead(200, {
+        ...HEADERS,
+        'Content-Type': contentType,
+        'Content-Length': bytes.byteLength
+      })
+      response.end(method === 'HEAD' ? undefined : bytes)
+    })
+    .catch((error: unknown) => {
+      // Logged rather than described to the browser, for the reason the local
+      // 404 above is not logged: this one is not ordinary. An `<img>` has
+      // nowhere to put a sentence, and "the host is not answering" and "that
+      // token is not in its store" look identical on screen.
+      console.error(`[web] could not read ${name} from host ${host}`, error)
+      const missing = error instanceof AppError && error.code === 'NOT_FOUND'
+      response.writeHead(missing ? 404 : 502, HEADERS).end()
+    })
 }

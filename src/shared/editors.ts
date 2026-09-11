@@ -16,6 +16,16 @@
  * `PATH` lookups and `cliArgs` are Node's business. This file is the half both
  * shells need, and it is the half a browser bundle can import.
  *
+ * ## Files on another machine
+ *
+ * M4.4 adds a second URL per editor, for a file that is not on this computer:
+ * `vscode://vscode-remote/ssh-remote+xfor@pc-wsl/home/xfor/…:42`. It is a
+ * different URL rather than the same one with a prefix, and only three of the
+ * six editors below have one - which is the useful half of putting it here,
+ * because "can this editor even do that" becomes a question the picker can ask
+ * before it offers a button. See spike S4 in docs/across-hosts.md for what was
+ * verified and on which machines.
+ *
  * Plain JS only. No Node, no Electron.
  */
 import type { EditorInfo } from './api.js'
@@ -26,6 +36,41 @@ export interface EditorLink extends EditorInfo {
    * scheme worth using and can only be launched from a command line.
    */
   url?: (path: string, line: number) => string
+  /**
+   * The same, for a file on another machine - `remote` being the authority that
+   * editor's own remote extension knows the machine by, such as
+   * `ssh-remote+xfor@pc-wsl` or `wsl+Ubuntu`. Absent when the editor has no way
+   * to open a file it cannot see, which is most of them.
+   *
+   * A separate function rather than an optional argument to `url`, because the
+   * two produce different URLs rather than the same URL with something extra
+   * on it, and because "this editor cannot do that" has to be a thing a caller
+   * can ask. An editor with no `remoteUrl` is left out of the picker on a remote
+   * review entirely - the M4.3 rule about a control that would do something
+   * plausible to the wrong machine, applied one level down.
+   */
+  remoteUrl?: (remote: string, path: string, line: number) => string
+}
+
+/**
+ * How an editor on this machine names a file on another one.
+ *
+ * The stored `editor_target` wins when there is one, and NULL means derive it -
+ * which is the common case and the reason the column is nullable rather than
+ * filled in at Add time with a guess nobody has checked. It is kept apart from
+ * `target` because the two coincide today and stop coinciding at M5, where the
+ * carrier is `wsl.exe -d Ubuntu` and the editor form is `wsl+Ubuntu`.
+ *
+ * Here rather than in the hosts service because both shells need it and only
+ * one of them can read a database: a browser tab opens the same URLs and works
+ * out the same authority from the host row it already has.
+ */
+export function editorTargetFor(host: {
+  kind: string
+  target: string
+  editorTarget: string | null
+}): string {
+  return host.editorTarget ?? `ssh-remote+${host.target}`
 }
 
 /**
@@ -37,17 +82,23 @@ export const EDITOR_LINKS = [
   {
     id: 'vscode',
     label: 'VS Code',
-    url: (path, line) => `vscode://file${encodeURI(path)}:${line}`
+    url: (path, line) => `vscode://file${encodeURI(path)}:${line}`,
+    remoteUrl: (remote, path, line) =>
+      `vscode://vscode-remote/${encodeURI(remote)}${encodeURI(path)}:${line}`
   },
   {
     id: 'cursor',
     label: 'Cursor',
-    url: (path, line) => `cursor://file${encodeURI(path)}:${line}`
+    url: (path, line) => `cursor://file${encodeURI(path)}:${line}`,
+    remoteUrl: (remote, path, line) =>
+      `cursor://vscode-remote/${encodeURI(remote)}${encodeURI(path)}:${line}`
   },
   {
     id: 'windsurf',
     label: 'Windsurf',
-    url: (path, line) => `windsurf://file${encodeURI(path)}:${line}`
+    url: (path, line) => `windsurf://file${encodeURI(path)}:${line}`,
+    remoteUrl: (remote, path, line) =>
+      `windsurf://vscode-remote/${encodeURI(remote)}${encodeURI(path)}:${line}`
   },
   {
     id: 'zed',
@@ -96,4 +147,41 @@ export function linkableEditors(): EditorInfo[] {
   return (EDITOR_LINKS as readonly EditorLink[])
     .filter((editor) => editor.url !== undefined)
     .map(({ id, label }) => ({ id, label }))
+}
+
+/**
+ * Whether this editor can be pointed at a file on another machine at all.
+ *
+ * `custom` is true and is the one id here that is not in the table. It stands
+ * for whatever `GITWARREN_EDITOR` holds, and the template gained `{host}` in
+ * M4.4 precisely so that somebody with `emacsclient` or a wrapper script can
+ * say what "over there" means for them. Whether it works is theirs to know;
+ * offering it is the only way they can find out.
+ */
+export function opensRemotely(id: string): boolean {
+  if (id === 'custom') return true
+  return EDITOR_LINKS.some((editor) => editor.id === id && 'remoteUrl' in editor)
+}
+
+/**
+ * The subset of an editor list that can open a file on another machine, and
+ * which of them to use when the caller does not name one.
+ *
+ * The filtering is here rather than in either shell because the list being
+ * filtered is *detection* - what this machine has installed, which only the
+ * Electron shell can know - while whether an editor has a remote form is a
+ * property of the editor and the same everywhere. An empty result is the honest
+ * answer for a machine with only Zed on it, and is what makes the button
+ * disappear rather than open the wrong file.
+ */
+export function remotelyOpenable(list: {
+  editors: EditorInfo[]
+  defaultId: string | null
+}): { editors: EditorInfo[]; defaultId: string | null } {
+  const editors = list.editors.filter((editor) => opensRemotely(editor.id))
+  const defaultId =
+    list.defaultId !== null && editors.some((editor) => editor.id === list.defaultId)
+      ? list.defaultId
+      : (editors[0]?.id ?? null)
+  return { editors, defaultId }
 }

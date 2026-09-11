@@ -42,6 +42,7 @@
  * because this is where it would be most tempting to be clever.
  */
 import { readFrames } from './ndjson.js'
+import { frame } from '../../shared/rpc-wire.js'
 import { AppError } from '../../shared/errors.js'
 import {
   isRpcEvent,
@@ -222,7 +223,17 @@ export function createStdioClient({
           // One `write` per message: Node serialises writes on a stream, so two
           // requests issued in the same tick cannot interleave halfway through
           // a line.
-          output.write(`${JSON.stringify(request)}\n`)
+          //
+          // `frame` rather than `JSON.stringify`, and that is not a style
+          // choice: an `ArrayBuffer` is the one value `JSON.stringify` destroys
+          // silently, turning `attachments.ingest`'s image into `{}`. Until
+          // M4.4 this line was the reason a screenshot pasted onto a review on
+          // another machine came back "that file is not a PNG" about a file
+          // that was one. The encoder is `shared/rpc-wire.ts` because the
+          // WebSocket carrier had already solved this and two answers to "how
+          // does a request become bytes" is the same hazard `ndjson.ts` exists
+          // to remove.
+          output.write(`${frame(request)}\n`)
         } catch (error) {
           pending.delete(id)
           reject(
