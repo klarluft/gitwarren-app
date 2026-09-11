@@ -212,6 +212,23 @@ export const hostsService = {
     // machine - which is the one thing the id exists to prevent.
     const movedElsewhere = target !== undefined && target !== row.target
 
+    // An ssh target is an *address*, and an address is allowed to change - a
+    // machine gets a new name, a config alias is renamed, the tailnet hands out
+    // a different one. A WSL host's target is not an address, it is which
+    // distribution this is; changing it does not repoint a route at the same
+    // machine, it names a different machine with a different home directory and
+    // a different database. So it is refused rather than quietly accepted, and
+    // the sentence says what to do instead. `update` carries no `kind`, which is
+    // why this is here and not in the schema.
+    if (movedElsewhere && row.kind === 'wsl') {
+      throw new AppError(
+        'INVALID_INPUT',
+        'A WSL host is identified by its distribution. To review a different one, ' +
+          'add it as its own host.',
+        { target: ['A WSL host cannot be pointed at a different distribution.'] }
+      )
+    }
+
     try {
       const updated = getDatabase()
         .update(hosts)

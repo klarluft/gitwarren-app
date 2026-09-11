@@ -106,7 +106,7 @@ export type RemoveRepositoryInput = z.input<typeof removeRepositoryInputSchema>
 export const MAX_TARGET_LENGTH = 255
 
 export const hostIdSchema = z.number().int().positive()
-export const hostKindSchema = z.enum(['ssh'])
+export const hostKindSchema = z.enum(['ssh', 'wsl'])
 
 /**
  * An SSH destination.
@@ -133,6 +133,39 @@ export const sshTargetSchema = z
   .refine((value) => !/[\s;&|`$(){}<>'"\\]/.test(value), {
     message: 'A host can only contain a user name, an @ and a machine name.'
   })
+
+/**
+ * A WSL distribution name.
+ *
+ * The whole of a WSL host's target - there is no user half, and the schema note
+ * on `hosts.target` says why. Shape only, like the ssh case above: which
+ * distributions exist is something `wsl.exe -l -q` knows and a validator does
+ * not, and the add form is a picker fed by exactly that, so a name reaching here
+ * by hand is the unusual path rather than the normal one.
+ *
+ * What is rejected is what would stop being a name and start being an argument:
+ * a leading `-`, and whitespace or a shell metacharacter. `wsl.exe` is spawned
+ * without a shell and does read `-d --not-a-distro` as a name rather than a
+ * flag, so this is belt-and-braces - but a carrier's safety should not rest on
+ * a spawn flag somebody could change, and a slash is refused too because a
+ * distribution name is never a path.
+ */
+export const wslDistroSchema = z
+  .string()
+  .trim()
+  .min(1, 'Choose a WSL distribution.')
+  .max(MAX_TARGET_LENGTH)
+  .refine((value) => !value.startsWith('-'), {
+    message: 'A distribution name cannot start with "-".'
+  })
+  .refine((value) => !/[\s;&|`$(){}<>'"\\/]/.test(value), {
+    message: 'That is not a WSL distribution name.'
+  })
+
+/** Whichever of the two a host of this kind is addressed by. */
+export function hostTargetSchemaFor(kind: 'ssh' | 'wsl'): z.ZodType<string> {
+  return kind === 'wsl' ? wslDistroSchema : sshTargetSchema
+}
 
 /** A row as stored, plus how it is doing right now. */
 export const hostSchema = z.object({
@@ -166,13 +199,35 @@ export const hostStateSchema = z.object({
 
 export const hostWithStateSchema = hostSchema.extend({ state: hostStateSchema })
 
-export const addHostInputSchema = z.object({
-  target: sshTargetSchema,
-  /** Defaults to the target with any `user@` removed. */
-  label: z.string().trim().min(1, 'Name cannot be empty.').max(MAX_NAME_LENGTH).optional(),
-  kind: hostKindSchema.optional(),
-  editorTarget: z.string().trim().max(MAX_TARGET_LENGTH).optional()
-})
+/**
+ * Adding a host, where what counts as a valid target depends on the carrier.
+ *
+ * A `superRefine` rather than a discriminated union, because `kind` is optional
+ * - every host added before M5 was an `ssh` one and says so by saying nothing -
+ * and a union cannot discriminate on a key that may be absent. The alternative
+ * was one permissive target rule for both, which would have cost the two error
+ * messages that are the only reason a person knows which field they got wrong:
+ * "Enter a host to connect to, like user@machine" and "Choose a WSL
+ * distribution" are not interchangeable advice.
+ */
+export const addHostInputSchema = z
+  .object({
+    target: z.string().trim().min(1).max(MAX_TARGET_LENGTH),
+    /** Defaults to the target with any `user@` removed. */
+    label: z.string().trim().min(1, 'Name cannot be empty.').max(MAX_NAME_LENGTH).optional(),
+    kind: hostKindSchema.optional(),
+    editorTarget: z.string().trim().max(MAX_TARGET_LENGTH).optional()
+  })
+  .superRefine((value, ctx) => {
+    const parsed = hostTargetSchemaFor(value.kind ?? 'ssh').safeParse(value.target)
+    if (parsed.success) return
+    for (const issue of parsed.error.issues) {
+      // Re-pathed onto `target`, so the message lands under the input the
+      // person typed into rather than in the dialog's general slot - which is
+      // the thing M4.3 found broken across the preload and M4.4 fixed.
+      ctx.addIssue({ code: 'custom', message: issue.message, path: ['target'] })
+    }
+  })
 
 export const updateHostInputSchema = z
   .object({

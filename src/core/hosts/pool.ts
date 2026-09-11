@@ -46,11 +46,32 @@
  * backoff, because a person pressing a button has information the timer does
  * not - they just turned the machine on.
  */
-import { connectOverSsh, type SshConnection } from './ssh.js'
+import { connectOverSsh } from './ssh.js'
+import { connectOverWsl } from './wsl.js'
+import type { HostConnection } from './carrier.js'
 import { AppError } from '../../shared/errors.js'
 import type { RpcMethod, RpcParams, RpcResult } from '../../shared/rpc.js'
 
-/** Matches `ControlPersist=10m` in `ssh.ts`. Kept in step deliberately. */
+/**
+ * How long a connection may sit unused before it is closed.
+ *
+ * One number, two reasons, and at M5 the second one turned out to be the more
+ * interesting.
+ *
+ * For `ssh` it matches `ControlPersist=10m`, deliberately, so that the
+ * multiplexing master and the daemon expire together rather than leaving one
+ * waiting for the other.
+ *
+ * For `wsl.exe` there is no `ControlPersist` to keep in step with, and being
+ * wrong about the number is cheap: measured on this machine, reconnecting to a
+ * running distribution costs 80 ms and starting a stopped one 1.7 seconds,
+ * against a key exchange for `ssh`. What makes hanging up matter here is the
+ * other direction. An open pipe keeps a `serve --stdio` process alive *inside*
+ * the distribution, and a distribution with a process in it is one WSL will not
+ * idle down - so on `ssh` letting go retires a multiplexing master, and on WSL
+ * it is what lets the whole virtual machine go to sleep. The timeout earns its
+ * place more on the carrier that has no `ControlPersist`, not less.
+ */
 export const IDLE_TIMEOUT_MS = 10 * 60 * 1000
 
 /**
@@ -65,7 +86,13 @@ export const BACKOFF_MS = [0, 1_000, 5_000, 15_000, 60_000] as const
 export interface HostRoute {
   /** The `hosts` row id. Identity within this install, not on the network. */
   id: number
-  kind: 'ssh'
+  /**
+   * Which carrier reaches it. The discriminant is over *carriers*, not over
+   * operating systems - what a host runs is discovered by asking it, never
+   * declared. See the note on `hosts.kind` in `core/db/schema.ts`.
+   */
+  kind: 'ssh' | 'wsl'
+  /** What that carrier is handed: an `ssh` destination, or a distro name. */
   target: string
 }
 
@@ -81,7 +108,7 @@ export interface HostState {
 
 export interface HostPoolOptions {
   /** Swappable for tests; the default opens a real `ssh`. */
-  connect?: (route: HostRoute, onClose: (error: AppError) => void) => SshConnection
+  connect?: (route: HostRoute, onClose: (error: AppError) => void) => HostConnection
   now?: () => number
   /**
    * Notified whenever a host's reachability changes. Nothing passes it yet.
@@ -104,7 +131,7 @@ export interface HostPoolOptions {
 }
 
 interface Entry {
-  connection: SshConnection | null
+  connection: HostConnection | null
   state: HostState
   idleTimer: NodeJS.Timeout | null
   inFlight: number
@@ -264,7 +291,7 @@ export function createHostPool({
    * `ignoreBackoff` is the probe's escape hatch; every ordinary request
    * respects the timer.
    */
-  const connectionFor = (route: HostRoute, ignoreBackoff: boolean): SshConnection => {
+  const connectionFor = (route: HostRoute, ignoreBackoff: boolean): HostConnection => {
     const entry = entryFor(route.id)
 
     if (entry.connection && !entry.connection.isOpen()) {
@@ -367,8 +394,23 @@ export function createHostPool({
   }
 }
 
-function defaultConnect(route: HostRoute, onClose: (error: AppError) => void): SshConnection {
-  return connectOverSsh({ target: route.target, onClose })
+/**
+ * Which carrier to open, and the only place in this file that knows there is
+ * more than one.
+ *
+ * Everything above is about *when* to connect, and none of it changed when M5
+ * added a second way of reaching a machine - which is the whole argument for
+ * the pool being a separate module from `ssh.ts`. A switch rather than a
+ * registry: two carriers, and M6's WebSocket will be a third, is not a number
+ * that earns indirection.
+ */
+function defaultConnect(route: HostRoute, onClose: (error: AppError) => void): HostConnection {
+  switch (route.kind) {
+    case 'wsl':
+      return connectOverWsl({ distro: route.target, onClose })
+    case 'ssh':
+      return connectOverSsh({ target: route.target, onClose })
+  }
 }
 
 /**

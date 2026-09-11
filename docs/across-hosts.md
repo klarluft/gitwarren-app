@@ -2461,7 +2461,7 @@ happen first:
    reason that has nothing to do with hosts. *(done — see below.)*
 1. **The WSL carrier.** `wsl.exe` as a way of starting a daemon and talking to
    it, the `kind` column widened, and the pool taught which carrier to open.
-   *(planned.)*
+   *(done — see below.)*
 2. **The distro list and the installer.** `hosts.distros`, the add form
    becoming a picker rather than a text field, and the same linux tarball
    streamed down the same pipe. *(planned.)*
@@ -2565,6 +2565,131 @@ package. `npm install --ignore-scripts` is the way past it. And the `python` on
 this machine's PATH is the Microsoft Store stub, which exits without printing a
 version, so node-gyp reports "THIS VERSION OF PYTHON IS NOT SUPPORTED" for a
 Python that is not installed at all.
+
+**M5.1, done on the PC against the Ubuntu distro, 11 September.** M4.1 said a
+carrier is "one file and an argument vector", and it very nearly is again -
+`wsl.ts` contributes a child process, the pool grew a two-line switch, and
+`kind` widened without a migration because `drizzle/0008_hosts.sql` never had a
+CHECK on it. What is *not* shared with `ssh` is four things, and every one of
+them was found by running the command and reading the bytes rather than by
+reading Microsoft's documentation.
+
+**`--` is not `ssh host '<script>'`, and the difference is silent.** The obvious
+spelling is `wsl.exe -d Ubuntu -- ~/.gitwarren/bin/gitwarren serve --stdio`, and
+it works, which is the problem: what `--` actually does is hand the words to the
+distribution's *login shell*, which expands parameters and tildes in each of them
+and then execs the result with no parsing at all - no word splitting, no quoting,
+no operators. So `-- 'echo $HOME'` as one argument tries to exec a file named
+`echo /home/xfor`, and `-- sh -c '<script>'` has the script's `$root` and `$`
+expanded by the *outer* shell before the inner `sh` sees them. That second one
+is the dangerous shape, because it still produces a number: `$` answered 1269
+where the inner shell answered 1274, so a scratch directory named after the pid
+quietly stops being unique per install. `-e` skips the login shell entirely, and
+naming `sh -c` ourselves buys back tilde expansion and a script-as-one-argument
+under our own control. It is more predictable than `ssh`'s arrangement rather
+than less: over `ssh` the *login* shell runs the command and M4.2 found out the
+hard way that on this box it is `zsh`, whereas here it is always `sh`.
+
+**`wsl.exe` writes its own errors to stdout, which is the protocol.** This is
+the one with no `ssh` analogue whatever. `ssh` puts its complaints on stderr and
+leaves stdout to the remote command - M4.1 depended on that, and it is why the
+daemon's ready banner is on stderr. `wsl.exe` puts "There is no distribution with
+the supplied name." on **stdout**, in front of a stream that is supposed to carry
+nothing but ndjson frames. Nothing can stop it. The frame reader does exactly
+what it should and shuts the connection down saying the host "sent something that
+is not part of the protocol … usually a login script printing to stdout on the
+host" - right about the shape and wrong about the cause, and it would have sent
+somebody to look at their `.zshrc` for a distribution they never installed.
+
+What saves it is the mechanism M4.1 built for a different reason.
+`diagnostics()` already waits for the exit before explaining itself, so it gets
+the last word: a bounded prefix of stdout is kept, `wslSaid` drops the lines that
+are frames, and `describeWslExit` puts what is left in the sentence. A
+distribution that does not exist now fails in **42 ms** with *wsl.exe could not
+start no-such-distro-here. There is no distribution with the supplied name. Error
+code: Wsl/Service/WSL_E_DISTRO_NOT_FOUND*. A frame is a JSON object, so "does
+this line start with `{`" is the whole of the test - cheaper than parsing, and
+the question being asked is not "is this valid JSON" but "did something other
+than the protocol write here".
+
+**Two encodings on one pipe.** `wsl.exe` speaks UTF-16LE and the guest speaks
+UTF-8, so `setEncoding('utf8')` turns half the stream into mojibake - `wsl.exe -l
+-q` reads `U\0b\0u\0n\0t\0u\0`, and an error message is worse because it is the
+thing somebody has to read. `WSL_UTF8=1` fixes it, and is set on the child rather
+than on this process because it changes the output of a program we parse and
+nothing else should have to know. Worth noticing that this is `rpc-wire.ts`'s
+lesson in a third place: two framings hang, two encodings lie, and two encodings
+*on the same stream* lie in only half the sentences.
+
+**There is no `BatchMode`, because there is nothing to prompt for.**
+`BatchMode=yes` is what turns an `ssh` hang into an error, and the hang it
+prevents does not exist here - `wsl.exe` never authenticates, the distribution
+belonging to the Windows user already. What exists instead is a set of failures
+that each arrive as a status with some words attached, so the work was
+enumerating them rather than defending against a wait. A distribution that is not
+installed and WSL that is not enabled are both `wsl.exe`'s own `-1` (which
+Windows reports as 4294967295, and both spellings are accepted because which one
+arrives is a platform detail rather than a promise), told apart by the sentence
+rather than by the code. A distribution without GitWarren is exit 127 from `sh`,
+the same status `ssh` produces, which is why it is the same sentence. The wrong
+architecture is not visible here at all - it gets as far as a perfectly
+successful `tar` and dies at the first `exec`, during an install someone is
+watching, exactly as M4.2 arranged.
+
+**The one message this app has to invent.** `wsl --terminate Ubuntu` under a live
+connection ends the pipe and exits **1 with not one word on either stream** -
+which is M5's equivalent of M4.5 killing the `ssh`, except that `ssh` at least
+said something. Exit 1 is also what a daemon failing on its own account would
+give, so the two are told apart by the evidence: a daemon that failed said so on
+stderr, and silence is what a shutdown looks like. The sentence is therefore
+worded as a possibility, because that is all the evidence supports - *The
+connection to Ubuntu ended without saying why. The distribution may have been
+shut down, by `wsl --terminate` or by WSL idling it out.*
+
+**What moved, and why it moved before it was copied.** `ssh.ts` held the
+connection interface, the launcher path, the two bounds and M4.5's
+"a healthy start is not a cause of death" stderr filter, and all five are things
+a *carrier* has rather than things `ssh` has. They are in `carrier.ts` now, and
+both files are users of it - the same move `ndjson.ts` made at M4 and for the
+same reason, one layer up. The failure it prevents is quieter than a hang this
+time but not by much: the pool holds carriers through that interface and would go
+on compiling while one of them stopped waiting for an exit before explaining
+itself, which is precisely the bug M4.1 spent its time on. `isLocalOnly` moved
+with them, which is what makes M5.2's `hosts.distros` unforwardable by being
+named rather than by anybody remembering to check.
+
+**Verified end to end against the real distribution through the shipping code,**
+which already had the daemon M4 left on it. A cold connection answered
+`repositories.list` in 2.5 seconds and the next request in **1 ms**; the
+distribution named itself `4e0b0adb…` running 0.1.7-beta.1, with the two
+repositories M4 added still there. Two requests in flight at once both came back,
+which is the property `id` exists for. A `NOT_FOUND` crossed the pipe as itself.
+`hosts.list` was refused by the carrier. Through the pool with a `wsl` route: 141
+ms warm, and an unreachable distribution arriving as a *state* carrying
+`wsl.exe`'s words rather than as a throw. Then `wsl --terminate` under an open
+connection: the next request failed in **3 ms** with the invented sentence, and
+the connection after that started the distribution again in 1.8 seconds and got
+the same instance id back.
+
+Two numbers worth keeping for the idle-timeout argument: reconnecting to a
+running distribution costs **80 ms**, and starting a stopped one **1.7 seconds**
+- against `ssh`'s 178 ms cold and 4 ms warm on a multiplexed channel. So
+`IDLE_TIMEOUT_MS` keeps its ten minutes and its comment stops claiming
+`ControlPersist` is the only reason: an open pipe keeps a `serve --stdio` process
+alive *inside* the distribution, and a distribution with a process in it is one
+WSL will not idle down. Letting go retires a multiplexing master on `ssh`; on WSL
+it is what lets the whole virtual machine sleep.
+
+**Not done in M5.1, and why.** Nothing installs into a distribution yet and no
+screen can add one - both are M5.2, and they are one slice for M4.2's reason:
+the picker's main job is to drive the install. `hosts.add` accepts
+`kind: 'wsl'` and the carrier works, so a host is added through the dispatcher
+and not by anybody using the app. A WSL host's target cannot be *edited* to a
+different distribution, and that is a rule rather than a gap: an ssh target is an
+address and addresses change, while a distribution name is which machine this is,
+so repointing it would be naming a different home directory and a different
+database. The service refuses it and says to add the other distribution as its
+own host.
 
 ### M6 — Tailnet and live updates
 

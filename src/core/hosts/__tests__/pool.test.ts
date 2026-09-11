@@ -18,7 +18,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import { createHostPool, BACKOFF_MS, type HostRoute } from '../pool.js'
-import type { SshConnection } from '../ssh.js'
+import type { HostConnection } from '../carrier.js'
 import { AppError } from '../../../shared/errors.js'
 
 const route: HostRoute = { id: 1, kind: 'ssh', target: 'xfor@pc-wsl' }
@@ -55,7 +55,7 @@ function fakePool(host: Partial<FakeHost> = {}): {
         fake.open = false
         onClose(error)
       }
-      const connection: SshConnection = {
+      const connection: HostConnection = {
         request: () => fake.answer() as Promise<never>,
         close: () => {
           fake.open = false

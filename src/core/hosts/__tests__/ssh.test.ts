@@ -13,14 +13,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import {
-  connectOverSsh,
-  describeExit,
-  isLocalOnly,
-  sshArgs,
-  REMOTE_LAUNCHER,
-  SSH_OPTIONS
-} from '../ssh.js'
+import { connectOverSsh, describeExit, sshArgs, REMOTE_LAUNCHER, SSH_OPTIONS } from '../ssh.js'
+import { isLocalOnly } from '../carrier.js'
 import { rpcMethodNames } from '../../rpc/dispatcher.js'
 import { DAEMON_READY_PREFIX } from '../../../shared/rpc.js'
 

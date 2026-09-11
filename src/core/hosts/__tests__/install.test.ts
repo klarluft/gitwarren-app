@@ -22,7 +22,7 @@ import { gzipSync } from 'node:zlib'
 
 import { installOnHost } from '../install.js'
 import { tarballName } from '../release.js'
-import type { SshRunResult } from '../ssh.js'
+import type { HostRunResult } from '../carrier.js'
 import type { HostRoute } from '../pool.js'
 import { AppError } from '../../../shared/errors.js'
 
@@ -45,7 +45,7 @@ interface Recorded {
  * reads as "when it asks about the version, say this" and does not have to be
  * renumbered when a step is added between two others.
  */
-function fakeHost(answers: Array<[match: string, result: Partial<SshRunResult>]>) {
+function fakeHost(answers: Array<[match: string, result: Partial<HostRunResult>]>) {
   const calls: Recorded[] = []
 
   const run = ({
@@ -54,7 +54,7 @@ function fakeHost(answers: Array<[match: string, result: Partial<SshRunResult>]>
   }: {
     command: string
     stdin?: unknown
-  }): Promise<SshRunResult> => {
+  }): Promise<HostRunResult> => {
     calls.push({ command, hadStdin: stdin !== undefined })
     // Consume the stream so a `createReadStream` in the real code does not sit
     // open on a file descriptor for the rest of the run.
@@ -96,7 +96,7 @@ test('a host with nothing on it gets asked, then sent, then made to prove itself
   host.calls.length = 0
   let seenVersion = false
   const run = (async (options: { command: string; stdin?: unknown }) => {
-    const result = await (host.run as unknown as (o: unknown) => Promise<SshRunResult>)(options)
+    const result = await (host.run as unknown as (o: unknown) => Promise<HostRunResult>)(options)
     if (options.command.includes('--version')) {
       if (seenVersion) return { code: 0, stdout: `${VERSION}\n`, stderr: '' }
       seenVersion = true
@@ -257,7 +257,7 @@ test('the remote script uses nothing a minimal sh and tar lack', async () => {
   ])
   let seen = 0
   const run = (async (options: { command: string; stdin?: unknown }) => {
-    const result = await (host.run as unknown as (o: unknown) => Promise<SshRunResult>)(options)
+    const result = await (host.run as unknown as (o: unknown) => Promise<HostRunResult>)(options)
     if (options.command.includes('--version') && seen++ > 0) {
       return { code: 0, stdout: `${VERSION}\n`, stderr: '' }
     }

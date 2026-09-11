@@ -52,21 +52,36 @@
  * The one rule it enforces itself is that a `hosts.*` method is never sent. A
  * host list is a property of the install a person is sitting at: forwarding it
  * would make host A's list of hosts readable - and writable - from host B, and
- * turn a hub-and-spoke arrangement into a mesh nobody asked for. The routing
- * layer in M4.3 is what will decide local-versus-remote in general; this is the
- * backstop that makes the rule structural rather than a comment, and it lives
- * here because a carrier is the last thing a request passes before it leaves
- * the machine.
+ * turn a hub-and-spoke arrangement into a mesh nobody asked for. M4.3's router
+ * decides local-versus-remote in general; `isLocalOnly` is the backstop that
+ * makes the rule structural rather than a comment, and every carrier checks it
+ * because a carrier is the last thing a request passes before it leaves the
+ * machine.
+ *
+ * ## What is no longer here
+ *
+ * The connection *interface*, the launcher path, the two bounds and the stderr
+ * filter moved to `carrier.ts` at M5, when `wsl.ts` became the second
+ * implementation of all of them. It is the move `ndjson.ts` made at M4 and for
+ * the same reason: a shape written down twice is one the copies eventually
+ * disagree about. What stayed is everything that is about `ssh` in particular,
+ * which is most of the file.
  */
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import type { Readable } from 'node:stream'
 import { createStdioClient, type StdioClient } from '../rpc/stdio-client.js'
+import {
+  diagnosticTail,
+  isLocalOnly,
+  EXIT_GRACE_MS,
+  MAX_STDERR_BYTES,
+  REMOTE_LAUNCHER,
+  type HostConnection,
+  type HostRunResult
+} from './carrier.js'
 import { AppError } from '../../shared/errors.js'
-import { DAEMON_READY_PREFIX } from '../../shared/rpc.js'
-import type { RpcMethod, RpcParams, RpcResult } from '../../shared/rpc.js'
 
-/** The launcher M2 promised would stay put. */
-export const REMOTE_LAUNCHER = '~/.gitwarren/bin/gitwarren'
+export { REMOTE_LAUNCHER }
 
 /**
  * Options given to `ssh` on every connection.
@@ -94,47 +109,6 @@ export function sshArgs(target: string): string[] {
   return [...SSH_OPTIONS, target, REMOTE_LAUNCHER, 'serve', '--stdio']
 }
 
-/**
- * How much of the host's stderr to keep.
- *
- * `ssh` says why it failed on stderr and then exits, so by the time anyone can
- * ask, the only evidence is what was captured while it ran. Bounded because a
- * daemon in a crash loop can produce a great deal of it, and this is held in
- * memory for the lifetime of a connection.
- */
-const MAX_STDERR_BYTES = 8 * 1024
-
-/**
- * How long to wait for `ssh` to exit before giving up on a better explanation.
- *
- * See `diagnostics` below. The wait only ever happens on a connection that has
- * already failed, and `ssh` exits within milliseconds of closing its streams,
- * so this is a bound on a pathological case rather than a delay anyone waits
- * for in practice.
- */
-const EXIT_GRACE_MS = 500
-
-export interface SshConnection {
-  request<M extends RpcMethod>(method: M, params?: RpcParams<M>): Promise<RpcResult<M>>
-  close(): void
-  isOpen(): boolean
-  /**
-   * The best available explanation of why this connection is no longer working.
-   *
-   * A promise, and that is the whole point of it. The protocol notices a dead
-   * connection when the far end's *stdout* ends, which for a failing `ssh`
-   * happens a moment before the `exit` event that carries the status code and
-   * after which stderr is complete. Reading the reason synchronously at the
-   * instant a request fails therefore gets "the connection closed" - true,
-   * useless, and the message a person would otherwise see for a hostname that
-   * does not resolve.
-   *
-   * So this waits for the exit that is already on its way, briefly, and answers
-   * with what `ssh` actually said.
-   */
-  diagnostics(): Promise<string>
-}
-
 export interface SpawnSshOptions {
   target: string
   /** Swappable so the tests can run a fake host without an `ssh` on the box. */
@@ -156,7 +130,7 @@ export function connectOverSsh({
   target,
   spawnProcess = spawn,
   onClose
-}: SpawnSshOptions): SshConnection {
+}: SpawnSshOptions): HostConnection {
   let child: ChildProcessWithoutNullStreams
   try {
     child = spawnProcess('ssh', sshArgs(target), {
@@ -262,12 +236,6 @@ export interface RunOverSshOptions {
   spawnProcess?: typeof spawn
 }
 
-export interface SshRunResult {
-  code: number
-  stdout: string
-  stderr: string
-}
-
 /**
  * Run one command on a host and wait for it to finish.
  *
@@ -286,7 +254,7 @@ export function runOverSsh({
   command,
   stdin,
   spawnProcess = spawn
-}: RunOverSshOptions): Promise<SshRunResult> {
+}: RunOverSshOptions): Promise<HostRunResult> {
   return new Promise((resolve, reject) => {
     let child: ChildProcessWithoutNullStreams
     try {
@@ -354,16 +322,6 @@ export function runOverSsh({
 }
 
 /**
- * Methods this install answers for itself, whatever host is being looked at.
- *
- * See the note at the top of the file. A prefix rather than a list of names, so
- * that adding `hosts.rename` tomorrow cannot accidentally become forwardable.
- */
-export function isLocalOnly(method: string): boolean {
-  return method.startsWith('hosts.')
-}
-
-/**
  * Turn an exit status into something worth putting on a screen.
  *
  * `ssh` has one exit code for "everything that went wrong on my side" (255) and
@@ -383,21 +341,10 @@ export function describeExit(
   signal: NodeJS.Signals | null,
   stderr: string
 ): string {
-  // Two different kinds of line arrive on that stream, and only one of them is
-  // an explanation. A daemon that started announces itself there (M4.1 put the
-  // banner on stderr precisely so it could not hurt the framing on stdout), and
-  // quoting it back at somebody whose connection has just died reads as though
-  // it were the cause: "The connection to xfor@pc-wsl was terminated (SIGKILL).
-  // [gitwarren-serve] ready (instance …)". Proof of a healthy start is the one
-  // thing that cannot be why it stopped. Every other line the daemon or `ssh`
-  // wrote is kept, because any of them might be.
-  const tail = stderr
-    .trim()
-    .split('\n')
-    .filter((line) => !line.trimStart().startsWith(DAEMON_READY_PREFIX))
-    .slice(-3)
-    .join(' ')
-    .trim()
+  // `diagnosticTail` is where the "a healthy start is not a cause of death"
+  // rule moved at M5, because `wsl.ts` needs exactly the same filter and M4.5
+  // went to some trouble to get the wording of it right.
+  const tail = diagnosticTail(stderr)
   const detail = tail ? ` ${tail}` : ''
 
   if (code === 127) {

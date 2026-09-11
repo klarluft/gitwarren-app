@@ -89,10 +89,18 @@ export type NewPrincipalRow = typeof principals.$inferInsert
  *
  * ## What `kind` will and will not grow into
  *
- * `ssh` here, `wsl` at M5, `websocket` at M6. It discriminates over *carriers*,
+ * `ssh` and `wsl` here, `websocket` at M6. It discriminates over *carriers*,
  * not over operating systems: what a host runs is discovered by asking it
  * (`uname -sm`, for M4.2's installer), never declared in a form, because a
  * person choosing "Linux" from a dropdown is a person who can choose wrong.
+ * M5 kept to that - a WSL host is added by picking a distribution, and the
+ * installer still asks `uname -sm` before choosing a tarball, exactly as it
+ * does for a machine across the network.
+ *
+ * Widening the enum needed no migration, which is worth saying once: the
+ * generated `drizzle/0008_hosts.sql` has no CHECK on this column, so the set of
+ * legal values is a type-level claim and SQLite has never been asked to hold an
+ * opinion about it.
  */
 export const hosts = sqliteTable(
   'hosts',
@@ -106,7 +114,7 @@ export const hosts = sqliteTable(
     /** What the person calls this machine. Theirs to choose; never matched on. */
     label: text('label').notNull(),
     /** Which carrier reaches it. */
-    kind: text('kind', { enum: ['ssh'] })
+    kind: text('kind', { enum: ['ssh', 'wsl'] })
       .notNull()
       .default('ssh'),
     /**
@@ -114,6 +122,23 @@ export const hosts = sqliteTable(
      * and it carries the Unix user, because spike S1 found that a bare MagicDNS
      * name requests the *client's* username and is refused by the tailnet
      * policy. `xfor@pc-wsl`, not `pc-wsl`.
+     *
+     * For `wsl`, the distribution name and nothing else: `Ubuntu`. There is no
+     * user half, and M5 decided there should not be one. `wsl.exe -d Ubuntu`
+     * runs as the distribution's own default user, decided by its `/etc/wsl.conf`
+     * and not by anything this app could say, so the username negotiation that
+     * made S1 interesting has no counterpart here. `wsl.exe` does have a `-u`,
+     * and offering it would be offering a second `$HOME` - hence a second
+     * `~/.gitwarren`, a second database and a second set of reviews. That is not
+     * another way of reaching one host; it is another host, and it is exactly
+     * the kind of field a person can choose wrong.
+     *
+     * Note that `wsl.exe` matches a distribution name case-insensitively while
+     * the index below is case-sensitive, so `Ubuntu` and `ubuntu` can both be
+     * inserted. That is not a hole: they collide on `hosts_instance_idx` the
+     * first time either one answers, which is the same mechanism that catches
+     * one machine added under two `ssh` names, and the add form is a picker
+     * fed by `wsl.exe -l -q` so the spelling comes from the machine itself.
      */
     target: text('target').notNull(),
     /**
