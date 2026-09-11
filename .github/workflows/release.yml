@@ -32,7 +32,20 @@ jobs:
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG already exists, leaving it alone."
           else
-            gh release create "$TAG" --draft --title "$TAG" --generate-notes
+            # A tag carrying a prerelease component - v0.1.7-beta.1 - is created
+            # flagged as a prerelease, and that flag is the only thing keeping it
+            # away from ordinary users. GitHub's /releases/latest skips
+            # prereleases, and that endpoint is what electron-updater asks on
+            # behalf of every install running a stable version. Nothing else in
+            # the release distinguishes it: the update manifests inside a beta
+            # release are still called latest.yml, because electron-builder does
+            # not derive a channel for the GitHub provider. Clear the flag and
+            # every stable install takes the beta on its next six-hourly check.
+            prerelease=""
+            case "$TAG" in
+              *-*) prerelease="--prerelease" ;;
+            esac
+            gh release create "$TAG" --draft --title "$TAG" --generate-notes $prerelease
           fi
 
   build:

@@ -13,8 +13,16 @@ name: Deploy site
 # buttons still point at the previous release, or fall back to the releases
 # page. Publishing the draft is the moment the assets become real.
 #
-# `published` rather than `released` on purpose: `released` does not fire for
-# prereleases, and v0.1.0 is one.
+# `published` rather than `released`, even though `released` already skips
+# prereleases: keeping the broader trigger means the decision to skip one is
+# written here, in an `if:` that can be read, rather than inferred from which
+# webhook GitHub chose to send.
+#
+# And skipped it must be. A prerelease is published so that testers can be
+# handed a link to it; gitwarren.com is where everyone else arrives, and its
+# buttons should go on pointing at the newest stable build. The site's own
+# lookup declines prereleases as well - this is the outer of the two guards,
+# and the one that saves an entire pointless deploy.
 
 on:
   release:
@@ -26,6 +34,9 @@ on:
 jobs:
   deploy:
     name: Rebuild and deploy gitwarren.com
+    # `github.event.release` is absent on a manual run, which leaves the first
+    # clause true and the redeploy button working.
+    if: github.event_name != 'release' || github.event.release.prerelease == false
     runs-on: ubuntu-latest
     steps:
       # Both repositories are public, so the default token is enough here.
