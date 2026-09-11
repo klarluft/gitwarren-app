@@ -16,7 +16,27 @@ import { createWebCarrier } from './carrier'
 import { createWebShell } from './shell'
 import { isLoopbackFragment, routeForLoopbackFragment } from './loopback-fragment'
 import { hrefFor } from '@shared/routes'
+import { outcomeOf, type BridgeCarrier, type Carrier } from '@shared/rpc'
 import type { GitWarrenBridge } from '@shared/api'
+
+/**
+ * The carrier, in the shape `window.gitwarren` promises.
+ *
+ * A tab has no `contextBridge` and could throw perfectly well - the socket
+ * carrier and the screens that read it are the same world, so an `AppError`
+ * crosses nothing and loses nothing. It hands back an outcome anyway, because
+ * the *Electron* bridge has no choice (see `BridgeCarrier` in `shared/rpc.ts`)
+ * and one shape means `lib/api.ts` has one way of asking rather than a branch
+ * for which shell it happens to be running in.
+ *
+ * The round trip through `toSerialized` and back is the price, and it is a
+ * plain object copy on a path that is already a network request.
+ */
+function asBridgeCarrier(carrier: Carrier): BridgeCarrier {
+  return {
+    request: (method, params, host) => outcomeOf(() => carrier.request(method, params, host))
+  }
+}
 
 export function installBridge(): GitWarrenBridge {
   // The shell is handed the carrier, which the preload's never needed. Two of
@@ -25,7 +45,9 @@ export function installBridge(): GitWarrenBridge {
   // host half is an ordinary method. See `shell.ts` on where that line falls.
   const carrier = createWebCarrier()
   const bridge: GitWarrenBridge = {
-    carrier,
+    carrier: asBridgeCarrier(carrier),
+    // The shell keeps the throwing carrier: it is ordinary in-world code, and
+    // `openInEditor` wants the path rather than an outcome to unwrap.
     shell: createWebShell(carrier)
   }
 

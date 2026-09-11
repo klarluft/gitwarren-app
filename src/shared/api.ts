@@ -18,7 +18,7 @@
  * that is deliberate: this file is transport, not behaviour.
  */
 import type { FileContent, FileImage, RepositoryRefs, ReviewCommits, ReviewDiff } from './git.js'
-import type { AttachmentIngestParams, Carrier, ReviewOpen, RpcMethod } from './rpc.js'
+import type { AttachmentIngestParams, BridgeCarrier, ReviewOpen, RpcMethod } from './rpc.js'
 import type {
   AddHostInput,
   AddRepositoryInput,
@@ -442,8 +442,12 @@ export interface GitWarrenApi {
  * above it do not change at all.
  */
 export interface GitWarrenBridge {
-  /** Every core method, in one function. See `shared/rpc.ts`. */
-  carrier: Carrier
+  /**
+   * Every core method, in one function, answering with an outcome rather than
+   * throwing - see `BridgeCarrier` in `shared/rpc.ts` for why that distinction
+   * is load-bearing across `contextBridge`. `lib/api.ts` unwraps it.
+   */
+  carrier: BridgeCarrier
   shell: ShellApi
 }
 
