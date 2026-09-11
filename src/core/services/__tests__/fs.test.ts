@@ -27,6 +27,24 @@ const { AppError } = await import('../../../shared/errors.js')
 
 const root = mkdtempSync(join(tmpdir(), 'gitwarren-fs-'))
 
+/**
+ * Whether this machine let an unprivileged process make a symlink.
+ *
+ * On Windows it does not, unless Developer Mode is on or the process is
+ * elevated: `symlinkSync` fails with `EPERM`. That is a fact about the
+ * operating system's privilege model rather than anything GitWarren does, and
+ * it is worth one variable because of where the call used to be - in `before`,
+ * where it took all thirteen tests in this file down with it and reported
+ * "EPERM: operation not permitted, symlink" as the reason a folder listing
+ * failed. CI runs ubuntu only, which is why nothing said so.
+ *
+ * The one test that is actually about symlinks skips itself rather than being
+ * deleted or faked: the claim it makes is still true on the platforms that can
+ * express it, and a skip says "not checked here" where a fake would say
+ * "checked" and be wrong.
+ */
+let symlinksAllowed = true
+
 before(() => {
   mkdirSync(join(root, 'plain'))
   mkdirSync(join(root, '.hidden'))
@@ -37,8 +55,13 @@ before(() => {
   mkdirSync(join(root, 'a-worktree'))
   writeFileSync(join(root, 'a-worktree', '.git'), 'gitdir: /elsewhere\n')
   writeFileSync(join(root, 'a-file.txt'), 'not a folder\n')
-  symlinkSync(join(root, 'a-file.txt'), join(root, 'link-to-file'))
-  symlinkSync(join(root, 'plain'), join(root, 'link-to-folder'))
+  try {
+    symlinkSync(join(root, 'a-file.txt'), join(root, 'link-to-file'))
+    symlinkSync(join(root, 'plain'), join(root, 'link-to-folder'))
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EPERM') throw error
+    symlinksAllowed = false
+  }
 })
 
 after(() => {
@@ -70,7 +93,14 @@ test('folders are listed and files are not', async () => {
   assert.ok(!listed.includes('a-file.txt'), 'a file is never the answer to "which repository"')
 })
 
-test('a symlink counts as what it points at', async () => {
+test('a symlink counts as what it points at', async (t) => {
+  // Asked here rather than in the options object, which node:test evaluates
+  // when the file is read - before any `before` hook has run, and so before
+  // anything has tried to make a symlink.
+  if (!symlinksAllowed) {
+    t.skip('this platform will not let an unprivileged process create a symlink')
+    return
+  }
   const listed = await names(root)
 
   assert.ok(listed.includes('link-to-folder'), 'a link to a folder is a way into that folder')

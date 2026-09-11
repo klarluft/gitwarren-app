@@ -2447,6 +2447,9 @@ M4; large for Windows users who keep code in WSL.
 - **Guard.** Adding a `\\wsl.localhost` path as a *local* repository is
   refused with a pointer to "add as WSL host".
 
+**Verify:** Windows app, repo in Ubuntu, Claude Code running inside WSL. Native
+Windows repos unaffected.
+
 #### How it is being built, and where it has got to
 
 Four changes, each mergeable on its own, in the order that keeps every one of
@@ -2455,7 +2458,7 @@ mock. Before them, one repair that is not M5 and is listed because it had to
 happen first:
 
 0. **The test suite on Windows.** `npm test` cannot run here at all, for a
-   reason that has nothing to do with hosts. *(planned.)*
+   reason that has nothing to do with hosts. *(done — see below.)*
 1. **The WSL carrier.** `wsl.exe` as a way of starting a daemon and talking to
    it, the `kind` column widened, and the pool taught which carrier to open.
    *(planned.)*
@@ -2536,8 +2539,32 @@ distro, and a distro with a process in it is a distro WSL will not idle down. On
 ssh, hanging up lets a multiplexing master expire; on WSL, hanging up is what
 lets the whole virtual machine go to sleep. It matters more here, not less.
 
-**Verify:** Windows app, repo in Ubuntu, Claude Code running inside WSL. Native
-Windows repos unaffected.
+**M5.0, done on the PC, 11 September.** `npm test` on Windows ended with
+thirteen failures in one file, every one of them reporting `EPERM: operation
+not permitted, symlink` as the reason a *folder listing* was wrong. Windows does
+not let an unprivileged process create a symlink without Developer Mode, and
+`fs.test.ts` made two of them in `before`, so the hook took all thirteen tests
+down and none of the other twelve had anything to do with symlinks. The one test
+that is about them now skips itself and says why; the rest run. 520 pass, 5
+skipped, 0 fail — the fifth skip is the new one, the other four being M4.1's
+envelope assertions.
+
+This is the third of its kind after `scripts/run-tests.mjs` and the Windows
+drive-letter fix, and they all have one cause: `ci.yml` runs ubuntu only, so
+every Windows-shaped failure in this repository has been found by a person
+sitting at a Windows machine rather than by the suite. A Windows job is the
+honest fix and is deliberately not in this milestone.
+
+Two more of the same family, found getting the checkout to build at all and
+recorded because the next person will hit them in the same order. `better-sqlite3`
+ships a `win32-x64` prebuild *and* a `binding.gyp`, and npm runs `node-gyp
+rebuild` for any package with a `binding.gyp` and no `install` script — so a
+plain `npm install` on Windows tries to compile SQLite, needs Python, and fails
+the whole install even though the binary it was about to build is already in the
+package. `npm install --ignore-scripts` is the way past it. And the `python` on
+this machine's PATH is the Microsoft Store stub, which exits without printing a
+version, so node-gyp reports "THIS VERSION OF PYTHON IS NOT SUPPORTED" for a
+Python that is not installed at all.
 
 ### M6 — Tailnet and live updates
 
