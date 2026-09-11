@@ -32,7 +32,6 @@ import { HostsCard } from './features/hosts/hosts-card'
 import { HostsPage } from './features/hosts/hosts-page'
 import { useRefetchOnReconnect } from './features/hosts/use-reconnect'
 import { SettingsPanel } from './features/settings/settings-panel'
-import { TailnetPanel } from './features/settings/tailnet-panel'
 import { RepositoryDetail } from './features/repositories/repository-detail'
 import { RepositoryList } from './features/repositories/repository-list'
 import { ReviewDetail } from './features/reviews/review-detail'
@@ -155,9 +154,12 @@ function HomeScreen() {
 
       <div className="flex flex-col gap-6">
         <RepositoryList />
+        {/* Hosts carries both directions of "other machines" now - the list of
+            the ones this install reaches, and the switch that lets them reach
+            back. The switch is on that screen rather than here; the card below
+            says whether it is on. */}
         <HostsCard />
         <AgentAccessCard />
-        <TailnetPanel />
         <SettingsPanel />
       </div>
     </>

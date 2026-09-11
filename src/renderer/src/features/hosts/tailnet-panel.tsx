@@ -9,6 +9,20 @@
  * in a tab as in the window - more so, since the person running `gitwarren
  * serve` on a headless box is the one who most needs it.
  *
+ * ## Why it lives under `hosts/` and renders on the Hosts screen
+ *
+ * It used to sit on the home screen next to the login-item switch, which put
+ * the two halves of one relationship on opposite ends of a page. A host is a
+ * machine this install reaches; this switch is whether this install can *be*
+ * reached. Same subject - this machine - opposite directions.
+ *
+ * `shared/routes.ts` had already committed to that subject: the Hosts route is
+ * `{ name: 'hosts'; host?: undefined }`, never host-scoped, because `hosts.*`
+ * is the property of the install a person is driving and even a hand-written
+ * `#/h/<id>/hosts` resolves here. So the Hosts screen is the one place where
+ * "this machine, and the machines around it" is already the whole topic, and a
+ * reachability switch anywhere else was the odd one out.
+ *
  * ## It says what the machine says, not what was asked for
  *
  * `tailscale serve` is machine state. It survives a GitWarren restart, and the
@@ -60,17 +74,17 @@
  * pressed.
  */
 import { useRef, useState } from 'react'
-import useSWR from 'swr'
 import { Globe, Loader2 } from 'lucide-react'
 import { Switch } from '@/components/ui/switch'
 import { Card } from '@/components/ui/card'
 import { Breakable } from '@/components/breakable'
 import { CopyButton } from '@/components/copy-button'
-import { api, CACHE_KEYS } from '@/lib/api'
+import { api } from '@/lib/api'
 import { errorMessage } from '@/lib/errors'
+import { useTailnet } from './use-tailnet'
 
 export function TailnetPanel() {
-  const { data: tailnet, mutate } = useSWR(CACHE_KEYS.tailnet, () => api.hosts.tailnet())
+  const { data: tailnet, mutate } = useTailnet()
   // Null when nothing is in flight; otherwise what was asked for, which is the
   // only thing the panel is entitled to claim before the machine answers.
   const [pending, setPending] = useState<boolean | null>(null)
