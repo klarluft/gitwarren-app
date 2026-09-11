@@ -97,7 +97,7 @@ linux:
     - target: AppImage
       arch: [x64, arm64]
   category: Development
-  synopsis: Local code review for your git repositories
+  synopsis: Code review for your own machines and your own agents
   artifactName: ${productName}-${version}-${arch}.${ext}
 
 publish:

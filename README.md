@@ -20,13 +20,19 @@ brew install klarluft/tap/gitwarren-cli   # macOS and Linux, brings its own Node
 
 See [The `gitwarren` command line](#the-gitwarren-command-line).
 
-A cross-platform desktop app for doing code reviews of your own git
-repositories, on your own machines. Your machines, your agents, no one else's
-server — and no account.
+Code review for your own git repositories, on your own machines. Your machines,
+your agents, no one else's server — and no account.
 
-Reviews live on the machine the code is on. GitWarren reaches your other
-machines over SSH, over `wsl.exe`, or over your own tailnet, and nothing is
-replicated, relayed or stored anywhere but the computers you already own.
+It runs as a desktop app on macOS, Windows and Linux, or as a command that
+serves the same review UI into a browser tab. Same renderer either way; the
+shell is the only thing that differs. A machine with no screen at all — a VPS, a
+WSL distro, a box an agent works on — runs the headless half and is reviewed
+from somewhere else.
+
+Reviews live on the machine the code is on, and stay there. GitWarren reaches
+your other machines over SSH, over `wsl.exe`, or over your own tailnet, and
+nothing is replicated, relayed or stored anywhere but the computers you already
+own. See [Your other machines](#your-other-machines).
 
 Built for the moment a coding agent — Claude Code, Codex, or anything else that
 edits files on your disk — has just finished, and its work is sitting in your
@@ -64,6 +70,7 @@ Local AI agents get the same capabilities through an MCP server over stdio.
 - [Database migrations](#database-migrations)
 - [Agent access (MCP)](#agent-access-mcp)
 - [The `gitwarren` command line](#the-gitwarren-command-line)
+- [Your other machines](#your-other-machines)
 - [Linking the user back into the app](#linking-the-user-back-into-the-app)
 - [Images in comments](#images-in-comments)
 - [Release process](#release-process)
@@ -702,7 +709,10 @@ which the page turns into `gitwarren://<instance-id>/review/4/conversation`.
 That is what lets a link resolve on whichever GitWarren the user clicked from —
 the app can tell its own review 4 from another machine's. A link naming an
 install this one is not lands on the home screen rather than opening the local
-review with that number; reaching another host arrives in M4.
+review with that number. If the install it names is a host this one knows, the
+link opens *that* machine's review instead — the host segment travels with it,
+so this install's review 4 is never reachable by a link that meant another
+machine's.
 
 The link is a chain of three hops, and each one is load-bearing:
 
@@ -1031,7 +1041,7 @@ It exists for two audiences that the app cannot serve. Someone who will not
 install an Electron app gets the identical renderer in a tab — every line is
 shared, the shell is not. And a machine with no screen at all — a VPS, a WSL
 distro, a box an agent works on — gets the daemon and the MCP server, which is
-what M4 and M5 in [docs/across-hosts.md](docs/across-hosts.md) build on.
+what [Your other machines](#your-other-machines) is built on.
 
 ### Three ways to install it
 
@@ -1039,7 +1049,7 @@ what M4 and M5 in [docs/across-hosts.md](docs/across-hosts.md) build on.
 | --- | --- |
 | `npx gitwarren` | Uses the Node you already have; `better-sqlite3` arrives as an ordinary dependency. The Windows answer, and about 700 KB. |
 | `brew install klarluft/tap/gitwarren-cli` | Pours the self-contained tarball. Brings its own Node, so nothing on the machine can upgrade out from under the native addon. |
-| The release tarball | `gitwarren-daemon-<v>-<target>.tar.gz`, unpacked anywhere. What M4 installs on a remote host. |
+| The release tarball | `gitwarren-daemon-<v>-<target>.tar.gz`, unpacked anywhere. What GitWarren sends to a remote host over SSH. |
 
 The formula is `gitwarren-cli` and the cask stays `gitwarren`. The tokens differ
 so `brew install klarluft/tap/gitwarren` keeps meaning the app; the *binary* is
@@ -1066,7 +1076,7 @@ Two things, and only the second is about logging in:
 
 1. **The launchers.** `~/.gitwarren/bin/gitwarren` and `~/.gitwarren/bin/gitwarren-mcp`,
    at the paths the rest of GitWarren already names — the Agent Access page
-   prints the second as a command to paste, and M4 spawns the first over ssh as
+   prints the second as a command to paste, and the app spawns the first over ssh as
    `~/.gitwarren/bin/gitwarren serve --stdio`. Rerunning after an update points
    them at the install that ran last.
 2. **The login item.** A LaunchAgent on macOS, a `systemd --user` unit on Linux,
@@ -1085,6 +1095,94 @@ build rather than inheriting them. Both have a fallback relative to the working
 directory, and a login item does not have one — launchd starts a job in `/`.
 That is resolved once, at install time, while the answer is still knowable; see
 `src/cli/install.ts`.
+
+---
+
+## Your other machines
+
+A repository lives on one machine, and so does its review. GitWarren does not
+copy either. What it does instead is reach the machine the code is already on,
+run the same review there, and render it in the window in front of you.
+
+Five rules hold this together, and every screen below follows from them:
+
+1. **A host owns its repositories.** SQLite, git and the MCP server for a repo
+   live on the machine that repo is on. Reviews never move.
+2. **Nothing syncs.** The window is a view onto hosts. It caches nothing across
+   a disconnect, and a machine that is offline is shown as offline rather than
+   as its last known state.
+3. **One protocol, several carriers.** The same requests, responses and events
+   run unchanged over a child-process pipe, `wsl.exe`, `ssh`, or a WebSocket.
+4. **Links resolve where they are clicked.** A loopback link names the host in
+   its fragment and opens on whichever GitWarren you clicked from. A tailnet URL
+   is offered in addition, but only while that host is actually listening.
+5. **Agents never cross the network.** MCP stays on stdio, local to its host,
+   reading real paths. The daemon exists for the human elsewhere, not for the
+   agent next to the code.
+
+**Other machines** is where all of it is driven, in both directions: the
+machines this one reaches, and whether this one can be reached back.
+
+### Over SSH
+
+Add a machine you can already reach over `ssh` — a VPS, a build box, a PC's WSL
+distro — and GitWarren installs itself there over the same connection. The host
+needs nothing but git: the daemon tarball ships a Node binary of its own, so
+there is no runtime to install and nothing to keep up to date by hand. It is
+fetched from the GitHub release by the machine you are sitting at and streamed
+down the pipe.
+
+Nothing is left running. `ssh host gitwarren serve --stdio` is spawned on
+demand, and a connection pool hangs up after ten idle minutes rather than
+holding a socket open to every machine you own.
+
+### WSL, from the Windows app
+
+A WSL distro is a host like any other, reached over `wsl.exe` instead of `ssh`.
+The Windows app lists the distributions on the machine and installs into the one
+you pick, running as that distribution's own default user.
+
+Windows-native repositories stay first class — most Windows developers do not
+run WSL, and agents have run natively there since late 2025. A Windows path and
+a WSL path are *different machines*, so a WSL path offered as a local repository
+is refused rather than read through `\\wsl$`, which is the wrong architecture
+even on the days it works.
+
+### On your tailnet
+
+Turn on **Reachable on your tailnet** and GitWarren runs `tailscale serve` in
+front of the loopback port. Every request then has to carry a Tailscale login
+equal to this machine's owner; anything else is refused before it reaches the
+dispatcher. There is no pairing token, and nothing is exposed to the internet —
+`funnel` is deliberately not used.
+
+Your other machines find this one by themselves: peers from
+`tailscale status --json` are probed, and the ones that answer are proposed as
+hosts with the instance id they reported. Manual entry stays for everything
+else. A machine added twice under two names is recognised as one machine,
+because the identity that settles it is the instance id rather than the address
+you typed.
+
+A listening host is also the only kind that can **push**. Comments and reviews
+arrive as events the moment they are written — including writes from an agent,
+which pokes the owner of its data directory over the port it already publishes.
+A host reached over SSH or `wsl.exe` has no process of its own to push from, so
+there the 15-second poll is still the floor. It is the floor everywhere: a lost
+event costs seconds, never correctness.
+
+### The phone
+
+Nothing was built for it. The web view is reachable at the host's `webUrl` from
+any device on the tailnet, and `tailscale serve` supplies the identity, so there
+is no token to get onto a phone. Below `lg` the files list and the diff become
+separate screens and the composer sits above the keyboard.
+
+MCP results carry that `webUrl` alongside the always-present loopback `guiUrl`
+whenever the host is listening — so a link an agent prints can be opened on the
+machine you are holding, not only the one it ran on.
+
+The full design, its spikes and the outcome of every milestone are in
+[docs/across-hosts.md](docs/across-hosts.md).
 
 ---
 
