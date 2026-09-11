@@ -3129,7 +3129,7 @@ Before them, one spike that had to happen first, because it decides whether the
    added. *(done — see below.)*
 7. **Links across installs, and the words.** What a `gitwarren://<other-id>/…`
    link does now that there is somewhere for it to go, and the README, the
-   tagline and Known limitations catching up with the thing that shipped.
+   tagline and Known limitations catching up with the thing that shipped. *(done — see below.)*
 
 **What was settled before any of it was written.**
 
@@ -3841,6 +3841,117 @@ The guess was wrong in a way that would have been invisible on a LAN and is the
 first thing anybody notices on a tailnet, which is the argument for measuring
 against the real one in one sentence.
 
+**M6.7, done on the Mac against `pc-wsl`, 11 September.** Two things that had
+been waiting for the rest of the milestone to exist, and the words.
+
+**A link naming another install finally opens something.** `main/deep-link.ts`
+has been sending those to the home screen since M2, with a log line saying
+*"reviews on other hosts arrive in M4"* - which they did, three milestones ago,
+while that line went on discarding them. M4.3, M4.4 and M5.3 each noticed it and
+each deferred, reasonably: nothing before the tailnet produced a link that named
+another machine, because a link is minted by the install that owns the review
+and there was no ordinary way for one to travel.
+
+The change is to hand the route over *with* its host segment rather than
+stripping it, in both shells - `main/deep-link.ts` for the window,
+`web/loopback-fragment.ts` for a tab. What is worth noticing is that this
+*strengthens* the rule the old behaviour existed for rather than relaxing it.
+The thing that must never happen is opening our own review 4 because the link
+said 4: ids are per host, so that shows the wrong review with no sign of it.
+Landing on the home screen avoided that; keeping the segment makes it
+unrepresentable, because the route says whose review it is and
+`core/hosts/router.ts` either sends the reads to that machine or fails naming
+it. The test that has guarded this since M2 now asserts the stronger thing, and
+a second one asserts that what comes out is `#/h/<id>/reviews/2/files` and could
+not be read as `#/reviews/2/files` by anything.
+
+No check that the host is *known*, deliberately. `requireInstance` already
+refuses by name when the reads go out, and its sentence names the id - which is
+the only thing a person can compare against their Hosts screen. Guessing earlier
+would replace a specific answer with a shrug, and in the browser shell it would
+also mean an asynchronous question asked before the app has booted.
+
+**`webUrl` reaches an agent, and both links sit side by side.** From the PC's own
+MCP server, `list_reviews` now answers:
+
+    guiUrl: http://127.0.0.1:41427/#h=4e0b0adb…/review/2/conversation
+    webUrl: http://pc-wsl.tail688c0c.ts.net:41427/#/reviews/2/conversation
+
+The two notations M2 separated, doing the two different jobs it separated them
+for. The loopback fragment is a *deep link waiting to be assembled* - the page
+at that address hands it to whichever GitWarren is on the machine that clicked,
+which is why it carries the instance id. The tailnet URL is not waiting for
+anything: the server answering it is the machine that owns the review, so the
+route is an ordinary app hash with no host segment, because there is no other
+machine in the story.
+
+Fetched from the Mac - a different device from the one serving it - that URL
+answers **200** with the web build and its JS bundle, with no token anywhere: the
+tailnet is the credential, and `tailscale serve` supplies the identity the
+loopback token supplies at home.
+
+**The words.** The README's tagline moves from *"Single user, single machine, no
+server, no account"* to *"Your machines, your agents, no one else's server"*,
+with a second paragraph saying the thing that actually changed - reviews live on
+the machine the code is on, reached over SSH, `wsl.exe` or your own tailnet,
+with nothing replicated, relayed or stored anywhere but computers you already
+own. `package.json`'s description follows it.
+
+*"Nothing is pushed to the UI"* is retired from Known limitations, and what
+replaces it is narrower than "live updates now work", because that would not be
+true: a host reached over SSH or `wsl.exe` has no process of its own to push
+from, so there the poll is still how the window finds out. Two *new* limitations
+go in beside it, both found during this milestone: a host is only greyed if
+something has asked it something in the last ten minutes, and `tailscale serve`
+needs `--operator` on Linux.
+
+**The site is a separate repository and is deliberately not in this PR.**
+`gitwarren-site` carries the same claim in at least `public/llms.txt`
+("no account, no server and no telemetry. State lives in one SQLite file on the
+machine"), `src/pages/privacy.astro` and `design/canvas/Blueprint.dc.html`
+("Local only: no server, no account, nothing cached"). Every one of those is
+still true of a single-machine install and is now incomplete rather than wrong,
+which is the kind of copy that needs a person deciding the phrasing rather than
+a mechanical substitution. Naming the files here is the useful half.
+
+**The gap table was re-read rather than glanced at, and four rows changed.**
+*Disconnection* now says what M6 actually contributed, which is only the half
+that has no request to learn from - M4.5's banner is still the mechanism for
+everything a screen can see. *Which GUI a link opens* gained the cross-install
+link above. *Host-scoped routes and IDs* gained M6, because the instance id is
+what decides four separate things here that it decided none of before: routing a
+link, excluding this machine from its own discovery, tagging an event, and
+refusing one box added twice.
+
+The fourth is the one that was not a formality. *Version skew between hosts* was
+`M4` and is now `M4, M6`, for two reasons. An unknown *event name* is ignored by
+a receiver, which is the protocol's standing rule arriving in the one direction
+nothing had exercised. And M6 found a gap in the *mechanism* rather than the
+design: `hosts.install` decides by version *string*, so a host running a
+same-versioned build from before a milestone answers `already-current` and is
+not upgraded. `force` is the existing way out and was needed twice in this
+milestone. A pre-release that changes methods without changing its version is
+the case that is not covered, and it is now written down where somebody will
+find it.
+
+**One thing bit, and an agent would have seen it before a person did.**
+`list_reviews` and `list_review_comments` build their links inline rather than
+through the two wrappers, and the change from `guiUrl: links.review(id)` to
+`...links.review(id)` was applied to the wrappers and missed at those two sites.
+The result was a payload with `guiUrl` nested inside `guiUrl` and `webUrl`
+buried under it - valid JSON, no error anywhere, and a link an agent would have
+handed over as `[object Object]`. Found by reading a real tool result off the
+real machine rather than by a type error, because `WithGuiUrl<T>` is a
+structural type and a nested object satisfies nothing it forbids.
+
+And a smaller one worth its line: the first attempt to check the fix reinstalled
+the daemon from a tarball built without `npm run build:mcp`, so the PC was
+running the *old* MCP bundle inside a new tarball and reported the bug as
+though it were unfixed. The tarball script's own header names the three builds
+that have to precede it; the lesson is the M6.2 one again, one layer down - a
+protocol change is a protocol change even when both ends came from the same
+checkout.
+
 ## Agent setup
 
 One sentence instead of a snippet per harness. Agents know their own
@@ -3929,14 +4040,14 @@ least one alternative.
 | Gap | Closed in | How |
 | --- | --- | --- |
 | Chattiness over a network | S5, M1, M3 | Measure, then coarse endpoints; a multiplexed WebSocket removes per-request setup. |
-| Disconnection | M4, M6 | Fail-fast errors, stale banner, reconnect with backoff, heartbeats, refetch on reconnect. |
+| Disconnection | M4, M6 | Fail-fast errors, stale banner, reconnect with backoff, refetch on reconnect — all M4.5, all learned from request *outcomes*. M6 adds only the half that has no request to learn from: a listening carrier holds a socket with a heartbeat on it, so a machine nobody is looking at is greyed too (216 ms, measured). Bounded by the pool's ten-minute idle hang-up. |
 | Colleague permissions | — | Non-goal. Object-centric RPC from M1 keeps the door open. |
 | Git argument and path hardening | M0 | Hygiene now; not a security boundary while every caller is the owner. |
-| Host-scoped routes and IDs | M0, M4 | Optional host segment in the route grammar; hosts table; links carry the instance id. |
-| Which GUI a link opens | M2, M6 | Loopback resolves on the clicker's machine; tailnet URL for the phone. |
+| Host-scoped routes and IDs | M0, M4, M6 | Optional host segment in the route grammar; hosts table; links carry the instance id. M6 is where that id finally decides something in every direction: it routes a link across installs, it excludes this machine from its own discovery, it tags an event with the machine it happened on, and it is what refuses one box added twice under two carriers. |
+| Which GUI a link opens | M2, M6 | Loopback resolves on the clicker's machine; `webUrl` for a phone, added only while the host listens and spelled as the machine reported rather than by convention. M6.7 also made a link naming *another* install open that machine's review rather than the home screen — the host segment travels, so this install's review 4 stays unreachable by a link that said 4. |
 | Attachments across hosts | M3, M4 | Ingest on the host; HTTP for the web view, the carrier for the app. |
-| Version skew between hosts | M4 | The GUI installs the daemon version it wants; protocol version in the handshake; unknown fields ignored. |
+| Version skew between hosts | M4, M6 | The GUI installs the daemon version it wants; protocol version in the handshake; unknown fields ignored — and since M6 an unknown *event name* is ignored too, which is the same rule arriving in the one direction nothing had exercised. What M6 found is a gap in the mechanism rather than in the design: `hosts.install` decides by **version string**, so a host running a same-versioned build from before a milestone answers `already-current` and is not upgraded. `force` is the existing way out and was needed twice here. A pre-release that changes methods without changing its version is the case this does not cover. |
 | Daemon process on headless hosts | M2, M3, M4, M5 | Bundle in M2, `gitwarren service install` in M3.3, spawned on demand over SSH in M4 and through `wsl.exe` in M5 — the same installer either way, since it was written against "a machine with a shell and a `tar`". |
 | Users who will not run Electron | M3 | The same renderer served by the local daemon; the `gitwarren-cli` formula, `npx gitwarren` and the tarball, all from M3.3. |
-| A screen the size of a phone | M3.5, M6 | Files list and diff as separate screens below `lg`, composer above the keyboard, paths that wrap at their separators; the route to the device itself is M6's tailnet. |
+| A screen the size of a phone | M3.5, M6 | Files list and diff as separate screens below `lg`, composer above the keyboard, paths that wrap at their separators; the route to the device itself is M6's tailnet, where `tailscale serve` supplies identity so there is no token to get onto a phone. |
 | MCP setup per harness and on remote hosts | M2, M3, M4 | Stable launcher path plus a one-sentence prompt the agent applies to its own config. |

@@ -27,7 +27,7 @@ import { resolve } from 'node:path'
 import { getInstanceId } from '../core/instance.js'
 import { IPC_CHANNELS } from '../shared/api.js'
 import { DEEP_LINK_SCHEME, parseDeepLink } from '../shared/deep-link.js'
-import { HOME, hrefFor, type Route } from '../shared/routes.js'
+import { hrefFor, type Route } from '../shared/routes.js'
 
 /**
  * A route that arrived before there was a window to show it in.
@@ -130,11 +130,23 @@ function show(route: Route): void {
  *    "local" now;
  *  - our own id - the same thing, said explicitly; the segment is dropped so
  *    the renderer is handed the route it would have been handed anyway;
- *  - somebody else's id - a review on another machine. There is no way to reach
- *    another machine until M4, and the one thing that must not happen is
- *    opening *our* review 4 because the link said 4. The user lands on the home
- *    screen and the id is logged, which is the honest failure until there is a
- *    hosts table to look it up in.
+ *  - somebody else's id - a review on another machine, which since M6 is an
+ *    ordinary thing for a link to be. The route keeps its host segment and the
+ *    window opens `#/h/<id>/reviews/4`.
+ *
+ * That last case used to land on the home screen, with a log line saying
+ * reviews on other hosts arrived in M4. They did, and this function went on
+ * discarding them for three milestones - M4.3, M4.4 and M5.3 each deferred it,
+ * reasonably, because nothing before the tailnet produced a link that named
+ * another machine in the first place.
+ *
+ * Handing the route over *with* its host is what preserves the rule the old
+ * behaviour existed for. Ids are per host, so opening our review 4 because the
+ * link said 4 would show the wrong review with no sign of it; keeping the
+ * segment makes that impossible rather than merely avoided. A machine this
+ * install does not know is not checked for here - `requireInstance` already
+ * refuses by name when the reads go out, and its sentence names the id, which
+ * is the only thing a person can compare against their Hosts screen.
  */
 function localise(route: Route): Route {
   if (route.host === undefined) return route
@@ -145,11 +157,8 @@ function localise(route: Route): Route {
     return local
   }
 
-  console.log(
-    `[deep-link] ignoring a link for instance ${route.host}, which is not this install. ` +
-      `Reviews on other hosts arrive in M4.`
-  )
-  return HOME
+  // Another machine's review. Left host-scoped; the screens do the rest.
+  return route
 }
 
 /** Handle one URL from any of the three doors. Unrecognised URLs are ignored. */

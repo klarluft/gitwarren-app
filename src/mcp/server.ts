@@ -310,7 +310,7 @@ server.registerTool(
     run(async () => {
       const links = guiLinker()
       const reviews = await reviewsService.list(input)
-      return reviews.map((review) => ({ ...review, guiUrl: links.review(review.id) }))
+      return reviews.map((review) => ({ ...review, ...links.review(review.id) }))
     })
 )
 
@@ -435,7 +435,7 @@ server.registerTool(
     run(async () => {
       const links = guiLinker()
       const threads = await commentsService.listAnchored(input)
-      return threads.map((thread) => ({ ...thread, guiUrl: links.comment(thread) }))
+      return threads.map((thread) => ({ ...thread, ...links.comment(thread) }))
     })
 )
 

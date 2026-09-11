@@ -20,8 +20,8 @@
  *    nothing an outside party wrote is ever assigned to `location.hash`;
  *  - this install's own id is dropped, so the router is handed the route it
  *    would have been handed anyway;
- *  - another install's id lands on the home screen rather than opening *our*
- *    review 4 because the link said 4. Reviews on other hosts arrive in M4.
+ *  - another install's id keeps its host segment, so the link opens *that*
+ *    machine's review 4 and never this one's.
  */
 // Relative rather than through the `@shared` alias, unlike its neighbours in
 // this directory. They are only ever built by Vite; this one is also *run* by
@@ -53,10 +53,39 @@ export function routeForLoopbackFragment(hash: string, instanceId: string): Rout
   // rather than swallowing the click.
   if (!route) return HOME
   if (route.host === undefined) return route
-  if (route.host !== instanceId) return HOME
 
-  // Rebuilt without the key rather than set to undefined - `hrefFor` and route
-  // equality both read the presence of the property, not its value.
-  const { host: _host, ...local } = route
-  return local
+  if (route.host === instanceId) {
+    // Rebuilt without the key rather than set to undefined - `hrefFor` and
+    // route equality both read the presence of the property, not its value.
+    const { host: _host, ...local } = route
+    return local
+  }
+
+  /**
+   * Another install's review, opened where it was clicked.
+   *
+   * Until M6 this landed on the home screen, and the comment said "reviews on
+   * other hosts arrive in M4" - which they did, three milestones ago, while
+   * this line went on discarding them. M4.3, M4.4 and M5.3 each noticed and
+   * each deferred it, reasonably: nothing in those milestones produced a link
+   * that named another machine, because a link is minted by the install that
+   * owns the review and until the tailnet there was no ordinary way for one to
+   * travel.
+   *
+   * The route is handed over *with* its host segment, which is the whole of the
+   * change and is also what preserves the rule this line was written for. The
+   * thing that must never happen is opening our own review 4 because the link
+   * said 4 - ids are per host, so that would show the wrong review with no sign
+   * of it. Keeping the segment makes that structurally impossible: the route
+   * says whose review it is, and `core/hosts/router.ts` sends the reads to that
+   * machine or fails naming it.
+   *
+   * No check that the host is *known*, deliberately. This runs before the app
+   * has asked the core anything, and the question is asynchronous; more to the
+   * point, "that machine is not in your list" is a sentence
+   * `requireInstance` already writes, naming the id - which is the only thing a
+   * person can compare against their Hosts screen. Guessing here would replace
+   * a specific answer with a shrug.
+   */
+  return route
 }

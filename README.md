@@ -20,8 +20,13 @@ brew install klarluft/tap/gitwarren-cli   # macOS and Linux, brings its own Node
 
 See [The `gitwarren` command line](#the-gitwarren-command-line).
 
-A cross-platform desktop app for doing local code reviews of your own git
-repositories. Single user, single machine, no server, no account.
+A cross-platform desktop app for doing code reviews of your own git
+repositories, on your own machines. Your machines, your agents, no one else's
+server — and no account.
+
+Reviews live on the machine the code is on. GitWarren reaches your other
+machines over SSH, over `wsl.exe`, or over your own tailnet, and nothing is
+replicated, relayed or stored anywhere but the computers you already own.
 
 Built for the moment a coding agent — Claude Code, Codex, or anything else that
 edits files on your disk — has just finished, and its work is sitting in your
@@ -1645,8 +1650,24 @@ these two are unrelated and both need updating if the branding moves.
 - **Agent names are only as consistent as the client's `clientInfo`.** A client
   that changes the name it sends between versions will appear as two
   participants, and there is no way to merge them after the fact.
-- **Nothing is pushed to the UI.** An agent's comment appears when the window
-  polls (every 15s) or regains focus, not the moment it is written.
+- **Live updates need a machine that is listening.** An agent's comment appears
+  the moment it is written when GitWarren is running on the machine that owns
+  the review — locally, or on a host reached over the tailnet. A host reached
+  over SSH or `wsl.exe` has no process of its own to push from, so there the
+  window still finds out on its next poll (every 15s) or when it regains focus.
+  The poll is the floor everywhere: a lost update costs seconds, never
+  correctness.
+- **A host is only greyed if something has asked it something recently.** The
+  connection pool hangs up after ten idle minutes, so a machine that goes away
+  having been untouched for longer is noticed the next time you look at it
+  rather than the moment it goes. Keeping a socket open to every host would mean
+  connecting to every machine you own, which is the thing the pool exists to
+  avoid.
+- **`tailscale serve` needs to be allowed to run.** On Linux it refuses without
+  root unless `sudo tailscale set --operator=$USER` has been run once; GitWarren
+  reports what Tailscale said rather than silently failing to turn the switch on.
+  HTTPS is a tailnet-wide setting: with it off, your machines are reachable over
+  plain HTTP inside the tailnet, which WireGuard is encrypting either way.
 - **Repo-relative images are not rendered.** `![](docs/arch.png)` in a comment
   stays as written rather than resolving against the repository — it needs a
   second protocol host and repository context threaded into the renderer. Such a
