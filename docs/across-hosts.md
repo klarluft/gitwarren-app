@@ -2464,7 +2464,7 @@ happen first:
    *(done — see below.)*
 2. **The distro list and the installer.** `hosts.distros`, the add form
    becoming a picker rather than a text field, and the same linux tarball
-   streamed down the same pipe. *(planned.)*
+   streamed down the same pipe. *(done — see below.)*
 3. **Editors, reveal and agent access.** `wsl+<distro>`, Explorer reveal
    through `\\wsl.localhost`, and the Agent Access page for a distro.
    *(planned.)*
@@ -2690,6 +2690,131 @@ address and addresses change, while a distribution name is which machine this is
 so repointing it would be naming a different home directory and a different
 database. The service refuses it and says to add the other distribution as its
 own host.
+
+**M5.2, done on the PC against the Ubuntu distro, 11 September.** A distribution
+stops being something the dispatcher can reach and becomes something a person
+can add and install onto. The installer's delta is a switch:
+
+    hosts.distros               what could become a host here
+    runOnHost(route, …)         the same four commands, either carrier
+    a picker, not a text field  because this machine knows the answer
+
+**Nothing was added to the installer, and that is the claim worth checking.**
+`core/hosts/install.ts` was written against "a machine with a shell and a `tar`"
+rather than against `ssh`, and a distribution is one - so `uname -sm`, the
+scratch directory, the one `mv`, the host writing its own launchers and the
+version read back afterwards are all M4.2's, unchanged. What changed is that
+`run` takes a route instead of an ssh target. A test asserts the same four
+commands in the same order against a `wsl` route, including that the tarball is
+still chosen from `uname` and not from the carrier - which is `hosts.kind`'s rule
+in an assertion: what a host runs is discovered by asking it.
+
+**The bytes went over the pipe in 1.1 seconds.** 44.2 MB, against M4.2's 3.4
+seconds for the same archive over `ssh`, which settles the delivery question
+empirically rather than by argument. The `\\wsl.localhost` route was rejected on
+moving parts rather than on speed: it still needs a shell inside the
+distribution to unpack and to run `service install`, so it is a file copy *plus*
+the same shell invocation, and it is only available while the distribution is
+already running - a precondition the pipe does not have, because starting it is
+what the pipe does.
+
+**`hosts.distros` is a method, and the browser tab is why.** The tempting
+comparison is `system.editors`, which is a shell channel because launching an
+editor is something only a shell can do and a tab must never ask a server to
+spawn one. Listing distributions is not an act; it is a fact, and a fact about
+the machine that will spawn `wsl.exe` - which is the machine the *core* runs on,
+not the one the window is drawn on. M4.2's Hosts screen works in a tab, where
+what it manages is the host list of the install that served it, so the tab has
+to be able to ask this too. Under the `hosts.` prefix it is unforwardable
+without anybody remembering to make it so, which is the property `isLocalOnly`
+moving into `carrier.ts` in M5.1 bought. And because an empty answer is what a
+Mac gives, the screen offers a WSL host exactly when the list is non-empty and
+**no code anywhere asks what platform it is on**.
+
+The list is unfiltered, `docker-desktop` and `docker-desktop-data` included. A
+blocklist of names goes stale - `rancher-desktop` and `podman-machine` are the
+same shape - and it is M4.3's argument about hidden folders one screen along: a
+listing that silently drops rows is one you cannot trust when what you wanted is
+not in it. Picking one that cannot host a daemon fails during an install someone
+is watching, in that distribution's own words.
+
+**Three things bit, and two of them are Windows properties rather than
+GitWarren ones.**
+
+*A daemon tarball built on Windows is not installable, and the install said the
+wrong thing about it.* `tar tzvf` on the archive this machine produced shows
+every entry as `-rw-rw-rw-`: NTFS has no POSIX mode, `chmodSync` is a no-op
+there, and bsdtar faithfully records what it was given - so `bin/gitwarren`,
+`bin/gitwarren-mcp` and the 126 MB embedded `bin/node` all arrive without an
+executable bit. M4.2's guard caught it, which is the system working, but it
+reported *the tarball did not contain bin/gitwarren* about a file that is
+plainly there. The fix is in the unpack script rather than in the builder:
+`chmod +x` on `bin/*` before the check. Nothing ever read those bits except that
+one check, and the step after it runs the binary, so setting the bit we require
+is strictly more reliable than asserting somebody else set it - and it makes an
+archive rebuilt on any machine work. The guard now distinguishes "not there"
+from "not executable", because those send a person to different places.
+
+*`scripts/build-daemon-tarball.mjs` built the tarball and then died reporting its
+size.* The last line ran `du -h`, which does not exist on Windows, so a 44 MB
+archive was produced successfully and the script exited non-zero on
+`spawnSync du ENOENT` - the most annoying available place to fail. `statSync`
+instead. Third of its family after `run-tests.mjs` and the drive-letter fix, and
+the same cause every time: `ci.yml` runs ubuntu only.
+
+*The `wsl.exe -l -v` table needs reading rather than splitting.* Three things
+about it: without `WSL_UTF8=1` it is UTF-16LE and a name reads
+`U\0b\0u\0n\0t\0u\0` - which would be *stored* as a host target by anything that
+did not notice; lines end `\r\n`; and the default distribution is marked with a
+leading `*` in the column every other row leaves blank. The header row is dropped
+by position rather than by matching "NAME", because that word is localised and a
+filter reading English would silently drop a distribution actually called `NAME`
+while keeping a header nobody could parse.
+
+**One machine is one row, and the collision fired for real.** Adding `ubuntu`
+alongside `Ubuntu` is two perfectly distinct *descriptions* - `wsl.exe` matches a
+name case-insensitively, the unique index does not - and the second one probed
+gave *ubuntu is the same machine as "Ubuntu" (Ubuntu), which is already in the
+list. Remove one of them.* M4.1 built that report for the hypothetical case of
+one box under two ssh names; this is it happening. The answer is deliberately not
+"allow one machine two carriers": `#/h/<instance>/…` routes by instance id and
+`requireInstance` reads one row for it, so two rows bearing one id would make
+every remote route ambiguous, with a repository list depending on which row won.
+The picker greys out a distribution already added, so the ordinary way to reach
+this is closed before the instance id has to.
+
+**The form has two halves and they are deliberately not symmetrical.** An `ssh`
+target stays free text, because every `~/.ssh/config` alias somebody already has
+must work and no validator can know what those are. A distribution is a *list*,
+because this machine knows exactly which ones exist and offering its own spelling
+removes the case question entirely. Both keep their own error messages - "a user
+name, an @ and a machine name" and "that is not a WSL distribution name" are not
+interchangeable advice - which is why `addHostInputSchema` grew a `superRefine`
+rather than one permissive rule: `kind` is optional, every host added before M5
+saying `ssh` by saying nothing, and a discriminated union cannot discriminate on
+a key that may be absent. The carrier choice appears only when there is something
+to choose, so on a Mac the dialog is what it was before M5.
+
+**Verified end to end through the real window over CDP**, every call made with
+`window.gitwarren.carrier.request` so the preload, the router, the pool and the
+carrier were all in the path. The window listed three distributions; `Ubuntu` was
+added with its label defaulting to the distribution name and `instanceId` null
+until it had been met; the picker then showed it as already added. `hosts.install`
+from the window: **44.2 MB in 3.6 seconds**, the instance id learned
+(`4e0b0adb…`), the row reachable. Then it was a machine to review: its two
+repositories listed with their WSL paths, `fs.list` answering `/home/xfor` with
+45 entries and `/` as its separator, `app.mcp` answering
+`/home/xfor/.gitwarren/bin/gitwarren-mcp`. The duplicate-spelling collision as
+above. An ssh target of "not a host" and a distro name of "no/slashes" each
+refused with their own sentence under the `target` field. No console errors.
+
+**Not done in M5.2, and why.** Editors, the Explorer reveal and the per-host
+Agent Access page are M5.3. A WSL host's target still cannot be edited, and the
+dialog now simply does not draw the field for one rather than drawing a field
+that could only produce the service's refusal. There is no uninstall, for M4.2's
+reason exactly: `hosts.remove` forgets a row here, and `rm -rf ~/.gitwarren` is
+something a person can type into their own distribution and read before pressing
+return.
 
 ### M6 — Tailnet and live updates
 

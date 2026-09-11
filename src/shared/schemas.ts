@@ -150,7 +150,7 @@ export const sshTargetSchema = z
  * a spawn flag somebody could change, and a slash is refused too because a
  * distribution name is never a path.
  */
-export const wslDistroSchema = z
+export const wslDistroNameSchema = z
   .string()
   .trim()
   .min(1, 'Choose a WSL distribution.')
@@ -164,8 +164,28 @@ export const wslDistroSchema = z
 
 /** Whichever of the two a host of this kind is addressed by. */
 export function hostTargetSchemaFor(kind: 'ssh' | 'wsl'): z.ZodType<string> {
-  return kind === 'wsl' ? wslDistroSchema : sshTargetSchema
+  return kind === 'wsl' ? wslDistroNameSchema : sshTargetSchema
 }
+
+/**
+ * One WSL distribution, as this machine lists it.
+ *
+ * `name` is the whole of what identifies it, and is also what goes into
+ * `hosts.target`. `isDefault` and `running` are there for the picker to draw
+ * with, and neither is stored: which distribution is default can change while
+ * the app is open, and whether one is running is exactly the kind of fact the
+ * host row refuses to keep for the same reason it never stores reachability.
+ *
+ * `alreadyAdded` is the picker's own convenience - the answer to "why is this
+ * one greyed out" - and is computed against the host list at the moment of
+ * asking rather than being a property of the distribution.
+ */
+export const wslDistroSchema = z.object({
+  name: z.string(),
+  isDefault: z.boolean(),
+  running: z.boolean(),
+  alreadyAdded: z.boolean()
+})
 
 /** A row as stored, plus how it is doing right now. */
 export const hostSchema = z.object({
@@ -274,6 +294,7 @@ export const installReportSchema = z.object({
   host: hostWithStateSchema
 })
 
+export type WslDistro = z.infer<typeof wslDistroSchema>
 export type Host = z.infer<typeof hostSchema>
 export type HostWithState = z.infer<typeof hostWithStateSchema>
 export type HostConnectionState = z.infer<typeof hostStateSchema>

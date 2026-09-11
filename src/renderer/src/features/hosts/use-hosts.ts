@@ -25,7 +25,8 @@ import type {
   AddHostInput,
   HostWithState,
   InstallReport,
-  UpdateHostInput
+  UpdateHostInput,
+  WslDistro
 } from '@shared/schemas'
 
 export interface UseHostsResult {
@@ -50,6 +51,30 @@ export function useHosts(): UseHostsResult {
     isRefreshing: isValidating && !isLoading,
     refresh: mutate
   }
+}
+
+/**
+ * The WSL distributions this install could add.
+ *
+ * Fetched rather than derived from the platform, and that is the point: the
+ * answer describes the machine the *core* runs on, so a browser tab served by a
+ * Windows install sees that install's distributions. Nothing in the renderer
+ * asks what operating system it is on; an empty list is how a Mac says "not
+ * here", and the Add dialog offers a WSL host exactly when the list is not
+ * empty.
+ *
+ * `alreadyAdded` comes back joined against the host list, so the picker can grey
+ * a row out rather than letting somebody press Add and read a duplicate error.
+ */
+export function useWslDistros(enabled = true): {
+  distros: WslDistro[] | undefined
+  isLoading: boolean
+} {
+  const { data, isLoading } = useSWR<WslDistro[], unknown>(
+    enabled ? CACHE_KEYS.distros : null,
+    () => api.hosts.distros()
+  )
+  return { distros: data, isLoading }
 }
 
 export interface HostMutations {

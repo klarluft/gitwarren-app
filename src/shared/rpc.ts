@@ -32,6 +32,7 @@ import type {
   InstallReport,
   RemoveHostInput,
   UpdateHostInput,
+  WslDistro,
   Comment,
   CommentThread,
   CreateReviewInput,
@@ -249,6 +250,30 @@ export interface RpcMethods {
    * on why it reports nothing until it is done.
    */
   'hosts.install': { params: InstallOnHostInput; result: InstallReport }
+  /**
+   * The WSL distributions on the machine that answers, in the order it lists
+   * them, or empty everywhere else.
+   *
+   * A *method* and not a shell channel, which was the M5 decision worth
+   * arguing about. The tempting comparison is `system.editors`: that is a shell
+   * channel because launching an editor is something only a shell can do, and a
+   * browser tab must not be able to ask a server to spawn one. Listing
+   * distributions is not an act at all, it is a fact - and a fact about the
+   * machine that will spawn `wsl.exe`, which is the machine the *core* runs on
+   * rather than the one the window is drawn on. M4.2's Hosts screen works in a
+   * tab, where what it manages is the host list of the install that served the
+   * tab, so the tab has to be able to ask this too; a shell capability would
+   * have left it unable to.
+   *
+   * Under `hosts.` because it is the same kind of secret as a host list: what
+   * distributions a machine has is that machine's own business, and the prefix
+   * is what makes `isLocalOnly` refuse to forward it without anybody having to
+   * remember. It is not about a host row, it is about what could become one.
+   *
+   * Empty rather than absent on a Mac, so that a screen offers a WSL host when
+   * the answer is non-empty and no code anywhere asks what platform it is on.
+   */
+  'hosts.distros': { params: void; result: WslDistro[] }
 
   /**
    * What is inside a folder, on the machine that answers.
@@ -387,6 +412,7 @@ export const READ_METHODS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
   'app.mcp',
   'hosts.list',
   'hosts.get',
+  'hosts.distros',
   // `hosts.probe` is deliberately absent. It reads in the sense that it changes
   // no host row a caller can see, but it opens a connection and clears a
   // backoff, and two people pressing "try now" at the same moment should mean

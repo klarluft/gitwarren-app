@@ -351,6 +351,118 @@ export function runOverWsl({
 }
 
 /**
+ * How long to wait for `wsl.exe -l` before deciding this machine has no WSL.
+ *
+ * Listing does not start a distribution, so it is a registry read and answers in
+ * milliseconds. The bound is for the case where the WSL service itself is wedged:
+ * a Hosts screen that cannot draw its Add dialog is worse than one that offers
+ * no distributions, and "none" is the right answer for a machine whose WSL
+ * cannot be asked.
+ */
+const LIST_TIMEOUT_MS = 5_000
+
+/**
+ * The WSL distributions on this machine, in the order `wsl.exe` lists them.
+ *
+ * Answers `[]` rather than throwing for every way this can fail - no `wsl.exe`
+ * on the machine, no WSL feature, no distributions, a wedged service - because
+ * all four mean the same thing to the only caller: there is nothing here to add.
+ * That is also what lets the Hosts screen offer a WSL host exactly when the list
+ * is non-empty and never ask what platform it is on, which is the property that
+ * makes a browser tab served by this machine correct by construction.
+ *
+ * `-v` rather than `-q`, for `running` and the `*` that marks the default. Its
+ * output is a *table* with a localised header, so the header row is dropped by
+ * position rather than by matching a word - "NAME" is "NOM" on a French Windows,
+ * and a filter that reads English would silently drop a distribution called
+ * `NAME` and keep a header nobody could parse.
+ *
+ * Nothing is filtered out. This machine has two `docker-desktop` distributions
+ * and they are listed, because a blocklist of names is one that goes stale -
+ * `rancher-desktop` and `podman-machine` are the same shape - and it is M4.3's
+ * argument about hidden folders one screen along: a listing that silently
+ * dropped rows is one you cannot trust when what you wanted is not in it.
+ * Picking one that cannot host a daemon fails during an install someone is
+ * watching, in that distribution's own words.
+ */
+export async function listDistros(
+  spawnProcess: typeof spawn = spawn
+): Promise<Array<{ name: string; isDefault: boolean; running: boolean }>> {
+  let stdout: string
+  try {
+    stdout = await new Promise<string>((resolve, reject) => {
+      const child = spawnProcess('wsl.exe', ['-l', '-v'], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        shell: false,
+        windowsHide: true,
+        env: wslEnvironment()
+      })
+      const chunks: string[] = []
+      child.stdout.setEncoding('utf8')
+      child.stdout.on('data', (chunk: string) => chunks.push(chunk))
+      child.on('error', reject)
+      const timer = setTimeout(() => {
+        child.kill()
+        reject(new Error('wsl.exe -l did not answer'))
+      }, LIST_TIMEOUT_MS)
+      timer.unref?.()
+      child.on('close', (code) => {
+        clearTimeout(timer)
+        // A machine with WSL installed but no distributions exits non-zero and
+        // says so. Both that and success-with-nothing are an empty list.
+        if (code !== 0) resolve('')
+        else resolve(chunks.join(''))
+      })
+    })
+  } catch {
+    return []
+  }
+  return parseDistroList(stdout)
+}
+
+/**
+ * Read `wsl.exe -l -v`'s table.
+ *
+ * Exported for its own test, because the shape of this output is the part that
+ * cannot be guessed from the documentation. Three things about it bite:
+ *
+ * - Without `WSL_UTF8=1` it is UTF-16LE, so every character has a null byte
+ *   after it and `Ubuntu` reads as `U\0b\0u\0n\0t\0u\0`. The environment is set
+ *   by `wslEnvironment`; the `` strip here is belt-and-braces for a
+ *   `wsl.exe` too old to honour it, where a list of names each full of nulls
+ *   would otherwise be *stored* as a host target.
+ * - Lines end `\r\n`, which a `split('\n')` leaves on the last column.
+ * - The default distribution is marked with a leading `*`, in the same column
+ *   as the two spaces every other row has.
+ */
+export function parseDistroList(
+  stdout: string
+): Array<{ name: string; isDefault: boolean; running: boolean }> {
+  return stdout
+    // A split rather than a regex: a NUL inside a character class is a lint
+    // error, and this reads better than silencing one.
+    .split('\u0000')
+    .join('')
+    .split(/\r?\n/)
+    // The header, by position. Matching on the word "NAME" would read English
+    // on a Windows that is not in English.
+    .slice(1)
+    .map((line) => line.trimEnd())
+    .filter((line) => line.trim().length > 0)
+    .map((line) => {
+      const isDefault = line.trimStart().startsWith('*')
+      const columns = line.replace(/^\s*\*?\s*/, '').split(/\s{2,}/)
+      const name = columns[0]?.trim() ?? ''
+      // "Running" / "Stopped" - and localised too, so this asks about the one
+      // spelling that decides nothing important. A wrong `running` costs a word
+      // in a picker; nothing branches on it.
+      const state = columns[1]?.trim() ?? ''
+      return { name, isDefault, running: state.toLowerCase() === 'running' }
+    })
+    .filter((distro) => distro.name.length > 0)
+}
+
+/**
  * What `wsl.exe` said on stdout, as opposed to what the daemon said.
  *
  * A protocol frame is a JSON object, so a line that does not begin with `{` was

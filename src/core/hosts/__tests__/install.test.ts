@@ -36,6 +36,8 @@ writeFileSync(staged, gzipSync(Buffer.from('a tarball, for the purposes of this 
 interface Recorded {
   command: string
   hadStdin: boolean
+  /** Which machine it was addressed to. M5 made that an argument. */
+  target: string
 }
 
 /**
@@ -48,14 +50,11 @@ interface Recorded {
 function fakeHost(answers: Array<[match: string, result: Partial<HostRunResult>]>) {
   const calls: Recorded[] = []
 
-  const run = ({
-    command,
-    stdin
-  }: {
-    command: string
-    stdin?: unknown
-  }): Promise<HostRunResult> => {
-    calls.push({ command, hadStdin: stdin !== undefined })
+  const run = (
+    route: { kind: string; target: string },
+    { command, stdin }: { command: string; stdin?: unknown }
+  ): Promise<HostRunResult> => {
+    calls.push({ command, hadStdin: stdin !== undefined, target: route.target })
     // Consume the stream so a `createReadStream` in the real code does not sit
     // open on a file descriptor for the rest of the run.
     if (stdin && typeof (stdin as { resume?: () => void }).resume === 'function') {
@@ -95,8 +94,10 @@ test('a host with nothing on it gets asked, then sent, then made to prove itself
   // answers differently from the first. Order matters in this list.
   host.calls.length = 0
   let seenVersion = false
-  const run = (async (options: { command: string; stdin?: unknown }) => {
-    const result = await (host.run as unknown as (o: unknown) => Promise<HostRunResult>)(options)
+  const run = (async (route: unknown, options: { command: string; stdin?: unknown }) => {
+    const result = await (
+      host.run as unknown as (r: unknown, o: unknown) => Promise<HostRunResult>
+    )(route, options)
     if (options.command.includes('--version')) {
       if (seenVersion) return { code: 0, stdout: `${VERSION}\n`, stderr: '' }
       seenVersion = true
@@ -161,9 +162,49 @@ test('force reinstalls a host that is already current', async () => {
   assert.deepEqual(shapeOf(host.calls), ['uname', 'version', 'unpack', 'launchers', 'version'])
 })
 
+test('the same four commands install into a WSL distribution', async () => {
+  // The claim M5.2 makes is that the installer did not learn about WSL: it was
+  // written against "a machine with a shell and a tar", and a distribution is
+  // one. So this is the ssh test with one field changed, and what it asserts is
+  // that nothing else had to change - same four commands, same order, the
+  // tarball still chosen from `uname` rather than from the carrier.
+  const host = fakeHost([
+    ['uname', { stdout: 'Linux x86_64\n' }],
+    ['--version', { code: 127 }]
+  ])
+  host.calls.length = 0
+  let seenVersion = false
+  const run = (async (route: unknown, options: { command: string; stdin?: unknown }) => {
+    const result = await (
+      host.run as unknown as (r: unknown, o: unknown) => Promise<HostRunResult>
+    )(route, options)
+    if (options.command.includes('--version')) {
+      if (seenVersion) return { code: 0, stdout: `${VERSION}\n`, stderr: '' }
+      seenVersion = true
+    }
+    return result
+  }) as never
+
+  const wslRoute: HostRoute = { id: 2, kind: 'wsl', target: 'Ubuntu' }
+  const report = await installOnHost(wslRoute, {
+    version: VERSION,
+    run,
+    resolve: () => Promise.resolve(staged)
+  })
+
+  assert.equal(report.action, 'installed')
+  // The linux tarball, because that is what the distribution said it was - not
+  // because the carrier is `wsl`. A host's operating system is discovered by
+  // asking it, which is the rule `hosts.kind` exists to keep.
+  assert.equal(report.target, 'linux-x64')
+  assert.deepEqual(shapeOf(host.calls), ['uname', 'version', 'unpack', 'launchers', 'version'])
+  // And every one of them went to the distribution rather than to an ssh target.
+  assert.deepEqual(new Set(host.calls.map((call) => call.target)), new Set(['Ubuntu']))
+})
+
 test('an older version is an upgrade, and says what it came from', async () => {
   let seen = 0
-  const run = (({ command }: { command: string; stdin?: unknown }) => {
+  const run = ((_route: unknown, { command }: { command: string; stdin?: unknown }) => {
     if (command.includes('uname')) {
       return Promise.resolve({ code: 0, stdout: 'Darwin arm64\n', stderr: '' })
     }
@@ -256,8 +297,10 @@ test('the remote script uses nothing a minimal sh and tar lack', async () => {
     ['--version', { code: 127 }]
   ])
   let seen = 0
-  const run = (async (options: { command: string; stdin?: unknown }) => {
-    const result = await (host.run as unknown as (o: unknown) => Promise<HostRunResult>)(options)
+  const run = (async (route: unknown, options: { command: string; stdin?: unknown }) => {
+    const result = await (
+      host.run as unknown as (r: unknown, o: unknown) => Promise<HostRunResult>
+    )(route, options)
     if (options.command.includes('--version') && seen++ > 0) {
       return { code: 0, stdout: `${VERSION}\n`, stderr: '' }
     }

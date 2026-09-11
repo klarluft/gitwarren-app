@@ -162,6 +162,7 @@ const handlers: {
   'hosts.remove': (params) => hostsService.remove(params),
   'hosts.probe': (params) => hostsService.probe(params),
   'hosts.install': (params) => hostsService.install(params),
+  'hosts.distros': () => hostsService.distros(),
 
   // Answered by whoever owns the folder, which is the whole point of it being
   // a method - see the note in `shared/rpc.ts`.

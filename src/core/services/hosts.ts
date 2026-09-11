@@ -40,6 +40,7 @@ import { getDatabase } from '../db/client.js'
 import { hosts, type HostRow } from '../db/schema.js'
 import { hostPool, type HostRoute } from '../hosts/pool.js'
 import { installOnHost } from '../hosts/install.js'
+import { listDistros } from '../hosts/wsl.js'
 import { AppError } from '../../shared/errors.js'
 import { parseWithSchema as parse } from '../../shared/validation.js'
 import {
@@ -50,7 +51,8 @@ import {
   updateHostInputSchema,
   type Host,
   type HostWithState,
-  type InstallReport
+  type InstallReport,
+  type WslDistro
 } from '../../shared/schemas.js'
 
 function toHost(row: HostRow): Host {
@@ -171,6 +173,37 @@ export const hostsService = {
   list(): HostWithState[] {
     const rows = getDatabase().select().from(hosts).orderBy(asc(hosts.label)).all()
     return rows.map(withState)
+  },
+
+  /**
+   * The WSL distributions this machine could host a daemon in.
+   *
+   * Answered here rather than in a shell channel because it is a fact about the
+   * machine the *core* runs on - the one that will spawn `wsl.exe` - and a
+   * browser tab managing this install's hosts has to be able to ask it. See the
+   * note on `hosts.distros` in `shared/rpc.ts`.
+   *
+   * `alreadyAdded` is joined on here because this is the layer that can see the
+   * host table, and a picker that offered a distribution already in the list
+   * would be offering the duplicate error rather than preventing it. Compared
+   * case-insensitively, because `wsl.exe` matches a distribution name that way
+   * while the unique index does not - so `ubuntu` typed by hand and `Ubuntu`
+   * from this list are one machine, and the picker should say so before the
+   * instance id has to.
+   */
+  async distros(): Promise<WslDistro[]> {
+    const found = await listDistros()
+    if (found.length === 0) return []
+
+    const taken = new Set(
+      getDatabase()
+        .select()
+        .from(hosts)
+        .where(eq(hosts.kind, 'wsl'))
+        .all()
+        .map((row) => row.target.toLowerCase())
+    )
+    return found.map((distro) => ({ ...distro, alreadyAdded: taken.has(distro.name.toLowerCase()) }))
   },
 
   get(input: unknown): HostWithState {

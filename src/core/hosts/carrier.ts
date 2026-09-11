@@ -16,6 +16,7 @@
  * own errors onto. Those are the carriers' own business, and the whole point of
  * the interface is that the pool never learns which one it is holding.
  */
+import type { Readable } from 'node:stream'
 import { AppError } from '../../shared/errors.js'
 import { DAEMON_READY_PREFIX } from '../../shared/rpc.js'
 import type { RpcMethod, RpcParams, RpcResult } from '../../shared/rpc.js'
@@ -126,3 +127,35 @@ export function diagnosticTail(stderr: string, lines = 3): string {
 export function offline(message: string): AppError {
   return new AppError('HOST_OFFLINE', message)
 }
+
+/**
+ * One command on a host, whichever carrier reaches it.
+ *
+ * The signature is deliberately the same shape for both, because it is the
+ * whole of what `core/hosts/install.ts` needs to know about a machine: a `sh`
+ * script, something on its stdin, and the exit status and streams back. That is
+ * what let M5.2 install into a distribution without adding a line of install
+ * logic - the sequence, the scratch directory, the `mv`, the read-back and the
+ * launchers are all M4.2's, unchanged.
+ *
+ * It is a type rather than a function here to keep `carrier.ts` free of both
+ * implementations; `runOnHost` in `install.ts` is where the switch lives, next
+ * to its only caller.
+ */
+export interface RunOnHostOptions {
+  /** A `sh` script. It crosses as one argument and a shell on the far end runs it. */
+  command: string
+  /**
+   * Piped to the command's stdin. This is how a tarball gets there.
+   *
+   * `Readable` rather than the structural `NodeJS.ReadableStream`, because both
+   * carriers `.pipe()` it and attach an error handler to it - the narrower type
+   * is the one that says so.
+   */
+  stdin?: Readable
+}
+
+export type RunOnHost = (
+  route: { kind: 'ssh' | 'wsl'; target: string },
+  options: RunOnHostOptions
+) => Promise<HostRunResult>
