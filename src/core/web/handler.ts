@@ -35,10 +35,19 @@
  *    to get in. Not a 404: pretending the app is not there would be a lie the
  *    user cannot act on, and the port is not a secret anyway - the token is.
  *
- * Everything behind the gate is a read: the web build, `app-info`, and since
- * M3.2 the attachment bytes an `<img>` in a comment body needs. Writes happen
- * over the socket and nowhere else, which is what keeps the whole of this file
- * answering `GET` and `HEAD` and refusing every other method outright.
+ * Almost everything behind the gate is a read: the web build, `app-info`, and
+ * since M3.2 the attachment bytes an `<img>` in a comment body needs. Writes to
+ * review data happen over the socket and nowhere else, which is what kept this
+ * file answering `GET` and `HEAD` and refusing every other method outright
+ * through M5.
+ *
+ * M6 adds exactly one exception and it is worth naming here rather than leaving
+ * to be discovered: `WEB_PATHS.notify` takes a `POST` from the *agent's*
+ * process, saying that it changed something so the window does not wait fifteen
+ * seconds to find out. It carries no data, names one event from a closed set,
+ * and requires the token in a header on top of the host and origin checks - a
+ * page cannot set one without a preflight this server never answers. The whole
+ * argument, including why it is not a channel of its own, is in `notify.ts`.
  *
  * The socket is upgraded only after the same three, with `Origin` required
  * rather than optional, because a WebSocket handshake is never a navigation.
@@ -48,12 +57,19 @@ import type { Duplex } from 'node:stream'
 import { WebSocketServer } from 'ws'
 import { serveWebSocket } from '../rpc/websocket.js'
 import { serveAttachment } from './attachments.js'
+import { serveNotify } from './notify.js'
 import { isAllowedHost, isAllowedOrigin, loopbackAuthority } from './origin.js'
 import { LINK_SERVER_PORT } from '../../shared/link-port.js'
 import { serveStatic } from './static.js'
 import { isWebToken } from './token.js'
 import { ATTACHMENT_HOST_PARAM } from '../../shared/attachments.js'
-import { SESSION_COOKIE, TOKEN_PARAM, WEB_PATHS, WEB_PREFIX } from '../../shared/web.js'
+import {
+  SESSION_COOKIE,
+  TOKEN_HEADER,
+  TOKEN_PARAM,
+  WEB_PATHS,
+  WEB_PREFIX
+} from '../../shared/web.js'
 import type { AppInfo } from '../../shared/api.js'
 
 export interface WebHandlerOptions {
@@ -106,6 +122,19 @@ function readCookie(header: string | undefined, name: string): string | undefine
     return decodeURIComponent(part.slice(separator + 1).trim())
   }
   return undefined
+}
+
+/**
+ * One request header as a string.
+ *
+ * Node lowercases header names and folds a repeated one into an array. An array
+ * here means a caller sent the token twice, which is not something the MCP
+ * process does and not something worth guessing about - so it is refused by
+ * coming back undefined rather than by picking one.
+ */
+function readHeader(request: IncomingMessage, name: string): string | undefined {
+  const value = request.headers[name]
+  return typeof value === 'string' ? value : undefined
 }
 
 /**
@@ -181,6 +210,26 @@ export function createWebHandler({
       const isRead = request.method === 'GET' || request.method === 'HEAD'
       if (!isAllowedOrigin(request.headers.origin, { required: !isRead, port })) {
         response.writeHead(403, NO_STORE).end()
+        return true
+      }
+
+      // The one write, and the only reason this file is no longer `GET` and
+      // `HEAD` and nothing else. See `notify.ts` for what it is for and the
+      // three independent reasons a web page cannot reach it. The token comes
+      // in a header rather than the cookie, because the caller is a local Node
+      // process and has no cookie jar - and a custom header is a lock of its
+      // own against a page, which cannot set one without a preflight this
+      // server never answers.
+      if (pathname === WEB_PATHS.notify) {
+        if (request.method !== 'POST') {
+          response.writeHead(405, { ...NO_STORE, Allow: 'POST' }).end()
+          return true
+        }
+        if (!isWebToken(token, readHeader(request, TOKEN_HEADER))) {
+          response.writeHead(401, NO_STORE).end()
+          return true
+        }
+        void serveNotify(request, response, NO_STORE)
         return true
       }
 

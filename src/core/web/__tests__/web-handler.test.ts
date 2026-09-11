@@ -25,9 +25,10 @@ const dataDir = mkdtempSync(join(tmpdir(), 'gitwarren-web-'))
 process.env.GITWARREN_DATA_DIR = dataDir
 
 const { createWebHandler } = await import('../handler.js')
-const { SESSION_COOKIE, TOKEN_PARAM, WEB_PATHS, webAttachmentSrc } = await import(
+const { SESSION_COOKIE, TOKEN_HEADER, TOKEN_PARAM, WEB_PATHS, webAttachmentSrc } = await import(
   '../../../shared/web.js'
 )
+const { subscribeToEvents } = await import('../../events.js')
 const { attachmentsService } = await import('../../services/attachments.js')
 const { closeDatabase } = await import('../../db/client.js')
 
@@ -115,6 +116,26 @@ function withSession(headers: Record<string, string> = {}): Record<string, strin
 
 async function get(path: string, headers: Record<string, string> = {}): Promise<Response> {
   return fetch(`${origin()}${path}`, { headers, redirect: 'manual' })
+}
+
+/**
+ * A JSON `POST`, which until M6 nothing on this server would answer.
+ *
+ * `fetch` is right for this one where it was wrong for the `Host` check: the
+ * headers under test here - `Origin` and the token header - are ones a caller
+ * is allowed to set, and the whole question is what happens when it does.
+ */
+async function post(
+  path: string,
+  body: unknown,
+  headers: Record<string, string> = {}
+): Promise<Response> {
+  return fetch(`${origin()}${path}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...headers },
+    body: JSON.stringify(body),
+    redirect: 'manual'
+  })
 }
 
 /**
@@ -406,4 +427,119 @@ test('a frame that is not a request is refused under an id it can be read with',
 
   assert.equal(answer.id, 0)
   assert.equal(answer.error?.code, 'INVALID_INPUT')
+})
+
+/**
+ * The one write this server answers: the agent's process poking the owner.
+ *
+ * M6 breaks a property this file's header had held since M3 - that everything
+ * behind the gate is a read - so the exception gets the coverage the rule had.
+ * What each case is really asking is "which of the three locks is doing the
+ * work here", because a poke that got in without one of them would still look
+ * like it was working.
+ */
+test('a poke with the token puts the event on the bus', async () => {
+  const seen: string[] = []
+  const stop = subscribeToEvents((event) => seen.push(event.event))
+
+  const response = await post(WEB_PATHS.notify, { event: 'comments.changed' }, {
+    origin: origin(),
+    [TOKEN_HEADER]: TOKEN
+  })
+
+  stop()
+  assert.equal(response.status, 204)
+  assert.deepEqual(seen, ['comments.changed'])
+})
+
+test('an event from a local poke is not tagged with a host', async () => {
+  // A local process telling the local owner about the local database, which is
+  // what "absent means this install" means everywhere else. Tagging it would
+  // make the renderer look for `…@<id>` keys that do not exist.
+  const seen: { host?: string }[] = []
+  const stop = subscribeToEvents((event) => seen.push(event))
+
+  await post(WEB_PATHS.notify, { event: 'reviews.changed' }, {
+    origin: origin(),
+    [TOKEN_HEADER]: TOKEN
+  })
+
+  stop()
+  assert.equal(seen.length, 1)
+  assert.equal(seen[0]?.host, undefined)
+})
+
+test('the session cookie is not enough: the poke wants the header', async () => {
+  // Deliberate. `SameSite=Strict` already means a cross-site page's request
+  // arrives without the cookie, but a custom header is the lock that does not
+  // depend on a browser's cookie policy being what we think it is - a page
+  // cannot set one without a preflight this server never answers.
+  const seen: string[] = []
+  const stop = subscribeToEvents((event) => seen.push(event.event))
+
+  const response = await post(WEB_PATHS.notify, { event: 'comments.changed' }, withSession({
+    origin: origin()
+  }))
+
+  stop()
+  assert.equal(response.status, 401)
+  assert.deepEqual(seen, [])
+})
+
+test('a poke from another origin is refused before the token is looked at', async () => {
+  const seen: string[] = []
+  const stop = subscribeToEvents((event) => seen.push(event.event))
+
+  const response = await post(WEB_PATHS.notify, { event: 'comments.changed' }, {
+    origin: 'http://evil.example',
+    [TOKEN_HEADER]: TOKEN
+  })
+
+  stop()
+  assert.equal(response.status, 403)
+  assert.deepEqual(seen, [])
+})
+
+test('a poke with no origin at all is refused', async () => {
+  // A write is never a navigation, so an absent origin is not the "somebody
+  // clicked a link" case that reads tolerate - see `origin.ts`.
+  const response = await post(WEB_PATHS.notify, { event: 'comments.changed' }, {
+    [TOKEN_HEADER]: TOKEN
+  })
+  assert.equal(response.status, 403)
+})
+
+test('an event name outside the vocabulary is refused', async () => {
+  const seen: string[] = []
+  const stop = subscribeToEvents((event) => seen.push(event.event))
+
+  for (const event of ['host.state', 'anything.else', '', 42]) {
+    const response = await post(WEB_PATHS.notify, { event }, {
+      origin: origin(),
+      [TOKEN_HEADER]: TOKEN
+    })
+    assert.equal(response.status, 400, String(event))
+  }
+
+  stop()
+  // `host.state` is in the refused set on purpose: it is minted by this
+  // install's own pool from a connection it is holding, and nothing outside
+  // this process has any evidence about it.
+  assert.deepEqual(seen, [])
+})
+
+test('a GET to the notify path is refused, and says what it wanted', async () => {
+  const response = await get(WEB_PATHS.notify, withSession())
+  assert.equal(response.status, 405)
+  assert.equal(response.headers.get('allow'), 'POST')
+})
+
+test('a body with no end does not grow this process', async () => {
+  // The one path that reads a request body at all. The cap is the same
+  // reasoning as `onOverflow` in `core/rpc/ndjson.ts`, on a much smaller scale.
+  const response = await post(WEB_PATHS.notify, { event: 'x'.repeat(4096) }, {
+    origin: origin(),
+    [TOKEN_HEADER]: TOKEN
+  })
+  assert.equal(response.status, 413)
 })

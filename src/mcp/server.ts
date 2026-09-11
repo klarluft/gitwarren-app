@@ -18,7 +18,16 @@
  * those changes, and that is what the comment tools carry.
  *
  * No authentication: this is a local, single-user app, the transport is a pipe
- * owned by the agent the user launched, and there is no network surface.
+ * owned by the agent the user launched, and nothing listens.
+ *
+ * Since M6 it does *dial* one thing, and the distinction is worth keeping: after
+ * a write, it opens a loopback connection to whichever process owns this data
+ * directory and says that something changed, so a window does not wait fifteen
+ * seconds to find out. It sends a name and no data, it is never awaited, and
+ * every way of failing - no owner, no token, nothing listening - is the same
+ * answer, which is that nothing happened. Rule 6 is untouched: the agent still
+ * never crosses a network, and quitting GitWarren still leaves it working. See
+ * `poke.ts`.
  *
  * There is, however, *attribution*, which is a different thing. Every comment
  * written through this server is marked as machine-written and named after the
@@ -47,7 +56,9 @@ import { repositoriesService } from '../core/services/repositories.js'
 import { reviewsService } from '../core/services/reviews.js'
 import { authorDisplayName, type CommentAuthor } from '../shared/actors.js'
 import { AppError } from '../shared/errors.js'
+import { RPC_EVENTS, type RpcEventName } from '../shared/rpc.js'
 import { GUI_URL_NOTE, guiLinker, type WithGuiUrl } from './gui-link.js'
+import { pokeOwner } from './poke.js'
 import { agentAuthor, getSessionId, getSessionLabel, setSessionLabel } from './identity.js'
 import {
   addRepositoryInputSchema,
@@ -121,6 +132,28 @@ async function run<T>(operation: () => Promise<T>): Promise<CallToolResult> {
   } catch (error) {
     return fail(error)
   }
+}
+
+/**
+ * A tool that changes something, and tells the owner it did.
+ *
+ * The poke is here rather than inside the services for the same reason
+ * `HUMAN_AUTHOR` is in the dispatcher rather than in `commentsService`: the
+ * *boundary* is what knows who is acting, and this file is the agent boundary.
+ * A service that announced its own writes would announce them once per process
+ * and be unable to say which process that was.
+ *
+ * After the operation, never before - an announcement that something changed
+ * must not outrun the thing changing. Not awaited, and `pokeOwner` cannot
+ * reject: the write is already committed, so nothing about telling a window
+ * may turn a successful tool call into a failed one. See `poke.ts`.
+ */
+function runWrite<T>(event: RpcEventName, operation: () => Promise<T>): Promise<CallToolResult> {
+  return run(async () => {
+    const result = await operation()
+    pokeOwner(event)
+    return result
+  })
 }
 
 const server = new McpServer({ name: 'gitwarren', version: VERSION })
@@ -221,7 +254,7 @@ server.registerTool(
     inputSchema: addRepositoryInputSchema.shape,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false }
   },
-  (input) => run(() => repositoriesService.add(input))
+  (input) => runWrite(RPC_EVENTS.reviewsChanged, () => repositoriesService.add(input))
 )
 
 server.registerTool(
@@ -235,7 +268,7 @@ server.registerTool(
     inputSchema: updateRepositoryInputSchema.shape,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true }
   },
-  (input) => run(() => repositoriesService.update(input))
+  (input) => runWrite(RPC_EVENTS.reviewsChanged, () => repositoriesService.update(input))
 )
 
 server.registerTool(
@@ -248,7 +281,7 @@ server.registerTool(
     inputSchema: removeRepositoryInputSchema.shape,
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true }
   },
-  (input) => run(() => repositoriesService.remove(input))
+  (input) => runWrite(RPC_EVENTS.reviewsChanged, () => repositoriesService.remove(input))
 )
 
 server.registerTool(
@@ -304,7 +337,7 @@ server.registerTool(
     inputSchema: createReviewInputSchema.shape,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false }
   },
-  (input) => run(() => linkedReview(reviewsService.create(input)))
+  (input) => runWrite(RPC_EVENTS.reviewsChanged, () => linkedReview(reviewsService.create(input)))
 )
 
 server.registerTool(
@@ -319,7 +352,7 @@ server.registerTool(
     inputSchema: updateReviewInputSchema.shape,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true }
   },
-  (input) => run(() => linkedReview(reviewsService.update(input)))
+  (input) => runWrite(RPC_EVENTS.reviewsChanged, () => linkedReview(reviewsService.update(input)))
 )
 
 server.registerTool(
@@ -333,7 +366,7 @@ server.registerTool(
     inputSchema: removeReviewInputSchema.shape,
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true }
   },
-  (input) => run(() => reviewsService.remove(input))
+  (input) => runWrite(RPC_EVENTS.reviewsChanged, () => reviewsService.remove(input))
 )
 
 /* -------------------------------------------------------------------------- */
@@ -416,7 +449,10 @@ server.registerTool(
     inputSchema: withLabel(createThreadInputSchema.shape),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false }
   },
-  (input) => run(() => linkedThread(commentsService.createThread(input, adoptLabel(input))))
+  (input) =>
+    runWrite(RPC_EVENTS.commentsChanged, () =>
+      linkedThread(commentsService.createThread(input, adoptLabel(input)))
+    )
 )
 
 server.registerTool(
@@ -432,7 +468,8 @@ server.registerTool(
     inputSchema: withLabel(replyToThreadInputSchema.shape),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false }
   },
-  (input) => run(() => linkedComment(commentsService.reply(input, adoptLabel(input))))
+  (input) =>
+    runWrite(RPC_EVENTS.commentsChanged, () => linkedComment(commentsService.reply(input, adoptLabel(input))))
 )
 
 server.registerTool(
@@ -447,7 +484,10 @@ server.registerTool(
     inputSchema: setThreadResolvedInputSchema.shape,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true }
   },
-  (input) => run(() => linkedThread(commentsService.setResolved(input, currentAuthor())))
+  (input) =>
+    runWrite(RPC_EVENTS.commentsChanged, () =>
+      linkedThread(commentsService.setResolved(input, currentAuthor()))
+    )
 )
 
 server.registerTool(
@@ -461,7 +501,10 @@ server.registerTool(
     inputSchema: updateCommentInputSchema.shape,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true }
   },
-  (input) => run(() => linkedComment(commentsService.update(input, currentAuthor())))
+  (input) =>
+    runWrite(RPC_EVENTS.commentsChanged, () =>
+      linkedComment(commentsService.update(input, currentAuthor()))
+    )
 )
 
 server.registerTool(
@@ -474,7 +517,7 @@ server.registerTool(
     inputSchema: removeCommentInputSchema.shape,
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true }
   },
-  (input) => run(() => commentsService.remove(input, currentAuthor()))
+  (input) => runWrite(RPC_EVENTS.commentsChanged, () => commentsService.remove(input, currentAuthor()))
 )
 
 async function main(): Promise<void> {

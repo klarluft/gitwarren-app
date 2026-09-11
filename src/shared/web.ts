@@ -61,8 +61,42 @@ export const WEB_PATHS = {
    * dispatcher, which is where the size limit and the format sniff live. There
    * is no upload endpoint here and there should not be one.
    */
-  attachments: `${WEB_PREFIX}/attachments/`
+  attachments: `${WEB_PREFIX}/attachments/`,
+  /**
+   * The one thing under here that is written to rather than read: an agent's
+   * process telling the owner of this data directory that it changed something.
+   *
+   * It is the M6 answer to "how does the MCP process poke the owner", and the
+   * argument for it being *here* rather than a channel of its own is that the
+   * channel already exists. `daemon-runtime.json` names the owning process and
+   * its `linkPort`; that process is already serving this handler on it; and the
+   * 0600 token beside the runtime file is readable by exactly the principal
+   * that may poke - the user. The alternative the plan offered was a counter in
+   * a file, which is a poll with extra steps: something would have to watch it,
+   * and `fs.watch` is per platform, unreliable on network filesystems and a
+   * timer underneath on several of them.
+   *
+   * `POST`, and it is the only non-idempotent request this server answers. What
+   * it accepts is a *name* from a closed vocabulary and nothing else, so the
+   * most a local process can do with it is make a window re-read something -
+   * which it could already cause by writing to the database it can already
+   * open. See `core/web/notify.ts`.
+   */
+  notify: `${WEB_PREFIX}/notify`
 } as const
+
+/**
+ * How a non-browser presents the session token.
+ *
+ * The cookie exchange in `core/web/handler.ts` is built for a browser arriving
+ * by navigation, and the MCP process is neither. A header is the natural
+ * spelling for it - and it is a *stronger* lock rather than a convenience,
+ * because a cross-origin page cannot set a custom header without a preflight
+ * this server never answers. So the notify endpoint takes the token here and
+ * nowhere else: not in the query, where it would end up in a log, and not in
+ * the cookie, which only a browser has.
+ */
+export const TOKEN_HEADER = 'x-gitwarren-token'
 
 /**
  * The same image, addressed the way a browser tab can fetch it.

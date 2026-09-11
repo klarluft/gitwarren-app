@@ -3115,7 +3115,7 @@ Before them, one spike that had to happen first, because it decides whether the
    a write emitting on it, both shells carrying it to a renderer, and a renderer
    that treats what arrives as a reason to re-ask. One machine; no tailnet. *(done — see below.)*
 2. **The poke from the MCP process.** An agent's write reaching the owner of the
-   data directory over the loopback port it already publishes.
+   data directory over the loopback port it already publishes. *(done — see below.)*
 3. **Tailnet exposure, identity, and `webUrl`.** `tailscale serve` behind a
    settings toggle, the gate learning a second way to be satisfied, and the URL
    that goes into an MCP result once a host listens. The phone works at the end
@@ -3417,6 +3417,83 @@ application with `core/events.ts` deleted is M5 exactly — slower, never wrong.
 That is the property "additive" has to mean, and it is worth checking rather
 than asserting: `mutate` on a key with no subscriber does nothing at all, so an
 event for a review nobody has open costs one map lookup and produces no read.
+
+**M6.2, done on the Mac, 11 September.** The channel from M6.1 is per process,
+and the agent is in a different one. `core/daemon-runtime.ts` argued years of
+this repository's thinking into one paragraph — the MCP server opens SQLite
+directly and never routes reads through a running GUI, so quitting GitWarren
+does not stop an agent working — and the cost of that, which nothing had had to
+pay before, is that `emitEvent` in the MCP process reaches nobody.
+
+**The poke is a `POST` to the owner, and the argument for it is that nothing had
+to be invented.** `daemon-runtime.json` already names the owning pid and its
+`linkPort`; the owner is already serving `core/web/handler.ts` there;
+`core/web/token.ts` already writes the session token beside it at mode 0600,
+readable by exactly the principal that may poke. So the whole delta is one path,
+one header and a client that never throws.
+
+The plan's other candidate was a counter in `daemon-runtime.json`, and it is
+worse for a reason worth stating: something would have to *watch* the file.
+`fs.watch` is a different mechanism on each platform, unreliable on network
+filesystems, and a poll underneath on several of them — so a counter is a poll
+with extra steps, dressed as a push. The file stays what it has always been, a
+published fact read fresh on every use.
+
+**It breaks a property `handler.ts` had held since M3, so the exception is
+written into that file's header rather than left to be found.** Everything
+behind that gate was a read; this is the one write. Three independent locks, and
+the interesting part is that each answers a different question: the token asks
+whether the caller was *pointed at* GitWarren; `Host` and `Origin` ask whether
+it is a web page, which is the attacker `origin.ts` was built against; and a
+closed vocabulary decides what may go on the bus here rather than letting a
+caller's string decide. `host.state` is refused by name — it is minted by this
+install's own pool from a connection it is holding, and nothing outside the
+process has any evidence about it.
+
+The honest bound is in the module: a local process running as the user can
+already open the database, so the worst this endpoint grants is making a window
+re-read something it could have caused by writing a row. The token is not
+authentication of a person and `token.ts` never claimed it was.
+
+**A host with no owner has no push, and that is the design.** A daemon spawned
+over `ssh` or `wsl.exe` binds nothing and writes no runtime file — deliberately,
+since M2 — so an agent on a machine reached that way finds no owner, pokes
+nobody, and the GUI notices on its next poll. The remedy is not a second
+mechanism; it is M6.3's toggle, which gives that machine an owner and a socket
+to push down. Saying so is better than building a channel for the case where it
+is off.
+
+**Verified against a real MCP session, `scripts/verify/m6-2.mjs`.** Not the
+services called directly: the poke lives in `runWrite`, after the service call
+and inside the agent boundary, so a harness that skipped the tool call would
+have proved nothing. An agent's `add_review_comment` reached the window's
+carrier in **12 ms** as `{event: "comments.changed", data: null}`, and with the
+conversation tab open the comment appeared with nobody touching the window. Two
+agent *reads* produced no events, which is the check that matters most.
+
+And the property the whole arrangement exists to protect, checked rather than
+assumed: an MCP server started against a data directory nothing owns answers its
+tools normally. No owner is the common case, not an error.
+
+**Two things bit, and one of them was a real bug.**
+
+*A refusal nobody receives is not a refusal.* The body cap destroyed the request
+socket the moment it was passed, which took the connection down *before* the
+`413` could be written — so the caller saw `other side closed` where it should
+have seen a status it could read. Found by the test rather than by reading, and
+the fix is an ordering: stop accumulating (which is what bounds the memory),
+settle immediately rather than waiting for an `end` an endless body will never
+send, answer, and only then hang up. It is the same shape as M4.1's
+`diagnostics()` lesson from the other direction — the useful thing and the
+teardown are in a race, and the teardown must lose.
+
+*A protocol change is a protocol change even when both ends are on this
+machine.* The first run failed with `405 Allow: GET, HEAD` from an app that was
+perfectly healthy: it was running the build from before the notify path existed.
+M4.5 and M5 were the only slices with nothing to say about version skew, and
+this is the cheapest possible version of it — two processes from the same
+checkout, one of them stale. Every slice from here needs the app rebuilt and
+restarted before it is asked anything, and a host reinstalled before it is.
 
 ## Agent setup
 
