@@ -21,6 +21,17 @@
  *
  * The transformations behind the toolbar and the Enter key live in
  * `markdown-editing.ts`, as pure functions over the text and the selection.
+ *
+ * ## Images, on a review that belongs to another machine
+ *
+ * Attaching is off on a host, and that is a decision rather than an oversight.
+ * An attachment is a file in the store of whoever owns the review, and the
+ * comment body names it by a token that only that store can resolve; the
+ * *displaying* half of that - `main/attachment-protocol.ts` resolving
+ * `(host, id)` - is M4.4. Ingesting now would put a real image on `pc-wsl` and
+ * render it here as a broken one, in a comment that cannot be fixed by
+ * anything but editing markdown by hand. Refusing is the kinder failure, and
+ * the text comment underneath it still works perfectly.
  */
 import {
   useCallback,
@@ -50,6 +61,7 @@ import { Tabs, TabsList, TabsPanel, TabsTab } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { Tooltip } from '@/components/ui/tooltip'
 import { api } from '@/lib/api'
+import { useHost } from '@/lib/host-scope'
 import { errorMessage } from '@/lib/errors'
 import { useKeepAboveKeyboard } from '@/lib/keyboard-inset'
 import { cn } from '@/lib/utils'
@@ -89,6 +101,7 @@ export function CommentComposer({
   onCancel,
   className
 }: CommentComposerProps) {
+  const host = useHost()
   const [value, setValue] = useState(initialValue)
   const [tab, setTab] = useState<'write' | 'preview'>('write')
   const [dragging, setDragging] = useState(false)
@@ -235,6 +248,11 @@ export function CommentComposer({
       const images = files.filter((file) => file.type.startsWith('image/'))
       if (images.length === 0) return
 
+      if (host !== undefined) {
+        setError(new Error(REMOTE_IMAGES_UNSUPPORTED))
+        return
+      }
+
       const state = readState()
       if (!state) return
 
@@ -266,7 +284,7 @@ export function CommentComposer({
         setBusy(false)
       }
     },
-    [applyEdit, readState]
+    [applyEdit, host, readState]
   )
 
   /**
@@ -361,7 +379,11 @@ export function CommentComposer({
               dragging && 'border-primary bg-primary/5'
             )}
           >
-            <Toolbar disabled={disabled} transform={transform} onAttach={() => void pickFile()} />
+            <Toolbar
+              disabled={disabled}
+              transform={transform}
+              onAttach={host === undefined ? () => void pickFile() : undefined}
+            />
             <Textarea
               ref={textareaRef}
               value={value}
@@ -436,7 +458,8 @@ function Toolbar({
 }: {
   disabled: boolean
   transform: (fn: (state: EditorState) => EditorState) => void
-  onAttach: () => void
+  /** Absent when there is nowhere to put an image. See the note at the top. */
+  onAttach: (() => void) | undefined
 }) {
   const actions = [
     { icon: Bold, title: 'Bold (⌘B)', run: (s: EditorState) => wrapInline(s, '**') },
@@ -490,29 +513,45 @@ function Toolbar({
         </Tooltip>
       ))}
 
-      <span className="mx-1 h-4 w-px bg-border" />
+      {/* Absent rather than disabled when there is nowhere to put the image -
+          the same rule the reveal button follows. See the note at the top. */}
+      {onAttach && (
+        <>
+          <span className="mx-1 h-4 w-px bg-border" />
 
-      <Tooltip label="Attach an image">
-        <button
-          type="button"
-          aria-label="Attach an image"
-          disabled={disabled}
-          onMouseDown={(event) => {
-            event.preventDefault()
-            onAttach()
-          }}
-          className={cn(
-            'rounded p-1.5 text-muted-foreground transition-colors',
-            'hover:bg-muted hover:text-foreground',
-            'disabled:pointer-events-none disabled:opacity-50'
-          )}
-        >
-          <ImageIcon className="size-4" />
-        </button>
-      </Tooltip>
+          <Tooltip label="Attach an image">
+            <button
+              type="button"
+              aria-label="Attach an image"
+              disabled={disabled}
+              onMouseDown={(event) => {
+                event.preventDefault()
+                onAttach()
+              }}
+              className={cn(
+                'rounded p-1.5 text-muted-foreground transition-colors',
+                'hover:bg-muted hover:text-foreground',
+                'disabled:pointer-events-none disabled:opacity-50'
+              )}
+            >
+              <ImageIcon className="size-4" />
+            </button>
+          </Tooltip>
+        </>
+      )}
     </div>
   )
 }
+
+/**
+ * Said when someone drops a screenshot onto a review that lives elsewhere.
+ *
+ * Written as a fact about where the file would have to go rather than as
+ * "unsupported", because that is the part a person can do something about:
+ * the same picture pasted into a review on this computer works.
+ */
+const REMOTE_IMAGES_UNSUPPORTED =
+  'Images cannot be attached to a review on another machine yet. The comment text works as usual.'
 
 /**
  * A default alt text, used only when nothing better is available.

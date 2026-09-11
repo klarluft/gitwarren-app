@@ -34,9 +34,11 @@ import type {
   CommentThread,
   CreateReviewInput,
   CreateThreadInput,
+  DirectoryListing,
   GetRepositoryInput,
   GetReviewInput,
   ListCommentsInput,
+  ListDirectoryInput,
   ListReviewedFilesInput,
   ListReviewsInput,
   RemoveCommentInput,
@@ -96,6 +98,18 @@ export interface RpcRequest<M extends RpcMethod = RpcMethod> {
   id: number
   method: M
   params?: RpcParams<M>
+  /**
+   * Which install this is for: an instance id, or absent for whoever receives
+   * it.
+   *
+   * On the envelope rather than in `params`, because where a request goes is
+   * not part of what the method means - `reviews.diff` has one meaning and it
+   * is the same on every machine. It is also the field the router *removes*
+   * before forwarding, which is what stops a chain of hosts forming: what
+   * arrives at the far end has no host on it, so the far end answers it itself.
+   * See `core/hosts/router.ts`.
+   */
+  host?: string
 }
 
 /**
@@ -181,8 +195,9 @@ export interface RpcMethods {
    * host. A host's list of hosts is its own business, and routing these onward
    * would turn a hub and its spokes into a mesh, where removing a machine from
    * one list could remove it from another. `isLocalOnly` in `core/hosts/ssh.ts`
-   * is the backstop that makes that structural; M4.3's router is where the
-   * general local-versus-remote decision will live.
+   * is the backstop that makes that structural, and `core/hosts/router.ts` is
+   * where the general local-versus-remote decision lives: it answers these here
+   * before it ever looks at the host on the envelope.
    */
   'hosts.list': { params: void; result: HostWithState[] }
   'hosts.get': { params: GetHostInput; result: HostWithState }
@@ -201,6 +216,23 @@ export interface RpcMethods {
    * on why it reports nothing until it is done.
    */
   'hosts.install': { params: InstallOnHostInput; result: InstallReport }
+
+  /**
+   * What is inside a folder, on the machine that answers.
+   *
+   * The one method here that exists because of a *capability* rather than a
+   * domain, and the reason it is a method at all is M4.3. Opening a folder
+   * picker is a thing the shell does on the machine the person is sitting at -
+   * so it stays out of this map, per the note above - but on a remote host that
+   * picker would browse the wrong filesystem, and in a browser tab there is no
+   * picker to open. Splitting the gesture in two puts the window where the
+   * screen is and the directory where the files are.
+   *
+   * Reads nothing but names, and never a file's contents: see
+   * `core/services/fs.ts` on why there is no sandbox and what the real
+   * boundary is.
+   */
+  'fs.list': { params: ListDirectoryInput; result: DirectoryListing }
 
   'repositories.list': { params: void; result: RepositoryWithGitState[] }
   'repositories.get': { params: GetRepositoryInput; result: RepositoryWithGitState }
@@ -314,6 +346,7 @@ export const READ_METHODS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
   // no host row a caller can see, but it opens a connection and clears a
   // backoff, and two people pressing "try now" at the same moment should mean
   // two attempts - which is the whole reason the button exists.
+  'fs.list',
   'repositories.list',
   'repositories.get',
   'repositories.refs',
@@ -344,7 +377,22 @@ export function isReadMethod(method: string): boolean {
  * inspects `params` or decides what a method means.
  */
 export interface Carrier {
-  request<M extends RpcMethod>(method: M, params: RpcParams<M>): Promise<RpcResult<M>>
+  /**
+   * `host` is an instance id, and absent means "this install" - the same
+   * asymmetry `HostScoped` has in `shared/routes.ts`, and for the same reason:
+   * every call written before hosts existed is still the call it was.
+   *
+   * A carrier does not resolve it, look at it, or know what a host is. It puts
+   * it on the envelope and hands it over; `core/hosts/router.ts` decides. What
+   * a carrier *must* do is keep it out of anything it uses as an identity for
+   * the request - a read-coalescing key that ignored the host would answer
+   * "the repositories on `pc-wsl`" with the repositories on this Mac.
+   */
+  request<M extends RpcMethod>(
+    method: M,
+    params: RpcParams<M>,
+    host?: string
+  ): Promise<RpcResult<M>>
 }
 
 /**

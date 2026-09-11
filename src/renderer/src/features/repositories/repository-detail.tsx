@@ -4,6 +4,12 @@
  * The repository itself is re-read here rather than plucked out of the list
  * cache, so the git state shown is current even if you arrived by a link or a
  * reload rather than by clicking through the list.
+ *
+ * On a host, the two shell affordances go away rather than doing something
+ * plausible-looking: `Show in file manager` would open a window on this Mac at
+ * a path only `pc-wsl` has, and the palette command that does the same thing
+ * goes with it. The `e` key and the edit dialog stay, because renaming a
+ * repository is a write to whoever owns it and travels perfectly well.
  */
 import { useMemo, useState } from 'react'
 import { AlertCircle, ArrowLeft, FolderOpen, Pencil } from 'lucide-react'
@@ -13,8 +19,9 @@ import { Button } from '@/components/ui/button'
 import { Tooltip } from '@/components/ui/tooltip'
 import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
-import { api, CACHE_KEYS } from '@/lib/api'
+import { CACHE_KEYS } from '@/lib/api'
 import { errorMessage } from '@/lib/errors'
+import { useApi, useHost, useHostScope } from '@/lib/host-scope'
 import { useRegisterCommands, type Command } from '@/features/commands/command-registry'
 import { navigate } from '@/lib/router'
 import { ReviewList } from '@/features/reviews/review-list'
@@ -23,10 +30,13 @@ import { RepositoryFormDialog } from './repository-form-dialog'
 import type { RepositoryWithGitState } from '@shared/schemas'
 
 export function RepositoryDetail({ repositoryId }: { repositoryId: number }) {
+  const api = useApi()
+  const host = useHost()
+  const scope = useHostScope()
   const [editing, setEditing] = useState(false)
 
   const { data: repository, error, isLoading } = useSWR<RepositoryWithGitState, unknown>(
-    `${CACHE_KEYS.repositories}:${repositoryId}`,
+    CACHE_KEYS.repository(repositoryId, host),
     () => api.repositories.get({ id: repositoryId })
   )
 
@@ -48,7 +58,9 @@ export function RepositoryDetail({ repositoryId }: { repositoryId: number }) {
               },
               // A shell with no file manager to reach contributes no command
               // and no `o` key, rather than one that answers with a sentence.
-              ...(api.capabilities.revealPath
+              // Neither does a repository on another machine, whose folder this
+              // machine's file manager does not have.
+              ...(api.capabilities.revealPath && host === undefined
                 ? ([
                     {
                       id: 'repository:reveal',
@@ -66,7 +78,7 @@ export function RepositoryDetail({ repositoryId }: { repositoryId: number }) {
                   ] satisfies Command[])
                 : [])
             ],
-      [repository]
+      [api, host, repository]
     )
   )
 
@@ -95,7 +107,7 @@ export function RepositoryDetail({ repositoryId }: { repositoryId: number }) {
             {error === undefined ? 'It may have been removed.' : errorMessage(error)}
           </p>
         </div>
-        <Button variant="outline" onClick={() => navigate({ name: 'repositories' })}>
+        <Button variant="outline" onClick={() => navigate({ name: 'repositories', ...scope })}>
           <ArrowLeft />
           Back to repositories
         </Button>
@@ -112,7 +124,7 @@ export function RepositoryDetail({ repositoryId }: { repositoryId: number }) {
           variant="ghost"
           size="sm"
           className="-ml-2 mb-2 text-muted-foreground"
-          onClick={() => navigate({ name: 'repositories' })}
+          onClick={() => navigate({ name: 'repositories', ...scope })}
         >
           <ArrowLeft />
           Repositories
@@ -135,7 +147,7 @@ export function RepositoryDetail({ repositoryId }: { repositoryId: number }) {
           </div>
 
           <div className="flex shrink-0 items-center gap-1">
-            {api.capabilities.revealPath && (
+            {api.capabilities.revealPath && host === undefined && (
               <Tooltip label={missing ? 'Folder is missing' : 'Show in file manager'}>
                 <Button
                   variant="ghost"

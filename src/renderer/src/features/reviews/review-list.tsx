@@ -13,6 +13,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { errorMessage } from '@/lib/errors'
 import { useRegisterCommands, type Command } from '@/features/commands/command-registry'
 import { absoluteTime, relativeTime } from '@/lib/format'
+import { useHostScope } from '@/lib/host-scope'
 import { navigate } from '@/lib/router'
 import { cn } from '@/lib/utils'
 import { ReviewFormDialog } from './review-form-dialog'
@@ -29,6 +30,7 @@ const FILTERS: { value: Filter; label: string }[] = [
 ]
 
 export function ReviewList({ repositoryId }: { repositoryId: number }) {
+  const scope = useHostScope()
   const [filter, setFilter] = useState<Filter>('open')
   const [formOpen, setFormOpen] = useState(false)
 
@@ -150,24 +152,32 @@ export function ReviewList({ repositoryId }: { repositoryId: number }) {
         open={formOpen}
         onOpenChange={setFormOpen}
         repositoryId={repositoryId}
-        onCreated={(review) => navigate({ name: 'review', reviewId: review.id, tab: 'files' })}
+        onCreated={(review) =>
+          navigate({ name: 'review', reviewId: review.id, tab: 'files', ...scope })
+        }
       />
     </section>
   )
 }
 
 function ReviewCard({ review }: { review: Review }) {
+  const scope = useHostScope()
+
+  function open(): void {
+    navigate({ name: 'review', reviewId: review.id, tab: 'conversation', ...scope })
+  }
+
   return (
     <Card
       role="button"
       tabIndex={0}
       // Picked up by the j/k shortcuts; the browser's own focus does the rest.
       data-nav-item
-      onClick={() => navigate({ name: 'review', reviewId: review.id, tab: 'conversation' })}
+      onClick={open}
       onKeyDown={(event) => {
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault()
-          navigate({ name: 'review', reviewId: review.id, tab: 'conversation' })
+          open()
         }
       }}
       className="flex cursor-pointer items-center gap-4 p-4 transition-colors hover:border-foreground/20"

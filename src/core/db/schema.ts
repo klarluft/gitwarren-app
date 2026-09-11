@@ -187,10 +187,36 @@ export const repositories = sqliteTable(
      * The install that owns this repository, or NULL for this one.
      *
      * A host owns its repositories: SQLite, git and the MCP server for a repo
-     * all live on the machine the repo is on, and a row here for a repository
-     * on another host is a *reference* to it, never a copy. NULL rather than
-     * this install's own instance id, so that nothing has to be rewritten when
-     * a data directory is moved or restored onto a machine that mints a new id.
+     * all live on the machine the repo is on. NULL rather than this install's
+     * own instance id, so that nothing has to be rewritten when a data
+     * directory is moved or restored onto a machine that mints a new id.
+     *
+     * ## Nothing writes it, and M4.3 decided that on purpose
+     *
+     * It was added in M0 for a design where this database would hold a row per
+     * remote repository - a bookmark saying "there is one of these on `pc-wsl`"
+     * - so that a repository list could be drawn without touching the network.
+     * M4.3 built the other thing, because rules 1 and 2 of the plan say so
+     * plainly: a host owns its repositories, and nothing syncs. A repository on
+     * `pc-wsl` is a row in *that machine's* SQLite with its own id, its reviews
+     * hang off it there, and the agent inside WSL reads them over its own local
+     * MCP. A second row over here would be a copy of a name and a path that
+     * only that machine can keep true, and it would give one repository two
+     * ids - while `#/h/<instance>/repositories/<id>` has always meant "that id,
+     * as that host knows it".
+     *
+     * So a host is a *place you go*: `#/h/<instance>/` is its repository list,
+     * fetched from it, when somebody asks for it. That is also what makes
+     * connect-on-use hold - a home screen that listed every host's repositories
+     * would open an `ssh` connection to every machine on the list in order to
+     * render, which is exactly what `core/hosts/pool.ts` exists to avoid.
+     *
+     * The column stays because dropping it is a migration that buys nothing,
+     * and because "this row is local" is a claim worth being able to make in
+     * SQL - `localRepositoryAt` in the service makes it. It would start being
+     * written the day GitWarren wanted to remember something about a machine
+     * that is switched off, which is a decision about caching and would want
+     * arguing on its own.
      */
     hostId: text('host_id'),
     /**

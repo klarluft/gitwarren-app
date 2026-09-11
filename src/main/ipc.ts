@@ -24,6 +24,7 @@
  */
 import { BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { dispatch } from '../core/rpc/dispatcher.js'
+import { route } from '../core/hosts/router.js'
 import { traced } from '../core/trace.js'
 import { attachmentsService } from '../core/services/attachments.js'
 import { AppError } from '../shared/errors.js'
@@ -75,12 +76,23 @@ export function registerIpcHandlers(): void {
     if (typeof payload !== 'object' || payload === null || !('method' in payload)) {
       throw new AppError('INVALID_INPUT', 'A request needs a method.')
     }
-    const { method, params } = payload as { method: RpcMethod; params?: unknown }
-    return dispatch(method, params as RpcParams<RpcMethod>)
+    const { method, params, host } = payload as {
+      method: RpcMethod
+      params?: unknown
+      host?: string
+    }
+    // `route` rather than `dispatch`: since M4.3 the renderer may be looking at
+    // a screen that belongs to another machine, and which machine that is
+    // arrives on the envelope. Everything with no host on it - which is nearly
+    // everything - reaches the same dispatcher it always did.
+    return route(host, method, params as RpcParams<RpcMethod>)
   })
 
   // Every channel that existed before M1, still answering, now through the
   // dispatcher. The table lives in `shared/api.ts` next to the channel names.
+  // Deliberately not routed: these are the pre-M1 shape, one channel per
+  // method with the params as the whole payload, and there is nowhere in that
+  // shape to put a host. They mean what they have always meant - this machine.
   for (const [channel, method] of Object.entries(CHANNEL_METHODS)) {
     // `RpcParams<typeof method>` rather than `RpcParams<RpcMethod>`: the table
     // covers only the pre-M1 channels, so the params union here is the smaller

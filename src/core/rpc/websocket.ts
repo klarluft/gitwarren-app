@@ -23,15 +23,19 @@
  *
  * ## What it does not do
  *
- * Decide anything. Every request goes through `handleRequest`, the same door
- * `main/ipc.ts` and `stdio.ts` use, and this file may not add a method, skip
- * validation or name an author - see the note at the top of `dispatcher.ts`.
+ * Decide anything. Every request goes through `handleRoutedRequest`, the same
+ * door `main/ipc.ts` and `stdio.ts` use, and this file may not add a method,
+ * skip validation or name an author - see the note at the top of
+ * `dispatcher.ts`. That includes deciding *where* a request goes: a tab may ask
+ * for a review on another host, and what this file does about it is pass the
+ * host along untouched.
+ *
  * Authentication happened before the upgrade was accepted (`web/server.ts`); a
  * socket that reaches here is one the user's browser was told the secret for,
  * and this file is not the place to second-guess that.
  */
 import type { WebSocket } from 'ws'
-import { handleRequest } from './dispatcher.js'
+import { handleRoutedRequest } from '../hosts/router.js'
 import { AppError } from '../../shared/errors.js'
 import type { RpcRequest, RpcResponse } from '../../shared/rpc.js'
 
@@ -98,9 +102,9 @@ export function serveWebSocket(socket: WebSocket): void {
       return
     }
 
-    // `handleRequest` never throws - that is its contract. The catch is for the
+    // `handleRoutedRequest` never throws - that is its contract. The catch is for the
     // write, which can fail on a socket that closed between the two.
-    void handleRequest(request)
+    void handleRoutedRequest(request)
       .then(write)
       .catch((error: unknown) => {
         console.error('[web] could not answer a request', error)

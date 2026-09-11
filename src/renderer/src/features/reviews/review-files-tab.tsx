@@ -40,6 +40,7 @@ import { api } from '@/lib/api'
 import { errorMessage } from '@/lib/errors'
 import { formatStep } from '@/lib/keys'
 import { plural } from '@/lib/format'
+import { useHost } from '@/lib/host-scope'
 import { useNarrow } from '@/lib/narrow'
 import { useStoredFlag, useStoredPreference } from '@/lib/preferences'
 import { revealElement } from '@/lib/reveal'
@@ -339,6 +340,7 @@ function useFilesLayout(): {
 }
 
 export function ReviewFilesTab({ review, focus }: { review: Review; focus?: DiffFocus }) {
+  const host = useHost()
   const [changes, setChanges] = useState<DiffChanges>(DEFAULT_DIFF_CHANGES)
   const [editorId, setEditorId] = useStoredPreference('editor', null)
   const [openError, setOpenError] = useState<unknown>(null)
@@ -346,7 +348,19 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
   const { data, error, isLoading, isRefreshing, refresh } = useReviewDiff(review.id, changes)
   const { threads } = useReviewComments(review.id)
   const mutations = useCommentMutations()
-  const editors = useEditors()
+  const localEditors = useEditors()
+  /**
+   * No editors on a review that belongs to another machine, and therefore no
+   * open-in-editor buttons and no editor picker.
+   *
+   * `reviews.filePath` answers with a path on the *host*, and `openInEditor` is
+   * this machine's shell - so the two halves that M1 deliberately kept separate
+   * would be joined across a network and hand a Mac editor a path only WSL has.
+   * The honest form of that is an editor list with nothing in it, which every
+   * control below already knows how to render: this is the same shape a browser
+   * tab has had since M3.
+   */
+  const editors = host === undefined ? localEditors : undefined
 
   const threadsByFile = useMemo(
     () => anchorByFile(data?.files ?? [], threads),
@@ -426,7 +440,18 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
     return counts
   }, [threadsByFile])
 
-  const openInEditor = useCallback(
+  /**
+   * Opening a file, and the reason there is a second name for it below.
+   *
+   * `FileActions` in `diff-view.tsx` decides whether to draw the button from
+   * whether it was given a *callback*, not from whether there is an editor
+   * list - so leaving the list empty for a remote host turned off the picker
+   * and left the button, and pressing it asked *this* install for
+   * `reviews.filePath` of a review id that means something else over there.
+   * Found by pressing it against `pc-wsl`, which is the one failure shape this
+   * slice set out to avoid: doing something plausible to the wrong file.
+   */
+  const openLocally = useCallback(
     (path: string, line: number) => {
       setOpenError(null)
       api.reviews
@@ -441,6 +466,9 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
     },
     [review.id, changes, editorId]
   )
+
+  // Undefined on a review that belongs to another machine - see the note above.
+  const openInEditor = host === undefined ? openLocally : undefined
 
   const marked = useFocusScroll(focus, !isLoading && data !== undefined)
 

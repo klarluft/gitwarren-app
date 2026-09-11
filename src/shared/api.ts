@@ -23,6 +23,8 @@ import type {
   AddHostInput,
   AddRepositoryInput,
   Attachment,
+  DirectoryListing,
+  ListDirectoryInput,
   GetHostInput,
   HostWithState,
   InstallOnHostInput,
@@ -296,6 +298,18 @@ export interface GitWarrenApi {
     probe(input: GetHostInput): Promise<HostWithState>
     /** Slow, and the only method here that changes the other machine. */
     install(input: InstallOnHostInput): Promise<InstallReport>
+  }
+  /**
+   * What is inside a folder, on the machine this api is pointed at.
+   *
+   * Not part of `system` even though the shell's own picker is, and the
+   * difference is the whole of M4.3's answer to the missing picker: opening a
+   * window is something only the machine with a screen can do, while reading a
+   * directory is something the machine holding the directory does. On a remote
+   * host those are two different computers.
+   */
+  fs: {
+    list(input: ListDirectoryInput): Promise<DirectoryListing>
   }
   repositories: {
     list(): Promise<RepositoryWithGitState[]>

@@ -15,6 +15,7 @@
 import useSWR, { useSWRConfig, type SWRResponse } from 'swr'
 import { useCallback, useMemo, useState } from 'react'
 import { api, CACHE_KEYS, CACHE_PREFIXES } from '@/lib/api'
+import { useApi, useHost } from '@/lib/host-scope'
 import type { EditorList } from '@shared/api'
 import type { ReviewOpen } from '@shared/rpc'
 import type {
@@ -72,8 +73,10 @@ export function useReviews(
   repositoryId: number | undefined,
   status?: ReviewStatus
 ): ListState<Review[]> {
+  const api = useApi()
+  const host = useHost()
   return toState(
-    useSWR<Review[], unknown>(CACHE_KEYS.reviews(repositoryId, status), () =>
+    useSWR<Review[], unknown>(CACHE_KEYS.reviews(repositoryId, status, host), () =>
       api.reviews.list({
         ...(repositoryId === undefined ? {} : { repositoryId }),
         ...(status === undefined ? {} : { status })
@@ -99,8 +102,10 @@ export function useReviews(
  * them separately would cost a round trip each.
  */
 function useReviewOpen(reviewId: number): SWRResponse<ReviewOpen, unknown> {
+  const api = useApi()
+  const host = useHost()
   return useSWR<ReviewOpen, unknown>(
-    CACHE_KEYS.review(reviewId),
+    CACHE_KEYS.review(reviewId, host),
     () => api.reviews.open({ id: reviewId }),
     { revalidateOnFocus: true, refreshInterval: 15_000 }
   )
@@ -118,9 +123,11 @@ export function useReviewThreads(reviewId: number): ListState<CommentThread[]> {
 }
 
 export function useReviewCommits(reviewId: number): ListState<ReviewCommits> {
+  const api = useApi()
+  const host = useHost()
   return toState(
     useSWR<ReviewCommits, unknown>(
-      CACHE_KEYS.reviewCommits(reviewId),
+      CACHE_KEYS.reviewCommits(reviewId, host),
       () => api.reviews.commits({ id: reviewId }),
       LIVE_READ_OPTIONS
     )
@@ -138,9 +145,11 @@ export function useReviewCommits(reviewId: number): ListState<ReviewCommits> {
 export const DEFAULT_DIFF_CHANGES: DiffChanges = 'all'
 
 export function useReviewDiff(reviewId: number, changes: DiffChanges): ListState<ReviewDiff> {
+  const api = useApi()
+  const host = useHost()
   return toState(
     useSWR<ReviewDiff, unknown>(
-      CACHE_KEYS.reviewDiff(reviewId, changes),
+      CACHE_KEYS.reviewDiff(reviewId, changes, host),
       () => api.reviews.diff({ id: reviewId, changes }),
       LIVE_READ_OPTIONS
     )
@@ -170,9 +179,11 @@ export function useReviewFile(
   path: string,
   changes: DiffChanges
 ): FileContentState {
+  const api = useApi()
+  const host = useHost()
   const [requested, setRequested] = useState(false)
   const result = useSWR<FileContent, unknown>(
-    requested && reviewId !== null ? CACHE_KEYS.reviewFile(reviewId, path, changes) : null,
+    requested && reviewId !== null ? CACHE_KEYS.reviewFile(reviewId, path, changes, host) : null,
     () => api.reviews.file({ id: reviewId as number, path, changes }),
     LIVE_READ_OPTIONS
   )
@@ -200,8 +211,10 @@ export function useReviewImage(
   side: DiffFileSide,
   changes: DiffChanges
 ): { image: FileImage | undefined; error: unknown; isLoading: boolean } {
+  const api = useApi()
+  const host = useHost()
   const result = useSWR<FileImage, unknown>(
-    path === null ? null : CACHE_KEYS.reviewImage(reviewId, path, side, changes),
+    path === null ? null : CACHE_KEYS.reviewImage(reviewId, path, side, changes, host),
     () => api.reviews.image({ id: reviewId, path: path as string, side, changes }),
     LIVE_READ_OPTIONS
   )
@@ -222,9 +235,11 @@ export function useEditors(): EditorList | undefined {
 
 /** Branches, tags and worktrees for the endpoint pickers. */
 export function useRepositoryRefs(repositoryId: number | null): ListState<RepositoryRefs> {
+  const api = useApi()
+  const host = useHost()
   return toState(
     useSWR<RepositoryRefs, unknown>(
-      repositoryId === null ? null : CACHE_KEYS.repositoryRefs(repositoryId),
+      repositoryId === null ? null : CACHE_KEYS.repositoryRefs(repositoryId, host),
       () => api.repositories.refs({ id: repositoryId as number }),
       LIVE_READ_OPTIONS
     )
@@ -259,6 +274,7 @@ export interface ReviewedFilesState {
  * and revalidates, which is the same read the screen already trusts.
  */
 export function useReviewedFiles(reviewId: number): ReviewedFilesState {
+  const api = useApi()
   const { data, isLoading, mutate } = useReviewOpen(reviewId)
 
   const files = data?.reviewedFiles ?? NO_REVIEWED_FILES
@@ -297,7 +313,7 @@ export function useReviewedFiles(reviewId: number): ReviewedFilesState {
         { optimisticData: next, revalidate: false, rollbackOnError: true }
       )
     },
-    [data, mutate, reviewId]
+    [api, data, mutate, reviewId]
   )
 
   return { digests, isLoading, setReviewed }
@@ -310,6 +326,7 @@ export interface ReviewMutations {
 }
 
 export function useReviewMutations(): ReviewMutations {
+  const api = useApi()
   const { mutate } = useSWRConfig()
 
   // Every review family at once: a change to one review can move it between
@@ -331,7 +348,7 @@ export function useReviewMutations(): ReviewMutations {
         await revalidate()
         return created
       },
-      [revalidate]
+      [api, revalidate]
     ),
     updateReview: useCallback(
       async (input) => {
@@ -339,14 +356,14 @@ export function useReviewMutations(): ReviewMutations {
         await revalidate()
         return updated
       },
-      [revalidate]
+      [api, revalidate]
     ),
     removeReview: useCallback(
       async (id) => {
         await api.reviews.remove({ id })
         await revalidate()
       },
-      [revalidate]
+      [api, revalidate]
     )
   }
 }

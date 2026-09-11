@@ -7,6 +7,25 @@
  * object method below is one `carrier.request`, so the day a browser tab
  * supplies a WebSocket carrier instead of the IPC one, nothing above this file
  * changes. There is still no fetch client and no API base URL.
+ *
+ * ## Since M4.3 there is one of these per machine
+ *
+ * `apiFor(host)` binds every method to an install, and `api` is `apiFor()` -
+ * this one. A screen never passes a host to a call; it uses the api it was
+ * handed, and `useApi()` in `lib/host-scope.tsx` hands it the one the current
+ * route is about. Which is why nothing in `features/` had to learn what a host
+ * is: `api.reviews.diff(...)` on a host-scoped screen already means "on that
+ * host", because the object it was called on says so.
+ *
+ * Binding rather than a parameter also keeps a whole class of bug out of reach.
+ * A host threaded through as an argument is a host that can be *forgotten* at
+ * one call site out of forty, and the failure mode of forgetting it is silent:
+ * the local answer, rendered under a remote heading. There is no argument to
+ * forget.
+ *
+ * The shell half is not bound to anything and never will be. Revealing a path,
+ * opening a picker, launching an editor: those happen on the machine with the
+ * screen on it, whatever the screen is showing. See `ShellCapabilities`.
  */
 import type { GitWarrenApi, GitWarrenBridge } from '@shared/api'
 import type { DiffChanges } from '@shared/git'
@@ -35,72 +54,135 @@ function once<T>(read: () => Promise<T>): () => Promise<T> {
   return () => (pending ??= read())
 }
 
-export const api: GitWarrenApi = {
-  // Read once, at module scope, because it is read during render and cannot
-  // change while the page is open. A screen asks `api.capabilities.revealPath`
-  // and leaves the button out; see `ShellCapabilities` on why that is better
-  // than a button that explains itself when pressed.
-  capabilities: shell.capabilities,
-  hosts: {
-    list: () => carrier.request('hosts.list', undefined),
-    get: (input) => carrier.request('hosts.get', input),
-    add: (input) => carrier.request('hosts.add', input),
-    update: (input) => carrier.request('hosts.update', input),
-    remove: (input) => carrier.request('hosts.remove', input),
-    probe: (input) => carrier.request('hosts.probe', input),
-    install: (input) => carrier.request('hosts.install', input)
-  },
-  repositories: {
-    list: () => carrier.request('repositories.list', undefined),
-    get: (input) => carrier.request('repositories.get', input),
-    add: (input) => carrier.request('repositories.add', input),
-    update: (input) => carrier.request('repositories.update', input),
-    remove: (input) => carrier.request('repositories.remove', input),
-    refs: (input) => carrier.request('repositories.refs', input)
-  },
-  reviews: {
-    list: (input) => carrier.request('reviews.list', input),
-    open: (input) => carrier.request('reviews.open', input),
-    get: (input) => carrier.request('reviews.get', input),
-    create: (input) => carrier.request('reviews.create', input),
-    update: (input) => carrier.request('reviews.update', input),
-    remove: (input) => carrier.request('reviews.remove', input),
-    commits: (input) => carrier.request('reviews.commits', input),
-    diff: (input) => carrier.request('reviews.diff', input),
-    file: (input) => carrier.request('reviews.file', input),
-    image: (input) => carrier.request('reviews.image', input),
-    reviewedFiles: (input) => carrier.request('reviews.reviewedFiles', input),
-    setFileReviewed: (input) => carrier.request('reviews.setFileReviewed', input),
-    // Where the file is comes from whoever owns the review; opening it is the
-    // shell's job. The two halves are joined in the main process.
-    openInEditor: (input) => shell.openInEditor(input)
-  },
-  comments: {
-    list: (input) => carrier.request('comments.list', input),
-    createThread: (input) => carrier.request('comments.createThread', input),
-    reply: (input) => carrier.request('comments.reply', input),
-    update: (input) => carrier.request('comments.update', input),
-    remove: (input) => carrier.request('comments.remove', input),
-    setResolved: (input) => carrier.request('comments.setResolved', input)
-  },
-  attachments: {
-    ingest: (input) => carrier.request('attachments.ingest', input),
-    pick: () => shell.pickAttachment(),
-    src: (url) => shell.attachmentSrc(url)
-  },
-  system: {
-    pickDirectory: () => shell.system.pickDirectory(),
-    revealPath: (path) => shell.system.revealPath(path),
-    appInfo: once(() => shell.system.appInfo()),
-    editors: once(() => shell.system.editors()),
-    // Not memoised, unlike the two above: the user can turn this on in System
-    // Settings while the window is open, and a value cached for the life of the
-    // document would show them a switch that disagrees with their machine.
-    getOpenAtLogin: () => shell.system.getOpenAtLogin(),
-    setOpenAtLogin: (openAtLogin) => shell.system.setOpenAtLogin(openAtLogin)
-  },
-  navigation: shell.navigation,
-  updates: shell.updates
+/**
+ * The api objects handed out so far, by host.
+ *
+ * Memoised because these end up in `useMemo` dependency lists and in SWR
+ * fetchers: a fresh object every render would make every one of those look like
+ * a change. `''` stands for this install, since `undefined` is not a key.
+ */
+const byHost = new Map<string, GitWarrenApi>()
+
+/**
+ * The app, as reached on one machine.
+ *
+ * `host` is an instance id, and omitting it means this install - the same
+ * asymmetry the routes have, and the reason a call written before hosts existed
+ * still means what it meant.
+ */
+export function apiFor(host?: string): GitWarrenApi {
+  const cached = byHost.get(host ?? '')
+  if (cached) return cached
+  const built = buildApi(host)
+  byHost.set(host ?? '', built)
+  return built
+}
+
+function buildApi(host: string | undefined): GitWarrenApi {
+  return {
+    // Read once, at module scope, because it is read during render and cannot
+    // change while the page is open. A screen asks `api.capabilities.revealPath`
+    // and leaves the button out; see `ShellCapabilities` on why that is better
+    // than a button that explains itself when pressed.
+    //
+    // Not scoped by host, and that is not an omission: these describe the shell
+    // the person is *using*, which does not change because the screen is
+    // showing another machine. What a remote screen must not do with them is a
+    // separate question, and the screens answer it - `revealPath` on a path
+    // that only exists on `pc-wsl` would open a Finder window on nothing.
+    capabilities: shell.capabilities,
+    // Deliberately unbound even here. A host's list of hosts is its own
+    // business, and the carrier refuses to send one; passing `host` would build
+    // a request that could only ever be refused. See `isLocalOnly`.
+    hosts: {
+      list: () => carrier.request('hosts.list', undefined),
+      get: (input) => carrier.request('hosts.get', input),
+      add: (input) => carrier.request('hosts.add', input),
+      update: (input) => carrier.request('hosts.update', input),
+      remove: (input) => carrier.request('hosts.remove', input),
+      probe: (input) => carrier.request('hosts.probe', input),
+      install: (input) => carrier.request('hosts.install', input)
+    },
+    fs: {
+      list: (input) => carrier.request('fs.list', input, host)
+    },
+    repositories: {
+      list: () => carrier.request('repositories.list', undefined, host),
+      get: (input) => carrier.request('repositories.get', input, host),
+      add: (input) => carrier.request('repositories.add', input, host),
+      update: (input) => carrier.request('repositories.update', input, host),
+      remove: (input) => carrier.request('repositories.remove', input, host),
+      refs: (input) => carrier.request('repositories.refs', input, host)
+    },
+    reviews: {
+      list: (input) => carrier.request('reviews.list', input, host),
+      open: (input) => carrier.request('reviews.open', input, host),
+      get: (input) => carrier.request('reviews.get', input, host),
+      create: (input) => carrier.request('reviews.create', input, host),
+      update: (input) => carrier.request('reviews.update', input, host),
+      remove: (input) => carrier.request('reviews.remove', input, host),
+      commits: (input) => carrier.request('reviews.commits', input, host),
+      diff: (input) => carrier.request('reviews.diff', input, host),
+      file: (input) => carrier.request('reviews.file', input, host),
+      image: (input) => carrier.request('reviews.image', input, host),
+      reviewedFiles: (input) => carrier.request('reviews.reviewedFiles', input, host),
+      setFileReviewed: (input) => carrier.request('reviews.setFileReviewed', input, host),
+      // Where the file is comes from whoever owns the review; opening it is the
+      // shell's job. The two halves are joined in the main process - which is
+      // why this one is still local-only, and why the screens hide it on a
+      // remote review rather than opening the wrong machine's file. M4.4 gives
+      // it `(host, path, line)`.
+      openInEditor: (input) => shell.openInEditor(input)
+    },
+    comments: {
+      list: (input) => carrier.request('comments.list', input, host),
+      createThread: (input) => carrier.request('comments.createThread', input, host),
+      reply: (input) => carrier.request('comments.reply', input, host),
+      update: (input) => carrier.request('comments.update', input, host),
+      remove: (input) => carrier.request('comments.remove', input, host),
+      setResolved: (input) => carrier.request('comments.setResolved', input, host)
+    },
+    attachments: {
+      ingest: (input) => carrier.request('attachments.ingest', input, host),
+      pick: () => shell.pickAttachment(),
+      src: (url) => shell.attachmentSrc(url)
+    },
+    system: {
+      pickDirectory: () => shell.system.pickDirectory(),
+      revealPath: (path) => shell.system.revealPath(path),
+      appInfo: once(() => shell.system.appInfo()),
+      editors: once(() => shell.system.editors()),
+      // Not memoised, unlike the two above: the user can turn this on in System
+      // Settings while the window is open, and a value cached for the life of the
+      // document would show them a switch that disagrees with their machine.
+      getOpenAtLogin: () => shell.system.getOpenAtLogin(),
+      setOpenAtLogin: (openAtLogin) => shell.system.setOpenAtLogin(openAtLogin)
+    },
+    navigation: shell.navigation,
+    updates: shell.updates
+  }
+}
+
+/** This install. What every screen used before there was more than one. */
+export const api: GitWarrenApi = apiFor()
+
+/**
+ * Tie a cache key to the machine its answer came from.
+ *
+ * Every id in this app is a per-host autoincrement integer, which is the point
+ * `shared/routes.ts` makes about links and is just as true of a cache: review 4
+ * here and review 4 on `pc-wsl` are two different reviews, and one key for both
+ * would put one machine's discussion under the other machine's heading. This is
+ * the same argument as the read-coalescing key in the carrier, one layer up.
+ *
+ * The host goes on the *end*, after the prefix, so that the family-wide
+ * invalidation below still works by `startsWith`. Invalidating `reviews:` then
+ * covers every host at once, which is the honest thing after a write: nothing
+ * unmounted refetches until it is looked at again, and what is on screen is one
+ * host's worth of reads.
+ */
+function scoped(key: string, host: string | undefined): string {
+  return host === undefined ? key : `${key}@${host}`
 }
 
 /**
@@ -110,6 +192,10 @@ export const api: GitWarrenApi = {
  * can invalidate a whole family at once - `mutate(key => key.startsWith('reviews:'))`
  * refreshes every list regardless of which repository or status filter it was
  * built with, which is what you want after creating or closing a review.
+ *
+ * Every key that names something a host owns takes that host as its last
+ * argument, and omitting it means this install - so a call site that predates
+ * hosts produces the string it always did.
  */
 export const CACHE_KEYS = {
   /**
@@ -123,10 +209,16 @@ export const CACHE_KEYS = {
    * screen disagree about what time it is.
    */
   hosts: 'hosts',
-  repositories: 'repositories',
-  repositoryRefs: (repositoryId: number) => `repository-refs:${repositoryId}`,
-  reviews: (repositoryId?: number, status?: string) =>
-    `reviews:${repositoryId ?? 'all'}:${status ?? 'any'}`,
+  repositories: (host?: string) => scoped('repositories', host),
+  repository: (repositoryId: number, host?: string) =>
+    scoped(`repository:${repositoryId}`, host),
+  repositoryRefs: (repositoryId: number, host?: string) =>
+    scoped(`repository-refs:${repositoryId}`, host),
+  /** One folder of one machine's filesystem, as the browse dialog sees it. */
+  directory: (path: string | undefined, host?: string) =>
+    scoped(`directory:${path ?? ''}`, host),
+  reviews: (repositoryId?: number, status?: string, host?: string) =>
+    scoped(`reviews:${repositoryId ?? 'all'}:${status ?? 'any'}`, host),
   /**
    * A whole review, as `reviews.open` answers it: the review itself, its
    * threads and its reviewed marks.
@@ -142,22 +234,29 @@ export const CACHE_KEYS = {
    * refresh brings back the discussion, the marks and any change to the review
    * itself together - one request where there used to be two.
    */
-  review: (reviewId: number) => `review:${reviewId}`,
-  reviewCommits: (reviewId: number) => `review-commits:${reviewId}`,
-  reviewDiff: (reviewId: number, changes: DiffChanges) => `review-diff:${reviewId}:${changes}`,
+  review: (reviewId: number, host?: string) => scoped(`review:${reviewId}`, host),
+  reviewCommits: (reviewId: number, host?: string) =>
+    scoped(`review-commits:${reviewId}`, host),
+  reviewDiff: (reviewId: number, changes: DiffChanges, host?: string) =>
+    scoped(`review-diff:${reviewId}:${changes}`, host),
   /**
    * Keyed by the same setting as the diff: expanded context read from another
    * version of the file would not line up with the hunks it sits between.
    */
-  reviewFile: (reviewId: number, path: string, changes: DiffChanges) =>
-    `review-file:${reviewId}:${changes}:${path}`,
+  reviewFile: (reviewId: number, path: string, changes: DiffChanges, host?: string) =>
+    scoped(`review-file:${reviewId}:${changes}:${path}`, host),
   /**
    * One side of an image preview, keyed by the same setting for the same
    * reason: which version of the picture is "before" depends on what the diff
    * is made of.
    */
-  reviewImage: (reviewId: number, path: string, side: string, changes: DiffChanges) =>
-    `review-image:${reviewId}:${changes}:${side}:${path}`,
+  reviewImage: (
+    reviewId: number,
+    path: string,
+    side: string,
+    changes: DiffChanges,
+    host?: string
+  ) => scoped(`review-image:${reviewId}:${changes}:${side}:${path}`, host),
   /**
    * The two reads that never change while the app runs. They keep keys so the
    * components that show them keep a loading state, but the reads underneath

@@ -215,10 +215,17 @@ export const hostsService = {
    * The connection is dropped first so that an in-flight request cannot write
    * `last_seen_at` back onto a row that is about to stop existing.
    *
-   * Repositories on the host are deliberately *not* deleted here. That is M4.3's
-   * decision to make, once there are remote repositories to have an opinion
-   * about; leaving orphaned rows for one slice is better than writing a cascade
-   * now and having to unpick it.
+   * There is no cascade to repositories, and M4.3 - which was left the decision
+   * - found it had nothing to decide. No row in this database ever names a
+   * host: a repository on `pc-wsl` is a row in that machine's SQLite, and this
+   * install holds only the route to the machine. So forgetting a host forgets a
+   * way of reaching a computer, and every repository, review and comment over
+   * there is exactly where it was. Adding the host again reaches all of it
+   * again. See the note on `repositories.host_id` in the schema.
+   *
+   * What is *not* removed is anything on the host itself - see "Not done in
+   * M4.2": going onto somebody's server to delete a directory is a different
+   * act, and the dialog says as much.
    */
   remove(input: unknown): { id: number } {
     const { id } = parse(removeHostInputSchema, input)
