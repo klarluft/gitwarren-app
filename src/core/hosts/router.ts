@@ -55,12 +55,9 @@
  * answer, not a gap: until the machine has said who it is, this install cannot
  * tell it apart from any other.
  */
-import { eq } from 'drizzle-orm'
-import { getDatabase } from '../db/client.js'
-import { hosts } from '../db/schema.js'
 import { getInstanceId } from '../instance.js'
 import { hostPool } from './pool.js'
-import { routeFor } from '../services/hosts.js'
+import { requireInstance, routeFor } from '../services/hosts.js'
 import { isLocalOnly } from './ssh.js'
 import { dispatch } from '../rpc/dispatcher.js'
 import { AppError } from '../../shared/errors.js'
@@ -94,20 +91,10 @@ export async function route<M extends RpcMethod>(
 ): Promise<RpcResult<M>> {
   if (isAnsweredLocally(host, method)) return dispatch(method, params)
 
-  const row = getDatabase().select().from(hosts).where(eq(hosts.instanceId, host as string)).get()
-  if (!row) {
-    // Names the id rather than saying "unknown host", because the id is what
-    // the link contained and is the only thing the person can compare against
-    // their Hosts screen. This is what a link to a machine that has since been
-    // forgotten produces, and it should read like one.
-    throw new AppError(
-      'NOT_FOUND',
-      `This GitWarren does not know a host with id ${host as string}. ` +
-        'It may have been removed, or the link may have come from somewhere else.'
-    )
-  }
-
-  return hostPool.request(routeFor(row), method, params)
+  // `requireInstance` rather than a lookup here, because the editor launch in
+  // `main/ipc.ts` resolves the same id for a different purpose and a link to a
+  // machine that has since been forgotten should read the same either way.
+  return hostPool.request(routeFor(requireInstance(host as string)), method, params)
 }
 
 /**

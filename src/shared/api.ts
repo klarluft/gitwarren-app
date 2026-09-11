@@ -311,6 +311,22 @@ export interface GitWarrenApi {
   fs: {
     list(input: ListDirectoryInput): Promise<DirectoryListing>
   }
+  /**
+   * Facts about the install this api is pointed at.
+   *
+   * `system.appInfo` is the shell's answer about the install *behind this
+   * window or tab*, and stays that. This one is about whichever machine the
+   * screen is showing, which is what the Agent Access page needs when it is
+   * showing a host: the command to paste is `~/.gitwarren/bin/gitwarren-mcp`
+   * *over there*, and only that machine knows what `~` is.
+   *
+   * A fact and not a capability, which is the line `shared/web.ts` draws and
+   * the reason this may travel at all: it says where a launcher is, it does not
+   * start one.
+   */
+  app: {
+    mcp(): Promise<McpLaunchInfo>
+  }
   repositories: {
     list(): Promise<RepositoryWithGitState[]>
     get(input: GetRepositoryInput): Promise<RepositoryWithGitState>
@@ -505,8 +521,16 @@ export interface ShellApi {
   system: GitWarrenApi['system']
   updates: GitWarrenApi['updates']
   navigation: GitWarrenApi['navigation']
-  /** A picker, then straight into `attachments.ingest`. */
-  pickAttachment(): Promise<Attachment | null>
+  /**
+   * A picker, then straight into `attachments.ingest`.
+   *
+   * `host` is where the image has to end up - the machine that owns the review
+   * being commented on - and absent means this one. The picker itself is always
+   * this machine's, because the file being attached is a file the person can
+   * see; what travels is the bytes, which is the one shape that works for a
+   * screenshot with no path at all.
+   */
+  pickAttachment(host?: string): Promise<Attachment | null>
   /**
    * The `src` this shell can actually draw an attachment token from.
    *
@@ -516,15 +540,26 @@ export interface ShellApi {
    * the `<img>` and nowhere else: the window passes it through to its custom
    * scheme, and a tab rewrites it to a path on its own origin.
    *
+   * `host` is the instance id of the machine whose store holds the file, and
+   * absent means this one. It is not in the token for the same reason a review
+   * id is not: the body is text on one machine and has no business naming
+   * another. Both shells attach it as a query, and the local case is therefore
+   * the token unchanged - see `ATTACHMENT_HOST_PARAM`.
+   *
    * Synchronous, and it has to be: it is called during render, once per image.
    */
-  attachmentSrc(url: string): string
+  attachmentSrc(url: string, host?: string): string
   /**
    * Ask the owning host where the file is, then open it here.
    *
    * Two halves that must not be merged: *which* file on disk is review
    * knowledge and belongs to whoever owns the review, while launching an
    * application is a capability of the machine the person is sitting at.
+   *
+   * `input.host` says which machine the path is on, and it travels with the
+   * path rather than binding the shell to a host: this shell is the one the
+   * person is sitting at whatever the screen is showing, and what it needs to
+   * know is which filesystem the file it is about to open lives on.
    */
   openInEditor(input: OpenReviewFileInput): Promise<void>
 }

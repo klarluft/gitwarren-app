@@ -20,7 +20,7 @@
  * `WEB_PATHS.appInfo` below.
  */
 
-import { ATTACHMENT_FILE_NAME, attachmentName } from './attachments.js'
+import { ATTACHMENT_FILE_NAME, ATTACHMENT_HOST_PARAM, attachmentName } from './attachments.js'
 
 /** Everything the browser shell talks to, under one reserved prefix. */
 export const WEB_PREFIX = '/gitwarren'
@@ -76,10 +76,18 @@ export const WEB_PATHS = {
  * Anything that is not one of our tokens comes back unchanged, so the caller's
  * own decision about what to do with a foreign URL - render it as a link, per
  * `components/markdown.tsx` - is still the caller's to make.
+ *
+ * Since M4.4 it also carries which machine's store to read from, because a tab
+ * can be looking at a review on another computer. Absent means this one.
  */
-export function webAttachmentSrc(url: string): string {
+export function webAttachmentSrc(url: string, host?: string): string {
   const name = attachmentName(url)
-  return name === null ? url : `${WEB_PATHS.attachments}${name}`
+  if (name === null) return url
+  const path = `${WEB_PATHS.attachments}${name}`
+  // The host goes on as a query, exactly as it does on the custom scheme, so
+  // that one rule in `shared/attachments.ts` describes both shells. See
+  // `ATTACHMENT_HOST_PARAM` for why it is not in the token itself.
+  return host === undefined ? path : `${path}?${ATTACHMENT_HOST_PARAM}=${encodeURIComponent(host)}`
 }
 
 /**

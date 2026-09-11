@@ -134,6 +134,13 @@ function buildApi(host: string | undefined): GitWarrenApi {
     fs: {
       list: (input) => ask('fs.list', input, host)
     },
+    app: {
+      // Not memoised the way `system.appInfo` is. That one is about the install
+      // behind this window and cannot change while it is open; this one is about
+      // whichever machine a route names, and a host whose daemon has just been
+      // installed has a launcher it did not have a minute ago.
+      mcp: () => ask('app.mcp', undefined, host)
+    },
     repositories: {
       list: () => ask('repositories.list', undefined, host),
       get: (input) => ask('repositories.get', input, host),
@@ -156,11 +163,12 @@ function buildApi(host: string | undefined): GitWarrenApi {
       reviewedFiles: (input) => ask('reviews.reviewedFiles', input, host),
       setFileReviewed: (input) => ask('reviews.setFileReviewed', input, host),
       // Where the file is comes from whoever owns the review; opening it is the
-      // shell's job. The two halves are joined in the main process - which is
-      // why this one is still local-only, and why the screens hide it on a
-      // remote review rather than opening the wrong machine's file. M4.4 gives
-      // it `(host, path, line)`.
-      openInEditor: (input) => shell.openInEditor(input)
+      // shell's job, on the machine the person is sitting at. The two halves
+      // are joined in the main process, which since M4.4 is handed the host so
+      // it can ask the right machine for the path and then tell a local editor
+      // that the path is over there. The host travels in the input rather than
+      // binding the shell, because the shell is not the thing that is remote.
+      openInEditor: (input) => shell.openInEditor({ ...input, ...(host === undefined ? {} : { host }) })
     },
     comments: {
       list: (input) => ask('comments.list', input, host),
@@ -172,8 +180,12 @@ function buildApi(host: string | undefined): GitWarrenApi {
     },
     attachments: {
       ingest: (input) => ask('attachments.ingest', input, host),
-      pick: () => shell.pickAttachment(),
-      src: (url) => shell.attachmentSrc(url)
+      // The picker is the shell's and the bytes are the store's, and since
+      // M4.4 those can be two different machines: a file chosen here is
+      // ingested wherever the review lives. That is why this one is bound like
+      // a read rather than left with the rest of the shell.
+      pick: () => shell.pickAttachment(host),
+      src: (url) => shell.attachmentSrc(url, host)
     },
     system: {
       pickDirectory: () => shell.system.pickDirectory(),
@@ -291,6 +303,16 @@ export const CACHE_KEYS = {
    * are memoised in `api` above and happen at most once per window.
    */
   appInfo: 'app-info',
+  /**
+   * How an agent reaches one machine's MCP server.
+   *
+   * Scoped, unlike `appInfo`, and that is the difference between the two: this
+   * is a fact about the machine a route names, and the Agent Access page for
+   * `pc-wsl` must never be handed this Mac's launcher path. It is the whole
+   * failure the page exists to avoid - an instruction that is confidently the
+   * wrong one.
+   */
+  agentMcp: (host?: string) => scoped('agent-mcp', host),
   editors: 'editors',
   /**
    * Whether GitWarren starts with the machine. Not one of the two above: it can

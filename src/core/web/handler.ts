@@ -52,6 +52,7 @@ import { isAllowedHost, isAllowedOrigin, loopbackAuthority } from './origin.js'
 import { LINK_SERVER_PORT } from '../../shared/link-port.js'
 import { serveStatic } from './static.js'
 import { isWebToken } from './token.js'
+import { ATTACHMENT_HOST_PARAM } from '../../shared/attachments.js'
 import { SESSION_COOKIE, TOKEN_PARAM, WEB_PATHS, WEB_PREFIX } from '../../shared/web.js'
 import type { AppInfo } from '../../shared/api.js'
 
@@ -237,7 +238,14 @@ export function createWebHandler({
       // Images in comment bodies. Behind the same cookie as everything else -
       // an attachment is review content, and a port that handed screenshots out
       // to whoever asked would be a hole the token exists to close.
-      if (serveAttachment(pathname, request.method ?? 'GET', response).served) return true
+      //
+      // The host comes off the query rather than the path, so the pathname is
+      // still `<sha>.<ext>` and the whitelist is still the whole of what
+      // reaches a filesystem. See `ATTACHMENT_HOST_PARAM`.
+      const attachmentHost = url.searchParams.get(ATTACHMENT_HOST_PARAM) ?? undefined
+      if (serveAttachment(pathname, request.method ?? 'GET', response, attachmentHost).served) {
+        return true
+      }
 
       // The socket path only exists as an upgrade. A plain GET to it is a
       // mistake worth naming rather than a 404 among many.

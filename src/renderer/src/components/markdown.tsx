@@ -43,7 +43,7 @@
 import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { ATTACHMENT_URL_PREFIX } from '@shared/attachments'
-import { api } from '@/lib/api'
+import { useApi } from '@/lib/host-scope'
 import { cn } from '@/lib/utils'
 
 /**
@@ -190,17 +190,7 @@ const components: Components = {
       )
     }
     return (
-      <img
-        // The one place a stored token becomes something fetchable, and the
-        // only place that differs between the two shells: the window has a
-        // custom scheme registered and passes it through, a tab rewrites it to
-        // a path on its own origin. See `ShellApi.attachmentSrc`.
-        src={api.attachments.src(url)}
-        alt={alt ?? ''}
-        title={title}
-        className={cn('my-2 max-w-full rounded-md border border-border', className)}
-        {...props}
-      />
+      <AttachmentImage url={url} alt={alt} title={title} className={className} {...props} />
     )
   },
 
@@ -223,6 +213,41 @@ const components: Components = {
   ),
   td: ({ node: _node, className, ...props }) => (
     <td className={cn('border border-border px-2 py-1 align-top', className)} {...props} />
+  )
+}
+
+/**
+ * One attachment, drawn from the store that holds it.
+ *
+ * A component of its own rather than an expression inside the `img` override,
+ * because it needs `useApi()` and that is a hook. The hook is the point: the
+ * api it hands back is bound to the machine this screen is about, so the `src`
+ * is asked for on behalf of the right store without the body, the comment card
+ * or anything between them learning that hosts exist. Before M4.4 this read the
+ * module-scope `api`, which is always this install - which is precisely why an
+ * image on a remote review rendered as a broken one.
+ */
+function AttachmentImage({
+  url,
+  className,
+  ...props
+}: { url: string; className?: string } & Omit<
+  React.ImgHTMLAttributes<HTMLImageElement>,
+  'src' | 'className'
+>) {
+  const api = useApi()
+  return (
+    <img
+      // The one place a stored token becomes something fetchable, and the only
+      // place that differs between the two shells: the window has a custom
+      // scheme registered and passes it through, a tab rewrites it to a path on
+      // its own origin. Both attach the host the same way. See
+      // `ShellApi.attachmentSrc`.
+      src={api.attachments.src(url)}
+      className={cn('my-2 max-w-full rounded-md border border-border', className)}
+      {...props}
+      alt={props.alt ?? ''}
+    />
   )
 }
 

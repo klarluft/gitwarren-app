@@ -11,6 +11,7 @@
  * UI and the agent surface from drifting apart.
  */
 import { z } from 'zod'
+import { ATTACHMENT_FILE_NAME } from './attachments.js'
 import { DIGEST_MAX_LENGTH } from './diff-digest.js'
 import type { DiffChanges, DiffLine } from './git.js'
 
@@ -385,7 +386,20 @@ export const reviewImageInputSchema = reviewFileInputSchema.extend({
  */
 export const openReviewFileInputSchema = reviewFileInputSchema.extend({
   line: z.number().int().min(1).optional().default(1),
-  editorId: z.string().max(64).optional()
+  editorId: z.string().max(64).optional(),
+  /**
+   * Which machine the review - and therefore the file - is on. Absent means
+   * this one.
+   *
+   * The one place in this file a host appears in params rather than on the
+   * envelope, and it is not an exception to `RpcRequest.host` but a consequence
+   * of it: this input never goes on a wire. It is a shell channel, answered by
+   * the main process of the machine with the screen on it, which has to do two
+   * different things with the host - ask *that* machine for the path, and then
+   * tell a local editor that the path is over there. `ssh-remote+<target>` is
+   * part of the URL it opens, so the host is part of what is being opened.
+   */
+  host: z.string().max(200).optional()
 })
 
 export const repositoryRefsInputSchema = z.object({ id: repositoryIdSchema })
@@ -680,8 +694,59 @@ export const agentLabelSchema = z
   .min(1, 'A label cannot be empty.')
   .max(MAX_AGENT_LABEL_LENGTH, 'That label is too long.')
 
+/**
+ * Which image to read out of the store, by the name a body already names it by.
+ *
+ * A name rather than a sha and an extension, because that is what the callers
+ * have: both shells are serving a URL whose last segment is `<sha>.<ext>`, and
+ * splitting it only to join it again is where a dot goes missing. The pattern
+ * is the security boundary and is checked here as well as by whoever is doing
+ * the serving - see `ATTACHMENT_FILE_NAME`, and note that this is a method a
+ * comment body written by an agent can reach through a rendered image.
+ */
+export const readAttachmentInputSchema = z.object({
+  name: z.string().regex(ATTACHMENT_FILE_NAME, 'That is not an attachment name.')
+})
+
+/**
+ * An image, small enough to have crossed a wire.
+ *
+ * base64 rather than bytes, because this answer is `JSON.stringify`d onto an
+ * ndjson frame by whoever serves it - the same encoding `attachments.ingest`
+ * takes on the way in, going the other way. It is a third larger than the file,
+ * and that is the price of the store being on a different computer: the ingest
+ * limit is what bounds it, and the browser cache is what stops it being paid
+ * twice, since the name is the hash of the bytes and can therefore be cached
+ * for ever.
+ *
+ * `mimeType` is the store's own conclusion from sniffing the bytes at ingest,
+ * never a claim made by a filename - see `core/services/attachments.ts`.
+ */
+export const attachmentBytesSchema = z.object({
+  name: z.string(),
+  mimeType: z.string(),
+  byteSize: z.number().int(),
+  /** The file itself, base64-encoded. */
+  base64: z.string()
+})
+
 export type AnchorSnapshot = z.infer<typeof anchorSnapshotSchema>
 export type Attachment = z.infer<typeof attachmentSchema>
+/**
+ * Which machine a picked image is being attached to. Absent means this one.
+ *
+ * A shell channel rather than a method, for the same reason the picker itself
+ * is: it opens a window. What crosses the wire afterwards is `attachments.ingest`
+ * with bytes on it, because a path picked here is a name only this machine
+ * knows - see the note on `pickAttachment` in `shared/api.ts`.
+ */
+export const pickAttachmentInputSchema = z.object({
+  host: z.string().max(200).optional()
+})
+
+export type ReadAttachmentInput = z.input<typeof readAttachmentInputSchema>
+export type AttachmentBytes = z.infer<typeof attachmentBytesSchema>
+export type PickAttachmentInput = z.input<typeof pickAttachmentInputSchema>
 export type CommentAttachment = z.infer<typeof commentAttachmentSchema>
 export type CommentAuthorData = z.infer<typeof commentAuthorSchema>
 export type Comment = z.infer<typeof commentSchema>

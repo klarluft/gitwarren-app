@@ -15,7 +15,7 @@
  */
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { attachmentUrl } from '../attachments.js'
+import { attachmentSrcOnHost, attachmentUrl } from '../attachments.js'
 import { attachmentNameFromWebPath, webAttachmentSrc, WEB_PATHS } from '../web.js'
 
 const SHA = 'a'.repeat(64)
@@ -65,4 +65,40 @@ test('a path under the prefix that is not a legitimate name is not a name', () =
 test('a path outside the prefix is not an attachment request at all', () => {
   assert.equal(attachmentNameFromWebPath(`/attachments/${SHA}.png`), null)
   assert.equal(attachmentNameFromWebPath(WEB_PATHS.appInfo), null)
+})
+
+/* -------------------------------------------------------------------------- */
+/* Which machine's store                                                      */
+/* -------------------------------------------------------------------------- */
+
+test('a local image is the same string it was before hosts existed', () => {
+  // The case that must not change. Every comment ever written names its images
+  // this way, and the local `src` is still exactly the token in both shells.
+  assert.equal(attachmentSrcOnHost(attachmentUrl(SHA, 'png'), undefined), attachmentUrl(SHA, 'png'))
+  assert.equal(webAttachmentSrc(attachmentUrl(SHA, 'png')), `${WEB_PATHS.attachments}${SHA}.png`)
+})
+
+test('a remote image names the machine in the query, never in the token', () => {
+  const token = attachmentUrl(SHA, 'png')
+
+  // The pathname is what a server resolves against a filesystem, and it is
+  // untouched - which is why the whitelist is still the whole of the story.
+  assert.equal(attachmentSrcOnHost(token, 'inst-abc'), `${token}?host=inst-abc`)
+  assert.equal(
+    webAttachmentSrc(token, 'inst-abc'),
+    `${WEB_PATHS.attachments}${SHA}.png?host=inst-abc`
+  )
+  assert.equal(attachmentNameFromWebPath(`${WEB_PATHS.attachments}${SHA}.png`), `${SHA}.png`)
+})
+
+test('an instance id is escaped on its way into the query', () => {
+  const withHost = attachmentSrcOnHost(attachmentUrl(SHA, 'png'), 'a&b=c')
+
+  assert.equal(new URL(withHost).searchParams.get('host'), 'a&b=c')
+})
+
+test('a URL that is not one of our tokens gains nothing', () => {
+  // A foreign image URL renders as a link rather than an `<img>`, and appending
+  // a host to it would be writing into somebody else's URL.
+  assert.equal(attachmentSrcOnHost('https://example.com/a.png', 'inst-abc'), 'https://example.com/a.png')
 })

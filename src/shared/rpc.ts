@@ -19,11 +19,13 @@
  * and a second opinion about what a valid review is.
  */
 import { AppError, deserializeAppError, type SerializedAppError } from './errors.js'
+import type { McpLaunchInfo } from './api.js'
 import type { FileContent, FileImage, RepositoryRefs, ReviewCommits, ReviewDiff } from './git.js'
 import type {
   AddHostInput,
   AddRepositoryInput,
   Attachment,
+  AttachmentBytes,
   GetHostInput,
   HostWithState,
   InstallOnHostInput,
@@ -44,6 +46,7 @@ import type {
   RemoveCommentInput,
   RemoveRepositoryInput,
   RemoveReviewInput,
+  ReadAttachmentInput,
   ReplyToThreadInput,
   Repository,
   RepositoryRefsInput,
@@ -185,6 +188,22 @@ export interface RpcMethods {
   'app.instance': { params: void; result: HostIdentity }
 
   /**
+   * How an agent starts *this* install's MCP server.
+   *
+   * A fact about the machine, which is the line that decides whether something
+   * may travel at all - see the note on `appInfo` in `shared/web.ts`. It says
+   * where a launcher is; it does not start one, and nothing here opens a window
+   * or reads a clipboard.
+   *
+   * It exists because the Agent Access page is per host: `#/h/<id>/agent` has to
+   * print `~/.gitwarren/bin/gitwarren-mcp` as that machine resolves it, since a
+   * Mac has no way to know what `~` is on `pc-wsl`. `gitwarren agent-setup` on
+   * the host prints the same command from the same function, which is what
+   * `shared/agent-setup.ts` exists to guarantee.
+   */
+  'app.mcp': { params: void; result: McpLaunchInfo }
+
+  /**
    * Managing the list of *other* machines this install knows about.
    *
    * In the map because both shells need them - the Hosts screen exists in a
@@ -272,6 +291,17 @@ export interface RpcMethods {
   'comments.setResolved': { params: SetThreadResolvedInput; result: CommentThread }
 
   'attachments.ingest': { params: AttachmentIngestParams; result: Attachment }
+  /**
+   * The bytes behind a token, from the store that holds them.
+   *
+   * A method rather than a file read because of who has to ask. An image lives
+   * in the store of the machine that owns the review, and both shells serve it
+   * off their own disk - so until M4.4 an image on a remote review was a broken
+   * one, resolved against a store that has never heard of that sha. Making it a
+   * method puts the question through the router, and `(host, name)` is then
+   * answered by the machine the name means something on.
+   */
+  'attachments.read': { params: ReadAttachmentInput; result: AttachmentBytes }
 }
 
 export type RpcMethod = keyof RpcMethods
@@ -340,6 +370,7 @@ export interface AttachmentIngestParams {
  */
 export const READ_METHODS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
   'app.instance',
+  'app.mcp',
   'hosts.list',
   'hosts.get',
   // `hosts.probe` is deliberately absent. It reads in the sense that it changes
@@ -359,7 +390,12 @@ export const READ_METHODS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
   'reviews.image',
   'reviews.filePath',
   'reviews.reviewedFiles',
-  'comments.list'
+  'comments.list',
+  // Two `<img>` elements on one screen naming the same token is ordinary - a
+  // screenshot quoted in a reply, the same picture in a description and a
+  // comment - and the answer is a few hundred kilobytes over a pipe. This is
+  // the entry in this list that most earns its place.
+  'attachments.read'
 ])
 
 export function isReadMethod(method: string): boolean {

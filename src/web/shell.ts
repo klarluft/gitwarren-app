@@ -34,7 +34,7 @@
  * backstop for a caller that did not look.
  */
 import { AppError } from '@shared/errors'
-import { editorLink, linkableEditors } from '@shared/editors'
+import { editorLink, editorTargetFor, linkableEditors } from '@shared/editors'
 import { WEB_PATHS, webAttachmentSrc } from '@shared/web'
 import type { AppInfo, EditorList, ShellApi, UpdateStatus } from '@shared/api'
 import type { Attachment, OpenReviewFileInput } from '@shared/schemas'
@@ -55,6 +55,31 @@ function unsupported<T>(what: string, instead: string): Promise<T> {
   return Promise.reject(
     new AppError('FORBIDDEN', `${what} is not available in a browser tab. ${instead}`)
   )
+}
+
+/**
+ * The row for one instance id, out of a list this tab has just asked for.
+ *
+ * A list rather than a `hosts.get`, because `hosts.get` takes the local numeric
+ * id and what a route carries is the instance id - the only name that survives
+ * a machine being renamed or readdressed. It is one local SQLite read behind
+ * the socket and happens on a button press, so there is nothing to save by
+ * caching it and something to lose: the target is the field someone edits when
+ * their editor and their SSH config disagree.
+ */
+function requireHostRow(
+  list: { instanceId: string | null; kind: string; target: string; editorTarget: string | null }[],
+  instanceId: string
+): { kind: string; target: string; editorTarget: string | null } {
+  const row = list.find((candidate) => candidate.instanceId === instanceId)
+  if (!row) {
+    throw new AppError(
+      'NOT_FOUND',
+      `This GitWarren does not know a host with id ${instanceId}. ` +
+        'It may have been removed, or the link may have come from somewhere else.'
+    )
+  }
+  return row
 }
 
 async function readAppInfo(): Promise<AppInfo> {
@@ -151,14 +176,18 @@ export function createWebShell(carrier: Carrier): ShellApi {
    *
    * `reviews.filePath` is a read on the dispatcher - it answers *which* file,
    * which is review knowledge - and the navigation is this shell's own. The
-   * path is an absolute path on the machine the daemon is on, which today is
-   * always the machine the browser is on too: the handler binds loopback and
-   * checks `Host`, so there is no way to be looking at this page from
-   * elsewhere. When M6 makes that untrue, this is one of the places that has to
-   * learn the difference, and the editor URL grows a remote authority per S4.
+   * path is an absolute path on the machine that owns the review, which since
+   * M4.3 may not be the machine the daemon is on; `input.host` is which, and
+   * the request carries it so that the *path* comes from there.
+   *
+   * The URL then needs the other half, and it is a different question: the
+   * browser is on the machine the person is sitting at, the loopback handler
+   * having made sure of that, so the editor it hands the URL to is a local one
+   * being told where the file is. That is the remote authority from S4, and it
+   * comes from the host row rather than from the path.
    */
   const openInEditor = async (input: OpenReviewFileInput): Promise<void> => {
-    const { id, path, changes, line, editorId } = input
+    const { id, path, changes, line, editorId, host } = input
     const editor = editorLink(editorId) ?? editorLink(editorChoices().defaultId ?? undefined)
     if (!editor?.url) {
       return unsupported(
@@ -166,8 +195,22 @@ export function createWebShell(carrier: Carrier): ShellApi {
         'No editor with a URL scheme was chosen for this tab.'
       )
     }
+    if (host !== undefined && !editor.remoteUrl) {
+      return unsupported(
+        'Opening a file on another machine',
+        `${editor.label} has no way to open a file it cannot see. VS Code, Cursor and Windsurf do.`
+      )
+    }
 
-    const absolute = await carrier.request('reviews.filePath', { id, path, changes })
+    const absolute = await carrier.request('reviews.filePath', { id, path, changes }, host)
+
+    // A host's own list of hosts is answered by whoever is asked, so this is
+    // this install's row for that machine - which is the right one: it is the
+    // row the person filled in, on the computer their editor is on.
+    const remote =
+      host === undefined
+        ? undefined
+        : editorTargetFor(requireHostRow(await carrier.request('hosts.list', undefined), host))
 
     // `location.href` rather than `window.open`: a scheme the browser hands to
     // the OS does not open a document, so a popup would be an empty tab left
@@ -177,7 +220,12 @@ export function createWebShell(carrier: Carrier): ShellApi {
     // could invent.
     // `line` is optional on the way in and defaulted by the schema on the way
     // through the dispatcher, which this call does not go through.
-    window.location.href = editor.url(absolute, line ?? 1)
+    window.location.href =
+      remote === undefined
+        ? editor.url(absolute, line ?? 1)
+        : // Non-null because the guard above refused an editor without one, and
+          // nothing between here and there can have changed which editor it is.
+          editor.remoteUrl!(remote, absolute, line ?? 1)
   }
 
   /**
@@ -189,13 +237,17 @@ export function createWebShell(carrier: Carrier): ShellApi {
    * tab knows that the Electron picker does not is that it never learns a path,
    * which is fine: a path was never what got stored.
    */
-  const pickAttachment = async (): Promise<Attachment | null> => {
+  const pickAttachment = async (host?: string): Promise<Attachment | null> => {
     const file = await pickImageFile()
     if (file === null) return null
-    return await carrier.request('attachments.ingest', {
-      bytes: await file.arrayBuffer(),
-      originalName: file.name
-    })
+    return await carrier.request(
+      'attachments.ingest',
+      { bytes: await file.arrayBuffer(), originalName: file.name },
+      // The store that has to end up holding it is the one that owns the
+      // review. This tab has bytes and no path, which is exactly the shape that
+      // travels, so nothing else about the call changes.
+      host
+    )
   }
 
   return {
