@@ -3124,7 +3124,7 @@ Before them, one spike that had to happen first, because it decides whether the
    the app, reaching a machine that listens rather than one it spawns. *(done — see below.)*
 5. **Events across a host, and `host.state`.** `RpcEvent` on a wire in the one
    direction nothing has exercised, and the pool's `onStateChange` finally
-   rendered — which is what greys a machine nobody is looking at.
+   rendered — which is what greys a machine nobody is looking at. *(done — see below.)*
 6. **Discovery.** Peers from `tailscale status --json`, proposed rather than
    added.
 7. **Links across installs, and the words.** What a `gitwarren://<other-id>/…`
@@ -3688,6 +3688,84 @@ command the tool had already printed. Writes now keep their failure text and
 Worth noticing that this is invisible on the machine most likely to be
 *developed* on and waiting on the machine most likely to be a *host*. It is the
 same shape as M5.0's `ci.yml` finding one layer up.
+
+**M6.5, done on the Mac against `pc-wsl`, 11 September.** The milestone's verify
+line, minus the phone, and the slice where everything built so far turns out to
+be one thing.
+
+**The stdio server sends its first unsolicited frame, and it cost one line.**
+`subscribeToEvents(write)` in `core/rpc/stdio.ts`, and the reason it is one line
+is a decision made at M1: an `RpcEvent` has no `id`, and the reader on the other
+end has been asking `isRpcEvent` about every frame since M4 without one ever
+being true. The comment there promised that "the message simply arrives". It
+does. This is the direction nothing had exercised, and the protocol was already
+shaped for it.
+
+**The pool is the only layer that can say which machine an event is about, and
+that is why the tagging lives there.** A daemon announcing `comments.changed`
+means "on me" - it cannot know what instance id this install files it under,
+because it may be reached by two GitWarrens at once, each with its own row. The
+association is the *connection the message came down*, and connections are what
+the pool holds. So `routeFor` carries the instance id now, and the pool stamps
+it on the way through. An untagged event would reach the renderer meaning "this
+install" and refresh the wrong machine's screens while looking entirely healthy,
+which is the failure `renderer/lib/event-scope.ts` has a test for from the other
+end.
+
+**`onStateChange` is rendered at last, and the four-milestone delay is the point
+rather than an oversight.** It was written at M4.1 for a banner; M4.5 declined
+to use it and wrote down why; M5 proved the banner carrier-agnostic without it.
+None of that is undone here. M4.5's banner is still raised by request
+*outcomes*, in `renderer/lib/host-reachability.ts`, and this event does not
+touch it.
+
+What is new is the case none of them could reach. For most of M4 the pool only
+learned anything by *connecting*, so a machine nobody was asking about was a
+machine nothing could say anything about - the hook had nothing to report, not
+just nowhere to report it. `core/hosts/websocket.ts` is what changes that: a
+listening host holds an open socket, so a machine that goes away is an event on
+this side with no request outstanding and no screen open on it.
+
+The bound is recorded rather than hidden. The pool still hangs up after
+`IDLE_TIMEOUT_MS`, so `host.state` can only speak for a host something has asked
+about in the last ten minutes. An always-open socket to every host would be a
+connection to every machine on the list, which is exactly what
+`core/hosts/pool.ts` exists to avoid and what M4.3 refused to do for a home
+screen.
+
+**Verified end to end, four hops, all of them real.** The agent's MCP process on
+`pc-wsl` pokes that machine's own daemon over its loopback port; the daemon
+emits on its own bus; `serveWebSocket` writes an `RpcEvent` down the socket the
+Mac is holding; the Mac's pool stamps it with `4e0b0adb…` and puts it on the
+Mac's bus, where the window is listening.
+
+A comment written by an agent on the PC reached the Mac's carrier in **395 ms**,
+tagged with the PC's instance id, carrying `data: null`. With the review open at
+`#/h/4e0b0adb…/reviews/2/conversation`, the next one **appeared on the Mac with
+nobody touching the window**.
+
+Then the other half. Back on the home screen, with nothing asking that machine
+anything, the daemon on `pc-wsl` was stopped: `host.state` arrived on the Mac
+**216 ms later**, and the host list said *The connection to
+pc-wsl.tail688c0c.ts.net:41427 was lost.* Nothing failed, because nothing had
+asked - which is the whole of what this slice adds, and is why the verify line
+says "turn the PC off" rather than "open a review and turn the PC off".
+
+Worth separating the two shapes of going away, because the number above is only
+one of them. Stopping a process closes its socket, and TCP says so immediately -
+hence 216 ms. A machine that is unplugged or frozen says nothing at all, and is
+noticed by `LIVENESS_TIMEOUT_MS` instead: up to thirty seconds. Both are
+"within seconds"; only the first is within a quarter of one, and a reader
+deserves to know which they are looking at.
+
+**And one thing about the harness rather than the app.** The first attempt drove
+the PC's MCP server by piping a `printf` through `ssh`, and it silently wrote
+nothing. The JSON is full of quotes and braces, and every layer between the two
+machines wanted its own say about them - a template literal, Node's argv, the
+local shell, `ssh`'s own concatenation of its arguments, and the remote *zsh*
+that M4.2 found is the login shell on that box. A script file crosses once and
+is read by `sh`. It is the same lesson M5.1 learned about `wsl.exe --`, in a
+place where it cost a confusing half hour rather than a bug.
 
 ## Agent setup
 

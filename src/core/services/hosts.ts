@@ -78,7 +78,12 @@ function withState(row: HostRow): HostWithState {
 }
 
 export function routeFor(row: HostRow): HostRoute {
-  return { id: row.id, kind: row.kind, target: row.target }
+  // The instance id rides along since M6.5, for one purpose: an event arriving
+  // from this host has to be tagged with the machine it is about, and the pool
+  // - which is where the event lands - holds connections rather than rows. Null
+  // until the machine has said who it is, which is also exactly the window in
+  // which it cannot have pushed anything.
+  return { id: row.id, kind: row.kind, target: row.target, instanceId: row.instanceId }
 }
 
 /**

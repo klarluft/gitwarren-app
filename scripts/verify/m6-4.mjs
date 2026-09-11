@@ -65,6 +65,50 @@ if (self) {
 for (const existing of await ask('hosts.list')) {
   if (existing.kind === 'websocket') await ask('hosts.remove', { id: existing.id })
 }
+
+/**
+ * One machine is one row, even when two carriers reach it.
+ *
+ * `pc-wsl` is already an `ssh` row on this Mac from M4, and it is the same box
+ * as the tailnet name - so adding it here is the first thing a real fleet does,
+ * and it must be refused. M5.2 wrote down why it is refused rather than merged:
+ * `#/h/<instance>/…` routes by instance id, and two rows bearing one id make
+ * every remote route ambiguous, with a repository list that depends on which
+ * row won.
+ *
+ * Nothing can see the collision until the machine says who it is, so the
+ * refusal happens on *connect* rather than in the form - which means the socket
+ * really did open and the daemon really did answer before anything was
+ * rejected.
+ */
+const clashing = (await ask('hosts.list')).filter(
+  (existing) => existing.kind !== 'websocket' && existing.instanceId !== null
+)
+if (clashing.length > 0 && !self) {
+  console.log('\n== one machine is one row, whichever carrier reaches it ==')
+  const clash = await ask('hosts.add', { target, kind: 'websocket' })
+  let collision = null
+  try {
+    await ask('hosts.probe', { id: clash.id })
+  } catch (error) {
+    collision = String(error)
+  }
+  report(
+    'adding a machine that is already here under another carrier is refused',
+    collision !== null && /already in the list/.test(collision),
+    collision?.replace(/^Error: /, '').slice(0, 200) ?? 'it was allowed'
+  )
+  report(
+    'and the message names the row it collided with, not just "duplicate"',
+    collision !== null && clashing.some((row) => collision.includes(row.target)),
+    clashing.map((row) => row.target).join(', ')
+  )
+  await ask('hosts.remove', { id: clash.id })
+  // Out of the way, so the rest of this run is about the carrier rather than
+  // about the collision. Two rows for one machine is the thing being refused;
+  // one row reached a new way is the thing being tested.
+  for (const row of clashing) await ask('hosts.remove', { id: row.id })
+}
 const host = await ask('hosts.add', { target, kind: 'websocket' })
 report('a websocket host is added', host.kind === 'websocket', `id=${host.id}, label=${host.label}`)
 report(

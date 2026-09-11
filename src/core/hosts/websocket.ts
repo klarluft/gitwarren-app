@@ -90,6 +90,14 @@ export interface WebSocketHostOptions {
    * on why both are accepted and what the second becomes.
    */
   target: string
+  /**
+   * A push from the far end. See `core/hosts/pool.ts` for what is done with it.
+   *
+   * Untagged when it arrives: the daemon is saying "on me" and does not know
+   * what instance id this install files it under. The pool adds that, being the
+   * side that knows.
+   */
+  onEvent?: (event: RpcEvent) => void
   onClose?: (error: AppError) => void
   /** Swappable for tests, which have no tailnet. */
   open?: (url: string, options: { headers: Record<string, string> }) => WebSocket
@@ -197,6 +205,7 @@ function describeSocketError(error: NodeJS.ErrnoException, target: string): stri
 export function connectOverWebSocket({
   target,
   onClose,
+  onEvent,
   open = (url, options) => new WebSocket(url, options)
 }: WebSocketHostOptions): HostConnection {
   const origin = normaliseTarget(target)
@@ -291,12 +300,7 @@ export function connectOverWebSocket({
   const client = createStdioClient({
     input: incoming,
     output: outgoing,
-    onEvent: (event: RpcEvent) => {
-      // Nothing yet. M6.5 is where an event from a host reaches a screen; the
-      // hook is named here so that slice is a line in `pool.ts` rather than a
-      // change to this file.
-      void event
-    },
+    onEvent,
     onClose: (error) => {
       resolveSettled()
       onClose?.(error)

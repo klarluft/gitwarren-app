@@ -35,9 +35,10 @@
  * protocol, which is the failure this whole arrangement exists to prevent.
  */
 import { handleRoutedRequest } from '../hosts/router.js'
+import { subscribeToEvents } from '../events.js'
 import { MAX_FRAME_BYTES, readFrames } from './ndjson.js'
 import { AppError } from '../../shared/errors.js'
-import type { RpcRequest, RpcResponse } from '../../shared/rpc.js'
+import type { RpcEvent, RpcRequest, RpcResponse } from '../../shared/rpc.js'
 
 /**
  * The id used when a frame is so malformed there is no id to answer under.
@@ -74,12 +75,34 @@ function asRequest(value: unknown): RpcRequest | null {
  * cope with out-of-order responses is a caller that is not using the protocol.
  */
 export function serveStdio({ input, output, onEnd }: StdioCarrierOptions): void {
-  const write = (message: RpcResponse): void => {
+  const write = (message: RpcResponse | RpcEvent): void => {
     // One `write` per message rather than a stringify into a shared buffer:
     // Node serialises writes on a stream, so two responses finishing in the
     // same tick cannot interleave halfway through a line.
     output.write(`${JSON.stringify(message)}\n`)
   }
+
+  /**
+   * Events out, on the same stream as the answers.
+   *
+   * The first thing this protocol has ever sent that nobody asked for, and it
+   * costs one subscription because the shape was decided at M1: an `RpcEvent`
+   * has no `id`, and the reader on the other end has asked `isRpcEvent` about
+   * every frame since M4 without one ever being true. `stdio-client.ts` said
+   * the shape was here so that "the message simply arrives", and this is the
+   * line that tests the claim.
+   *
+   * No `host` is stamped. This daemon is saying "on me" and has no idea what
+   * instance id the listener files it under - it may be spawned by two
+   * GitWarrens at once, each with its own row. The receiving pool is the side
+   * that knows, and `core/hosts/pool.ts` is where it is added.
+   *
+   * Nothing is unsubscribed on `onEnd`, deliberately: a `serve --stdio` process
+   * exists for exactly one pipe and exits when it closes, so the subscription
+   * and the process have the same lifetime. A daemon that outlived its pipe
+   * would be a different design with a different bug.
+   */
+  subscribeToEvents(write)
 
   const refuse = (id: number, message: string): void => {
     write({ id, error: new AppError('INVALID_INPUT', message).toSerialized() })

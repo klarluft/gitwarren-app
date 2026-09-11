@@ -80,6 +80,7 @@ import {
   type HostRunResult
 } from './carrier.js'
 import { AppError } from '../../shared/errors.js'
+import type { RpcEvent } from '../../shared/rpc.js'
 
 export { REMOTE_LAUNCHER }
 
@@ -113,6 +114,14 @@ export interface SpawnSshOptions {
   target: string
   /** Swappable so the tests can run a fake host without an `ssh` on the box. */
   spawnProcess?: typeof spawn
+  /**
+   * A push from the far end. See `core/hosts/pool.ts` for what is done with it.
+   *
+   * Untagged when it arrives: the daemon is saying "on me" and does not know
+   * what instance id this install files it under. The pool adds that, being the
+   * side that knows.
+   */
+  onEvent?: (event: RpcEvent) => void
   onClose?: (error: AppError) => void
 }
 
@@ -129,7 +138,8 @@ export interface SpawnSshOptions {
 export function connectOverSsh({
   target,
   spawnProcess = spawn,
-  onClose
+  onClose,
+  onEvent
 }: SpawnSshOptions): HostConnection {
   let child: ChildProcessWithoutNullStreams
   try {
@@ -163,6 +173,7 @@ export function connectOverSsh({
   const client: StdioClient = createStdioClient({
     input: child.stdout,
     output: child.stdin,
+    onEvent,
     onClose: (error) => {
       closeError = error
       onClose?.(error)
