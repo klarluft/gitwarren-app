@@ -93,9 +93,21 @@ before(async () => {
     staticRoot,
     token: TOKEN,
     appInfo: () => APP_INFO,
-    port
+    port,
+    // Read per request by the handler, exactly as the real one reads
+    // `tailnetGate()`, so a test can turn exposure on and off between cases the
+    // way the settings switch does at runtime.
+    tailnet: () => exposed
   })
 })
+
+/** The tailnet gate, when these tests have turned it on. */
+let exposed: { authority: string; login: string; scheme: 'http' | 'https' } | null = null
+
+const OWNER = 'michal-wrzosek@github'
+function tailnetAuthority(): string {
+  return `pc-wsl.tail688c0c.ts.net:${port}`
+}
 
 after(async () => {
   handler.close()
@@ -147,6 +159,26 @@ async function post(
  * that exists because a *browser* is what sends the header - hence the raw
  * client for this case.
  */
+function rawPost(path: string, headers: Record<string, string>): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const request = httpRequest(
+      {
+        host: '127.0.0.1',
+        port,
+        path,
+        method: 'POST',
+        headers: { ...headers, 'content-type': 'application/json', 'content-length': '2' }
+      },
+      (response) => {
+        response.resume()
+        resolve(response.statusCode ?? 0)
+      }
+    )
+    request.on('error', reject)
+    request.end('{}')
+  })
+}
+
 function rawGet(path: string, headers: Record<string, string>): Promise<number> {
   return new Promise((resolve, reject) => {
     const request = httpRequest(
@@ -542,4 +574,126 @@ test('a body with no end does not grow this process', async () => {
     [TOKEN_HEADER]: TOKEN
   })
   assert.equal(response.status, 413)
+})
+
+/**
+ * The second authority, and who is allowed through it.
+ *
+ * Every case here is a *refusal*, which is what makes them worth writing down:
+ * the happy path was proved against the real tailnet from a real second machine
+ * (`scripts/verify/m6-3.mjs`), and what a test can do that a demonstration
+ * cannot is show that the ways in which it should say no are all still shut.
+ *
+ * The headers are forged, and that is fine for exactly these questions.
+ * `Tailscale-User-Login` is set by `tailscaled` in life; here it is set by the
+ * test, which is the same position an attacker on this machine is in - and the
+ * module's header says plainly that such an attacker gains nothing, because it
+ * can already read the token file and open the database. What these check is
+ * the boundary that does matter: which authority a claim is believed on.
+ */
+test('a tailnet-shaped request is refused while exposure is off', async () => {
+  exposed = null
+  const status = await rawGet('/app/', {
+    host: tailnetAuthority(),
+    'tailscale-user-login': OWNER
+  })
+  // 403 rather than 401: the authority itself does not exist, so there is no
+  // question of identity to get wrong.
+  assert.equal(status, 403)
+})
+
+test('the owner gets in over the tailnet with no token at all', async () => {
+  exposed = { authority: tailnetAuthority(), login: OWNER, scheme: 'http' }
+  const status = await rawGet('/app/', {
+    host: tailnetAuthority(),
+    'tailscale-user-login': OWNER
+  })
+  assert.equal(status, 200)
+  exposed = null
+})
+
+test('another login on the tailnet is refused', async () => {
+  exposed = { authority: tailnetAuthority(), login: OWNER, scheme: 'http' }
+  assert.equal(
+    await rawGet('/app/', {
+      host: tailnetAuthority(),
+      'tailscale-user-login': 'someone-else@github'
+    }),
+    401
+  )
+  // And no header at all, which is what a request that did not come through
+  // `tailscale serve` looks like.
+  assert.equal(await rawGet('/app/', { host: tailnetAuthority() }), 401)
+  exposed = null
+})
+
+test('a token is not consulted on the tailnet authority', async () => {
+  // The thing this milestone was told not to collapse. A token minted on one
+  // machine is not evidence about a person on another, so the session cookie
+  // that opens loopback opens nothing here.
+  exposed = { authority: tailnetAuthority(), login: OWNER, scheme: 'http' }
+  const status = await rawGet('/app/', {
+    host: tailnetAuthority(),
+    cookie: `${SESSION_COOKIE}=${TOKEN}`
+  })
+  assert.equal(status, 401)
+  exposed = null
+})
+
+test('an identity header on loopback grants nothing', async () => {
+  // The mirror of the case above, and the one that would be easy to get wrong
+  // by checking the header before checking which authority was reached. A local
+  // process may set this header freely; it must only ever be read on the
+  // authority `tailscale serve` is proxying to.
+  exposed = { authority: tailnetAuthority(), login: OWNER, scheme: 'http' }
+  const status = await rawGet('/app/', {
+    host: `127.0.0.1:${port}`,
+    'tailscale-user-login': OWNER
+  })
+  assert.equal(status, 401)
+  exposed = null
+})
+
+test('a page on the tailnet origin may act, and a loopback page may not act on it', async () => {
+  exposed = { authority: tailnetAuthority(), login: OWNER, scheme: 'http' }
+  const socket = await connect({
+    host: tailnetAuthority(),
+    origin: `http://${tailnetAuthority()}`,
+    'tailscale-user-login': OWNER
+  })
+  socket.close()
+
+  // The cross-authority case: our own loopback origin, on the tailnet host. It
+  // is one of the two values this server mints and it is still not the right
+  // one, which is what comparing rather than parsing buys.
+  await assert.rejects(
+    connect({
+      host: tailnetAuthority(),
+      origin: origin(),
+      'tailscale-user-login': OWNER
+    }),
+    /403/
+  )
+  exposed = null
+})
+
+test('the poke endpoint does not exist on the tailnet authority', async () => {
+  // A peer telling this install that its own database changed would be asking
+  // it to believe a claim about something the peer cannot see. 404 rather than
+  // 403, because on that authority there is genuinely no such path.
+  exposed = { authority: tailnetAuthority(), login: OWNER, scheme: 'http' }
+  const seen: string[] = []
+  const stop = subscribeToEvents((event) => seen.push(event.event))
+
+  const status = await rawPost(WEB_PATHS.notify, {
+    host: tailnetAuthority(),
+    origin: `http://${tailnetAuthority()}`,
+    'tailscale-user-login': OWNER,
+    [TOKEN_HEADER]: TOKEN
+  })
+
+  stop()
+  assert.equal(status, 404)
+  assert.deepEqual(seen, [])
+  exposed = null
 })

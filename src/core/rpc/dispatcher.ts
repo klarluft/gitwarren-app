@@ -33,7 +33,7 @@ import { APP_VERSION } from '../version.js'
 import { attachmentsService } from '../services/attachments.js'
 import { commentsService } from '../services/comments.js'
 import { fsService } from '../services/fs.js'
-import { hostsService } from '../services/hosts.js'
+import { hostsService, tailnetService } from '../services/hosts.js'
 import { repositoriesService } from '../services/repositories.js'
 import { reviewedFilesService } from '../services/reviewed-files.js'
 import { reviewsService } from '../services/reviews.js'
@@ -164,6 +164,11 @@ const handlers: {
   'hosts.probe': (params) => hostsService.probe(params),
   'hosts.install': (params) => hostsService.install(params),
   'hosts.distros': () => hostsService.distros(),
+  // About this machine's own reachability, never a host's - `isLocalOnly`
+  // refuses the whole prefix, which is what stops a GUI on one machine
+  // starting `tailscale serve` on another. See the note in `shared/rpc.ts`.
+  'hosts.tailnet': () => tailnetService.read(),
+  'hosts.setTailnetExposure': (params) => tailnetService.set(params),
 
   // Answered by whoever owns the folder, which is the whole point of it being
   // a method - see the note in `shared/rpc.ts`.

@@ -41,6 +41,7 @@ import { hosts, type HostRow } from '../db/schema.js'
 import { hostPool, type HostRoute } from '../hosts/pool.js'
 import { installOnHost } from '../hosts/install.js'
 import { listDistros } from '../hosts/wsl.js'
+import { refreshExposure, setExposed } from '../web/exposure.js'
 import { AppError } from '../../shared/errors.js'
 import { parseWithSchema as parse } from '../../shared/validation.js'
 import {
@@ -52,7 +53,9 @@ import {
   type Host,
   type HostWithState,
   type InstallReport,
-  type WslDistro
+  type WslDistro,
+  setTailnetExposureInputSchema,
+  type TailnetExposure
 } from '../../shared/schemas.js'
 
 function toHost(row: HostRow): Host {
@@ -392,5 +395,38 @@ export const hostsService = {
     }
 
     return { ...report, host: withState(requireRow(id)) }
+  }
+}
+
+/**
+ * This machine's tailnet reachability, as a method rather than a shell channel.
+ *
+ * Appended to `hostsService` rather than given a service of its own because it
+ * is the same question the rest of this file answers - how this install is
+ * reached, and by what - and because the `hosts.` prefix is what makes
+ * `isLocalOnly` refuse to forward it. That refusal is the load-bearing part: a
+ * GUI on the Mac must not be able to start `tailscale serve` on the PC.
+ *
+ * Thin, like every other entry here. The machinery is `core/web/exposure.ts`,
+ * which is also what the gate reads, so the panel and the server cannot
+ * disagree about whether this install is exposed.
+ */
+export const tailnetService = {
+  /** What is true now. Re-read from the machine, not from memory. */
+  read(): Promise<TailnetExposure> {
+    return refreshExposure()
+  },
+  /**
+   * Turn it on or off, and answer with what the machine then says.
+   *
+   * Deliberately not "answer with what was asked for": `tailscale serve
+   * --https` on a tailnet with no certificates never returns, so the request
+   * and the outcome genuinely differ, and a switch that showed the request
+   * would tell somebody they were reachable when they were not. See
+   * `core/tailnet.ts`.
+   */
+  async set(input: unknown): Promise<TailnetExposure> {
+    const { exposed } = setTailnetExposureInputSchema.parse(input)
+    return setExposed(exposed)
   }
 }

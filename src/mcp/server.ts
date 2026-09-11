@@ -43,6 +43,15 @@
  * before showing it, and the descriptions say what a refused connection means
  * instead. See `gui-link.ts`.
  *
+ * Since M6 a payload may also carry a `webUrl`, and the two are not a fallback
+ * pair. `guiUrl` is loopback and opens GitWarren on the machine the person is
+ * sitting at; `webUrl` names *this* machine on their tailnet and opens the same
+ * review in a browser on any of their devices. Which one is useful depends on
+ * where the person is, and this server has no way to know that - so both are
+ * offered and the tool text explains what each is for rather than ranking them.
+ * `webUrl` is present only while this install is actually being served, which
+ * is why it is conditional where `guiUrl` never is.
+ *
  * One hard rule: stdout belongs to the protocol. Diagnostics go to stderr.
  */
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
@@ -57,7 +66,7 @@ import { reviewsService } from '../core/services/reviews.js'
 import { authorDisplayName, type CommentAuthor } from '../shared/actors.js'
 import { AppError } from '../shared/errors.js'
 import { RPC_EVENTS, type RpcEventName } from '../shared/rpc.js'
-import { GUI_URL_NOTE, guiLinker, type WithGuiUrl } from './gui-link.js'
+import { GUI_URL_NOTE, WEB_URL_NOTE, guiLinker, type WithGuiUrl } from './gui-link.js'
 import { pokeOwner } from './poke.js'
 import { agentAuthor, getSessionId, getSessionLabel, setSessionLabel } from './identity.js'
 import {
@@ -193,14 +202,14 @@ function adoptLabel(input: { agentLabel?: string }): CommentAuthor {
 
 async function linkedReview<T extends { id: number }>(result: Promise<T>): Promise<WithGuiUrl<T>> {
   const review = await result
-  return { ...review, guiUrl: guiLinker().review(review.id) }
+  return { ...review, ...guiLinker().review(review.id) }
 }
 
 async function linkedThread<T extends CommentLocation>(
   result: Promise<T>
 ): Promise<WithGuiUrl<T>> {
   const thread = await result
-  return { ...thread, guiUrl: guiLinker().comment(thread) }
+  return { ...thread, ...guiLinker().comment(thread) }
 }
 
 /**
@@ -213,7 +222,7 @@ async function linkedComment<T extends { id: number }>(
   const comment = await result
   return {
     ...comment,
-    guiUrl: guiLinker().comment(commentsService.locate({ commentId: comment.id }))
+    ...guiLinker().comment(commentsService.locate({ commentId: comment.id }))
   }
 }
 
@@ -293,7 +302,7 @@ server.registerTool(
       '("open" or "closed"); omit both to list every review across all tracked repositories. ' +
       'A review records the two refs being compared, not the commits they resolved to - ' +
       'read the repository with git to see the actual changes.' +
-      GUI_URL_NOTE,
+      GUI_URL_NOTE + WEB_URL_NOTE,
     inputSchema: listReviewsInputSchema.shape,
     annotations: { readOnlyHint: true, openWorldHint: false }
   },
@@ -312,7 +321,7 @@ server.registerTool(
     description:
       'Fetch one review by id, with the repository it belongs to attached (including the ' +
       'repository path, so the changes can be inspected with git directly).' +
-      GUI_URL_NOTE,
+      GUI_URL_NOTE + WEB_URL_NOTE,
     inputSchema: getReviewInputSchema.shape,
     annotations: { readOnlyHint: true, openWorldHint: false }
   },
@@ -333,7 +342,7 @@ server.registerTool(
       'the same ref as both endpoints is allowed and does exactly that: the review then holds ' +
       'only the uncommitted work on that ref, and its title defaults to "Uncommitted work on ' +
       '<ref>".' +
-      GUI_URL_NOTE,
+      GUI_URL_NOTE + WEB_URL_NOTE,
     inputSchema: createReviewInputSchema.shape,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false }
   },
@@ -348,7 +357,7 @@ server.registerTool(
       'Change a review\'s title, description or endpoints, or set its `status` to "closed" or ' +
       '"open" again. Provide at least one field. New refs are validated exactly as they are on ' +
       'creation.' +
-      GUI_URL_NOTE,
+      GUI_URL_NOTE + WEB_URL_NOTE,
     inputSchema: updateReviewInputSchema.shape,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true }
   },
@@ -418,7 +427,7 @@ server.registerTool(
       'on disk: read it with your own image tools. `alt` is the description whoever attached it ' +
       'wrote, and is worth reading first - it is often enough on its own, and it is all you get ' +
       'if you cannot see images.' +
-      GUI_URL_NOTE,
+      GUI_URL_NOTE + WEB_URL_NOTE,
     inputSchema: listCommentsInputSchema.shape,
     annotations: { readOnlyHint: true, openWorldHint: false }
   },
@@ -445,7 +454,7 @@ server.registerTool(
       'returned thread says whether it could be anchored to a visible line. ' +
       'Comments are attributed automatically from the MCP handshake - see `agent_identity`.\n\n' +
       ATTACHMENT_GUIDANCE +
-      GUI_URL_NOTE,
+      GUI_URL_NOTE + WEB_URL_NOTE,
     inputSchema: withLabel(createThreadInputSchema.shape),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false }
   },
@@ -464,7 +473,7 @@ server.registerTool(
       'responding to something someone already raised, so the discussion stays in one place. ' +
       'Thread ids come from `list_review_comments`.\n\n' +
       ATTACHMENT_GUIDANCE +
-      GUI_URL_NOTE,
+      GUI_URL_NOTE + WEB_URL_NOTE,
     inputSchema: withLabel(replyToThreadInputSchema.shape),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false }
   },
@@ -480,7 +489,7 @@ server.registerTool(
       'Mark a discussion settled, or reopen one. Set `resolved` to true once the point has been ' +
       'addressed, false to bring it back. Resolving records who did it; it never deletes the ' +
       'messages, which stay readable.' +
-      GUI_URL_NOTE,
+      GUI_URL_NOTE + WEB_URL_NOTE,
     inputSchema: setThreadResolvedInputSchema.shape,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true }
   },
@@ -497,7 +506,7 @@ server.registerTool(
     description:
       'Replace the text of one message. An agent can only edit messages written by its own tool - ' +
       'correcting yourself is expected, rewriting someone else\'s review is not.' +
-      GUI_URL_NOTE,
+      GUI_URL_NOTE + WEB_URL_NOTE,
     inputSchema: updateCommentInputSchema.shape,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true }
   },

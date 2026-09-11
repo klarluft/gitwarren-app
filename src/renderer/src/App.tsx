@@ -32,6 +32,7 @@ import { HostsCard } from './features/hosts/hosts-card'
 import { HostsPage } from './features/hosts/hosts-page'
 import { useRefetchOnReconnect } from './features/hosts/use-reconnect'
 import { SettingsPanel } from './features/settings/settings-panel'
+import { TailnetPanel } from './features/settings/tailnet-panel'
 import { RepositoryDetail } from './features/repositories/repository-detail'
 import { RepositoryList } from './features/repositories/repository-list'
 import { ReviewDetail } from './features/reviews/review-detail'
@@ -156,6 +157,7 @@ function HomeScreen() {
         <RepositoryList />
         <HostsCard />
         <AgentAccessCard />
+        <TailnetPanel />
         <SettingsPanel />
       </div>
     </>

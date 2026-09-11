@@ -3119,7 +3119,7 @@ Before them, one spike that had to happen first, because it decides whether the
 3. **Tailnet exposure, identity, and `webUrl`.** `tailscale serve` behind a
    settings toggle, the gate learning a second way to be satisfied, and the URL
    that goes into an MCP result once a host listens. The phone works at the end
-   of this one.
+   of this one. *(done — see below.)*
 4. **The listening carrier.** The third `HostConnection`: a WebSocket client in
    the app, reaching a machine that listens rather than one it spawns.
 5. **Events across a host, and `host.state`.** `RpcEvent` on a wire in the one
@@ -3494,6 +3494,102 @@ M4.5 and M5 were the only slices with nothing to say about version skew, and
 this is the cheapest possible version of it — two processes from the same
 checkout, one of them stale. Every slice from here needs the app rebuilt and
 restarted before it is asked anything, and a host reinstalled before it is.
+
+**M6.3, done on the Mac against the real tailnet, 11 September.** The biggest
+slice, and the one where the plan's own wording turned out to need checking
+against the machine.
+
+    core/tailnet.ts        what Tailscale knows, asked rather than assumed
+    core/web/exposure.ts   one answer, for three layers that need the same one
+    core/web/origin.ts     a second authority, and a different question on it
+    core/web/handler.ts    the gate, satisfied two ways and never one for the other
+    mcp/gui-link.ts        `webUrl`, when there is one
+    features/settings/tailnet-panel.tsx   the switch
+
+**A second authority, not a second server.** `tailscale serve` proxies from the
+tailnet *to loopback*, so a request from a phone arrives on 127.0.0.1 with
+`Host: mac.tail688c0c.ts.net:41427`. There is no socket to tell the two apart
+by; the header is the whole difference. That makes this a change to
+`isAllowedHost` rather than a listener beside it, and everything `origin.ts`
+already said stays true - a browser cannot change `Host`, so requiring it to be
+one of the two we hand out forecloses rebinding on both.
+
+**The token and the identity header answer different questions, and a request
+satisfies one or the other.** Written into `isTailnetOwner` rather than only
+into this document, because it is the thing most likely to be undone by somebody
+being helpful. `token.ts` asks *did the user point something at GitWarren, or
+does this merely know the port* - about intent, on a machine where every process
+is already the user. The header asks *is the person at the other end the owner* -
+about principal, on a network where intent cannot be checked at all. So a token
+presented on the tailnet authority is **ignored rather than honoured**: a token
+minted on the Mac is not evidence about the person holding a phone. `token.ts`
+is untouched, and M4.5's finding about per-launch minting still stands exactly
+as it did.
+
+The honest bound is in the module rather than implied: a *local* process can set
+the header itself with a tailnet `Host` and get in without the token. It gains
+nothing - it can already read the 0600 token file and open the database - and it
+is the same principal `token.ts` says loopback has. The door that matters stays
+shut, because a web page can set neither `Host` nor `Tailscale-User-Login`,
+both being forbidden header names.
+
+**`webUrl` is derived from what happened, not from the plan's spelling.** The
+plan writes it `https://<host>.<tailnet>.ts.net/review/4/…`. M6.0 found that
+this tailnet has no HTTPS at all, so a URL assembled by convention would have
+been handed to an agent, handed to a person, and refused to open, with nothing
+anywhere having warned. `serveTailnet` asks for HTTPS, falls back to HTTP, and
+reports which it got; the panel and the MCP result both show what the machine
+said. A tailnet that enables certificates later gets `https` on the next toggle
+with no code change.
+
+It also carries the *mount*, which is not cosmetic: the app serves the web build
+at `/app/` and the daemon at `/`, so a URL naming only the origin would land a
+phone on the Electron link page rather than in the app.
+
+**The route in a `webUrl` is an ordinary app hash, and that is M2's two
+notations finally paying off.** A loopback link's fragment is `h=<id>/review/4`
+- a *deep link waiting to be assembled*, handed by the page to a local
+GitWarren which then decides whose review it is. A tailnet URL is not waiting
+for anything: the server answering it is the machine that owns the review, so
+the fragment is `#/reviews/4/conversation` with no host segment, because there
+is no other machine in the story. `deep-link.ts` predicted in M2 that those two
+"stop being the same machine in M4"; this is where they stop.
+
+**The switch is `hosts.setTailnetExposure`, and the prefix is the point.**
+Turning exposure on is genuinely an *act* on a machine, which is the thing the
+dispatcher may never let travel - and it does not, because `isLocalOnly` refuses
+the whole `hosts.` prefix. So a browser tab can expose the install that served
+it, which is exactly what the person running `gitwarren serve` on a headless box
+needs, and a GUI on the Mac cannot reach across and start `tailscale serve` on
+the PC. M5.2 made the same argument for `hosts.distros` and this is the harder
+case it was rehearsing for.
+
+**Verified two ways, and the second one is the one that mattered.**
+`scripts/verify/m6-3.mjs` forges headers against the running app and checks the
+refusals: exposure off is `403` on the tailnet authority; the owner is `200`
+with no token; another login is `401`; no header is `401`; a token on the
+tailnet authority mints no session; an identity header on *loopback* grants
+nothing; the poke endpoint is `404` there; and turning the switch off takes the
+authority and the published `webRoot` away again.
+
+Then the same thing from a machine whose header was stamped by a real
+`tailscaled` rather than by the test: from `pc-wsl`, `GET
+http://mac.tail688c0c.ts.net:41427/app/` answered **200**, and
+`/gitwarren/app-info` came back with the Mac's instance id - a second computer,
+through the proxy, through the gate, with no configuration on either side beyond
+the switch. And the half that could have failed silently: the same request with
+upgrade headers answered **101 Switching Protocols**, which is M6.4's carrier
+proved before a line of it was written.
+
+**One thing bit, and a test found it rather than a machine.** `isAllowedOrigin`
+accepted *either* authority's origin on *either* authority, so a page on
+loopback could act on the tailnet authority. Nothing escalated - both pages are
+ours, and both had already got through the gate - but the shape was wrong, and
+what makes it worth recording is that the comment above the function already
+said the right thing ("what neither may be is *the other one*") while the code
+did not. A page acts on the server that served it; the origin check now takes
+which authority the request arrived at and accepts exactly one value. The next
+authority added would have been wrong the same way.
 
 ## Agent setup
 

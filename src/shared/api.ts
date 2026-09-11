@@ -31,6 +31,8 @@ import type {
   InstallReport,
   WslDistro,
   RemoveHostInput,
+  SetTailnetExposureInput,
+  TailnetExposure,
   UpdateHostInput,
   Comment,
   CommentThread,
@@ -322,6 +324,20 @@ export interface GitWarrenApi {
      * on `hosts.distros` in `shared/rpc.ts`.
      */
     distros(): Promise<WslDistro[]>
+    /**
+     * Whether the machine answering is reachable on its tailnet, and where.
+     *
+     * Here for the same reason `distros` is, and it survives the harder version
+     * of the same test. Turning exposure on is genuinely an *act* on a machine,
+     * which is the thing `shared/rpc.ts` says must never travel - and it does
+     * not: `isLocalOnly` refuses the whole `hosts.` prefix, so what this acts on
+     * is always the machine whose core is answering. A browser tab gets its own
+     * server's switch, which is exactly what a person running `gitwarren serve`
+     * on a headless box needs; a GUI looking at a remote host cannot reach
+     * across and start `tailscale serve` there.
+     */
+    tailnet(): Promise<TailnetExposure>
+    setTailnetExposure(input: SetTailnetExposureInput): Promise<TailnetExposure>
   }
   /**
    * What is inside a folder, on the machine this api is pointed at.

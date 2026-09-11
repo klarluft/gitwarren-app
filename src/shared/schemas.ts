@@ -883,3 +883,57 @@ export const directoryListingSchema = z.object({
 export type ListDirectoryInput = z.input<typeof listDirectoryInputSchema>
 export type DirectoryEntry = z.infer<typeof directoryEntrySchema>
 export type DirectoryListing = z.infer<typeof directoryListingSchema>
+
+/**
+ * Whether this machine is reachable on its tailnet, and where.
+ *
+ * In `shared/` rather than beside the implementation in `core/web/exposure.ts`
+ * because the renderer draws the switch and the renderer may not import
+ * `core/`. It is the same split `HostWithState` has: the shape is everyone's,
+ * and the machinery for producing it is one side's.
+ *
+ * A schema and not just a type, even though nothing validates an *outgoing*
+ * one, so that a screen on the other end of a carrier has the same guarantee
+ * about this answer as it has about every other.
+ */
+export const tailnetExposureSchema = z.object({
+  /**
+   * Whether this machine has a working Tailscale at all: installed, logged in,
+   * daemon running. False covers all three failures because no screen can act
+   * on the difference - the switch is not offered, and rule 3 says Tailscale is
+   * never a dependency.
+   */
+  available: z.boolean(),
+  /** This machine's MagicDNS name, or null. */
+  dnsName: z.string().nullable(),
+  /** The owner's Tailscale login, so a person can see whose tailnet this is. */
+  login: z.string().nullable(),
+  /** Whether the loopback port is being served on the tailnet right now. */
+  exposed: z.boolean(),
+  /**
+   * Where the web view is for a phone, mount included:
+   * `http://pc-wsl.tail688c0c.ts.net:41427/app/`. Null when not exposed.
+   *
+   * The mount is part of it because the two shells serve the app at different
+   * paths - a URL naming only the origin would land a phone on the Electron
+   * link page rather than in the app. The scheme is whatever `tailscale serve`
+   * actually managed, never assumed: see `core/tailnet.ts`.
+   */
+  webRoot: z.string().nullable()
+})
+
+export type TailnetExposure = z.infer<typeof tailnetExposureSchema>
+
+/**
+ * Turning "Reachable on your tailnet" on or off.
+ *
+ * One boolean, and it is a schema rather than a bare argument for the reason
+ * every other input here is: whoever answers re-parses what it was sent, and a
+ * method whose params were a naked value would be the one place that rule did
+ * not hold.
+ */
+export const setTailnetExposureInputSchema = z.object({
+  exposed: z.boolean()
+})
+
+export type SetTailnetExposureInput = z.infer<typeof setTailnetExposureInputSchema>

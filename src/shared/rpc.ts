@@ -31,6 +31,8 @@ import type {
   InstallOnHostInput,
   InstallReport,
   RemoveHostInput,
+  SetTailnetExposureInput,
+  TailnetExposure,
   UpdateHostInput,
   WslDistro,
   Comment,
@@ -330,6 +332,32 @@ export interface RpcMethods {
   'hosts.distros': { params: void; result: WslDistro[] }
 
   /**
+   * Whether the machine that answers is reachable on its tailnet, and where.
+   *
+   * Under `hosts.` for the same reason `hosts.distros` is, and the reason is
+   * worth restating because this one looks much more like a capability. It is
+   * a fact - and an *act*, in the setter's case - about the machine the core
+   * runs on, which is the machine being exposed. A browser tab must be able to
+   * ask and to set it, because the person who will not install Electron is
+   * exactly the person running `gitwarren serve` on a headless box.
+   *
+   * What the prefix buys is that `isLocalOnly` refuses to forward either of
+   * them without anybody having to remember. That refusal is the important
+   * half: a GUI on the Mac must not be able to reach across and start
+   * `tailscale serve` on the PC. A request that could start a process on
+   * another machine is the thing `core/rpc/dispatcher.ts` says would make this
+   * very different software, and "the method is about the machine holding the
+   * list" is the rule that keeps it out.
+   *
+   * `available: false` on a machine with no Tailscale, rather than an error, so
+   * a settings panel offers the switch when the answer says it can and no code
+   * anywhere asks what is installed. The same shape `hosts.distros` uses to
+   * make a Mac not offer a WSL host.
+   */
+  'hosts.tailnet': { params: void; result: TailnetExposure }
+  'hosts.setTailnetExposure': { params: SetTailnetExposureInput; result: TailnetExposure }
+
+  /**
    * What is inside a folder, on the machine that answers.
    *
    * The one method here that exists because of a *capability* rather than a
@@ -467,6 +495,7 @@ export const READ_METHODS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
   'hosts.list',
   'hosts.get',
   'hosts.distros',
+  'hosts.tailnet',
   // `hosts.probe` is deliberately absent. It reads in the sense that it changes
   // no host row a caller can see, but it opens a connection and clears a
   // backoff, and two people pressing "try now" at the same moment should mean
