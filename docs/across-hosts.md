@@ -2555,6 +2555,11 @@ every Windows-shaped failure in this repository has been found by a person
 sitting at a Windows machine rather than by the suite. A Windows job is the
 honest fix and is deliberately not in this milestone.
 
+*It exists now.* `ci.yml` runs Windows, macOS and Linux on every pull request,
+and this test is one of the five named in the list of skips it is allowed to
+report. See [What CI runs](../CONTRIBUTING.md#what-ci-runs) — it is not a
+milestone, so it is not one of these.
+
 Two more of the same family, found getting the checkout to build at all and
 recorded because the next person will hit them in the same order. `better-sqlite3`
 ships a `win32-x64` prebuild *and* a `binding.gyp`, and npm runs `node-gyp
@@ -3057,6 +3062,13 @@ a Windows machine rather than by the suite, because `ci.yml` runs ubuntu only.
 A Windows job is the honest fix and is deliberately not part of M5: it is a
 change to how this project is tested rather than to what it does, and folding it
 in here would have made the milestone's diff about something else.
+
+*It was done after M6, and for the same reason it is not a milestone either:*
+`ci.yml` now runs all three platforms on every pull request, runs `npm run
+build` as well as the other three, and builds a daemon tarball on each — the
+step that would have caught `du -h` the day it was written. Described in
+[What CI runs](../CONTRIBUTING.md#what-ci-runs), reasoned about at length in
+the comments in `.github/workflows/ci.yml`.
 
 ### M6 — Tailnet and live updates
 
@@ -4025,15 +4037,50 @@ peers there are". Wrong in a way that would be invisible on a LAN and is the
 first thing anyone notices on a tailnet, which is the argument for verifying
 against the real one in a sentence.
 
-**And the thing that is still owed, again.** `ci.yml` runs ubuntu only. M5
+**And the thing that was still owed, twice.** `ci.yml` ran ubuntu only. M5
 recorded that every Windows-shaped failure in this repository had been found by
-a person sitting at a Windows machine; M6 adds a Linux-shaped one to the pile -
+a person sitting at a Windows machine; M6 added a Linux-shaped one to the pile -
 `tailscale serve` needs `--operator` there and succeeds silently as the user on
 macOS, so the switch works on the machine most likely to be *developed* on and
 fails on the machine most likely to be a *host*. A CI job that runs on more than
 one platform is the honest fix, it is a change to how this project is tested
 rather than to what it does, and it is still deliberately not part of a
 milestone.
+
+It is no longer deferred. `ci.yml` runs `windows-latest`, `macos-latest` and
+`ubuntu-latest` on every pull request with `fail-fast: false`, and the
+`--operator` divergence is the argument for macOS being in that list rather
+than Windows alone: what exposed it was not one platform failing but two
+platforms *disagreeing*, which a matrix of Linux and Windows would have hidden
+as thoroughly as one entry did. Two other gaps went with it - CI never ran the
+bundler, so a failure that is a bundler's opinion rather than a type error
+waited until release day, and it never ran
+`scripts/build-daemon-tarball.mjs`, which is where `du -h` lived. Both are
+steps now, and `npm test` fails if a test skips itself without being named,
+so the fifth skip below stops being indistinguishable from a test that quietly
+stopped running.
+
+Two things the job proved about itself, neither of them by being read. *It
+found a Windows bug on its first run*: nine assertions in
+`dispatcher.test.ts` compared a stored repository path against
+`C:\Users\RUNNER~1\…`, an 8.3 short name, because the test realpathed its
+temporary directory with plain `realpathSync` where `canonicalise` uses
+`realpath.native`. Only the native call expands a short name. It does not
+reproduce on a Windows profile that has no short name, which is why running
+the suite on the PC did not find it. *And it failed to fail once, usefully*:
+`du -h` put back deliberately did **not** turn Windows red, because
+`windows-latest` carries Git for Windows and its MSYS2 `du` on PATH. The
+runner is a friendlier environment than the shell that bug was found in, so a
+missing Unix binary is a class of Windows failure it cannot reproduce - which
+is written down in `ci.yml` rather than quietly hoped over. A break one level
+below PATH, `path.sep` asserted as `/`, turned Windows red and left the other
+two green, which is the check the job actually passes on.
+
+The missing `ws` in the next entry is the other thing it would not have
+caught, and the note there says why. Reasoned about in the comments in
+`.github/workflows/ci.yml`, summarised in
+[What CI runs](../CONTRIBUTING.md#what-ci-runs); not a milestone, so it does
+not appear above.
 
 **M6 on Windows, done from the Mac against `pc-win`, 11 September.** M6 was
 built and verified entirely from the Mac, against a Linux daemon inside WSL. The

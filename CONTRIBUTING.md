@@ -60,17 +60,71 @@ live.
 
 ## Before you open a pull request
 
-Run the same three things CI runs:
+Run the same four things CI runs:
 
 ```bash
 npm run lint
 npm run typecheck
+npm run build
 npm test
 ```
 
 The tests create throwaway git repositories in a temp directory and point the
 app at a temp data directory via `GITWARREN_DATA_DIR`, so they never touch your
 real database.
+
+### What CI runs
+
+`.github/workflows/ci.yml` runs those four, plus one daemon tarball build, on
+**Windows, macOS and Linux** — all three, on every pull request. The comments in
+that file explain each choice; the short version is why it is shaped that way at
+all.
+
+Four platform-shaped breakages in this repository were found by a person at a
+keyboard rather than by the suite, because CI used to run ubuntu only: `npx.cmd`
+spawned from `scripts/run-tests.mjs`, which meant `npm test` had never once
+worked on Windows; a drive-letter path; the symlink `fs.test.ts` created in
+`before`, which took thirteen tests down with it; and `du -h` in
+`scripts/build-daemon-tarball.mjs`. Three of those four are `npm test`. The
+fourth lived in a script CI never ran, which is why the tarball build is a step
+now — and `npm run build` is a step for a separate reason, that CI never ran the
+bundler at all.
+
+One caveat on that fourth, measured by putting the bug back and pushing it:
+the tarball step on `windows-latest` would **not** have caught `du -h`. The
+runner carries Git for Windows, whose MSYS2 `usr/bin` is on PATH and supplies
+`du`, so the step printed a size and passed. A missing Unix binary is the class
+of Windows problem this runner cannot reproduce, because it is a friendlier
+environment than the shell the bug was found in. The step still earns its place
+for everything in that script that is Node's or the filesystem's rather than
+PATH's — but it runs the script on Windows, which is not the same claim as
+catching that bug.
+
+macOS is in the matrix for a fifth thing, which is not a breakage but a
+disagreement: `tailscale serve` needs `--operator` on Linux and succeeds
+silently as the user on macOS. What exposed it was two platforms differing,
+which no single-platform job can notice however well chosen the platform is.
+
+Two things worth knowing when you read a green check:
+
+- **A skip is reported by name.** `npm test` fails if a test skips itself
+  without being listed in `MAY_SKIP` in `scripts/run-tests.mjs`. Four tests skip
+  everywhere, and M5.0's symlink test skips itself on a Windows machine that
+  will not let an unprivileged process create one — before this, `skipped 4` and
+  `skipped 5` were the same line of output, so a test that quietly stopped
+  running on one platform looked exactly like the one that is meant not to run
+  there. Every run now prints what it did *not* check.
+
+  The list holds names rather than a count per platform because the fifth skip
+  is a property of the *machine*, not the operating system: the GitHub Windows
+  runner allows the symlink and reports four skips, while the Windows PC this
+  project is developed against reports five. Both are correct.
+- **Green means the lockfile installs, not that your `node_modules` is right.**
+  CI installs with `npm ci`, from the lockfile. A developer's `node_modules`
+  drifts on its own — `ws` went missing from one for two milestones without CI
+  noticing, and it could not have. What a publicly visible green Windows build
+  gives you is the other half of that answer: if your checkout fails and CI
+  does not, the problem is your install, not the repository.
 
 If you changed the Drizzle schema in `src/core/db/schema.ts`, regenerate the
 migrations and commit the generated SQL:
