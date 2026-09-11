@@ -42,7 +42,9 @@ jobs:
     # from Windows at 2x and macOS at 10x does not apply. The three jobs run in
     # parallel, so a pull request waits for the slowest rather than for the sum
     # - the number that changes is ubuntu's minutes becoming Windows' minutes,
-    # not three times anything.
+    # not three times anything. Measured on the run that added this file:
+    # Linux 1m04s, macOS 2m01s, Windows 3m46s, so a green check arrives in
+    # under four minutes instead of just over one. That is the whole trade.
     strategy:
       # release.yml's matrix also carries `continue-on-error: true`, and that
       # part deliberately does not transfer. There it is right: one platform
