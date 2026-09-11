@@ -12,8 +12,57 @@ concurrency:
 
 jobs:
   check:
-    name: Lint, typecheck, test
-    runs-on: ubuntu-latest
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+
+    # Every platform on every pull request, rather than a fast ubuntu path with
+    # the other two held back for main.
+    #
+    # Four platform-shaped breakages in this repository were found by a person
+    # at a keyboard rather than by this job: `npx.cmd` spawned from
+    # scripts/run-tests.mjs, which meant `npm test` had never once worked on
+    # Windows; a drive-letter path; the symlink `fs.test.ts` made in `before`,
+    # which took all thirteen tests in that file down with it (M5.0); and
+    # `du -h` in scripts/build-daemon-tarball.mjs (M5). Every one was invisible
+    # here for the same reason - this job ran ubuntu only.
+    #
+    # macOS is in the list for a fifth thing, which is not a breakage but a
+    # disagreement: `tailscale serve` needs `--operator` on Linux and succeeds
+    # silently as the user on macOS (M6). What exposed it was two platforms
+    # differing, which is something no single-platform job can notice however
+    # well chosen the platform is.
+    #
+    # Splitting the matrix would put all of that back. A green check on a pull
+    # request would again mean "nothing platform-shaped was checked", which is
+    # the state this change exists to end, and three of the four above would
+    # have merged green.
+    #
+    # What it costs is latency, not money: this repository is public, so
+    # GitHub-hosted runners are free on every platform and the usual argument
+    # from Windows at 2x and macOS at 10x does not apply. The three jobs run in
+    # parallel, so a pull request waits for the slowest rather than for the sum
+    # - the number that changes is ubuntu's minutes becoming Windows' minutes,
+    # not three times anything.
+    strategy:
+      # release.yml's matrix also carries `continue-on-error: true`, and that
+      # part deliberately does not transfer. There it is right: one platform
+      # failing should not discard the installers the others already uploaded
+      # into the draft. Here it would let every job report success however the
+      # run went, which is a check that cannot fail and therefore says nothing.
+      #
+      # `fail-fast: false` does transfer. The useful answer to "it broke on
+      # Windows" is whether it also broke on macOS, and cancelling the other two
+      # to save a few minutes of free runner time throws that away.
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: Linux
+          - os: windows-latest
+            name: Windows
+          - os: macos-latest
+            name: macOS
+
     steps:
       - uses: actions/checkout@v4
 
@@ -30,13 +79,65 @@ jobs:
       # `npm ci` runs the postinstall (electron-builder install-app-deps),
       # which rebuilds better-sqlite3 against Electron's headers. The tests
       # open a real SQLite file, so this has to happen before them.
+      #
+      # Worth being honest about what this does and does not check. It installs
+      # from the lockfile, so it proves the lockfile is installable on all three
+      # platforms - which is not nothing; a plain `npm install` on Windows tries
+      # to compile better-sqlite3 from its `binding.gyp` and needs a Python that
+      # is usually the Microsoft Store stub (M5.0). It does *not* reproduce a
+      # developer's node_modules, which drifts on its own: `ws` was missing on
+      # the Windows machine on 11 September, absent since M3, and this job would
+      # have stayed green throughout. The help it offers there is indirect and
+      # real - a publicly visible green Windows build is how somebody whose own
+      # checkout is failing can tell the difference between a broken repository
+      # and a broken node_modules, which is exactly what that morning lacked.
       - run: npm ci
 
       - run: npm run lint
 
+      # `npm run build` runs typecheck itself, so this step is a few seconds of
+      # duplicated `tsc`. It is kept anyway, because a step named `typecheck` is
+      # a type error that names itself in the checks list rather than one found
+      # by reading the log of a step called `build`.
       - run: npm run typecheck
 
+      # New here, and not about platforms at all. CI ran lint, typecheck and
+      # test and never once ran the bundler, so a failure that is a bundler's
+      # opinion rather than a type error - an import Vite cannot resolve, an
+      # asset path, a config that only one platform reads the same way - passed
+      # CI and turned up at release time, which is the worst moment to learn it
+      # and the one place where the fix cannot be a quick push. It is thirteen
+      # seconds. It builds the Electron bundles, the MCP and daemon bundles and
+      # the web build, which is also what the tarball step below needs.
+      - run: npm run build
+
       # The suite shells out to a real git and writes to a temp
-      # GITWARREN_DATA_DIR, so git has to be present — it is, on all
-      # GitHub-hosted runners.
+      # GITWARREN_DATA_DIR, so git has to be present - it is, on all
+      # GitHub-hosted runners. scripts/run-tests.mjs also checks that the only
+      # tests reporting themselves skipped are the ones written down as allowed
+      # to; see the note there on why that is a list of names and not a count.
       - run: npm test
+
+      # The daemon tarball, which CI has never built and which is where `du -h`
+      # lived: the script packed a 44 MB archive successfully and then died
+      # reporting its size, on the one platform nothing ran it.
+      #
+      # One target on every host rather than all four, because nothing in that
+      # script is compiled - it downloads a Node binary and copies a
+      # better-sqlite3 prebuild, so any machine can build any target and the
+      # host has nothing to do with what comes out. What is being checked here
+      # is therefore not the artifact but the script: that it runs at all on
+      # this operating system. linux-x64 is the canonical one.
+      #
+      # It is affordable because the step above already paid for it. The
+      # bundles and the web build are the expensive prerequisites and
+      # `npm run build` has just made them; what is left is one download and a
+      # `tar`, about seven seconds. The 44 MB is the size of the output, not the
+      # cost of producing it.
+      #
+      # Note that this deliberately covers more ground than release.yml does.
+      # That workflow builds every tarball on ubuntu, so a Windows or macOS host
+      # failing here is not a broken release - it is a broken `node
+      # scripts/build-daemon-tarball.mjs` for the person who runs it by hand,
+      # which is precisely who found `du -h`.
+      - run: node scripts/build-daemon-tarball.mjs linux-x64
