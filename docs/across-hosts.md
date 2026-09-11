@@ -2467,7 +2467,7 @@ happen first:
    streamed down the same pipe. *(done — see below.)*
 3. **Editors, reveal and agent access.** `wsl+<distro>`, Explorer reveal
    through `\\wsl.localhost`, and the Agent Access page for a distro.
-   *(planned.)*
+   *(done — see below.)*
 4. **The guard.** A `\\wsl.localhost` path refused as a *local* repository,
    with a pointer to the thing the person meant. *(planned.)*
 
@@ -2815,6 +2815,110 @@ that could only produce the service's refusal. There is no uninstall, for M4.2's
 reason exactly: `hosts.remove` forgets a row here, and `rm -rf ~/.gitwarren` is
 something a person can type into their own distribution and read before pressing
 return.
+
+**M5.3, done on the PC against the Ubuntu distro, 11 September.** The three
+controls that point at a file over there. Two of them were already right and had
+to be told about one more arrangement; the third is the one M4.3 switched off and
+this milestone is allowed to switch back on.
+
+    editorTargetFor             wsl+Ubuntu, not ssh-remote+Ubuntu
+    useRevealPath               can this machine name that file at all
+    app.mcp                     unchanged, and that is the result
+
+**The editor form is the thing M4.4 wrote down a milestone early.** Its note
+said `editor_target` was kept apart from `target` because "the two coincide today
+and stop coinciding at M5, where the carrier is `wsl.exe -d Ubuntu` and the
+editor form is `wsl+Ubuntu`", and this is that sentence becoming a branch. The
+authorities come from different VS Code extensions - `ssh-remote+` from
+ms-vscode-remote.remote-ssh and `wsl+` from ms-vscode-remote.remote-wsl - which
+is the real reason they cannot be one derivation, and also the reason a link's
+failure is silent: the wrong extension is not installed and nothing says so.
+That caught M4.4 out on the Mac, so it was checked first here rather than
+concluded from a URL that looked right.
+
+**Reveal stopped being a rule about remoteness and became a question.** M4.3 hid
+"Show in file manager" for every remote host, and the reasoning was exact:
+`/home/xfor/app` handed to a Mac's Finder opens a window on nothing or on an
+unrelated local folder. M5 does not re-open that hole, it observes that
+`host === undefined` was only ever a *proxy* for the condition actually being
+tested - *can this machine name that file in its own filesystem* - and that the
+proxy was correct only while every remote host was across a network. Windows
+serving a distribution at `\\wsl.localhost\<distro>\…` is the one arrangement
+where the answer is yes for a machine that is not this one.
+
+So `useRevealPath` returns a path or null, and null is still absence rather than
+a disabled button. It returns the *path* rather than a boolean on purpose: the
+caller needs a name to hand the shell, and a second place where the translation
+could be made differently is a second place to get it wrong. Both its conditions
+have to hold and neither implies the other - the host must be reached by
+`wsl.exe`, and the **core** must be on Windows, which is `appInfo.platform` and
+not anything about the browser. In a tab it never gets asked, because
+`capabilities.revealPath` is false and the button is gone first.
+
+It returns null while the host list is still loading, deliberately: an unanswered
+question is not the alarming answer - the same distinction M4.3's banner got
+wrong in the other direction - and the cost of waiting a frame is a button
+appearing late, against a file manager opened on a path that means something
+else.
+
+**`shared/wsl.ts` translates both ways, and the second direction is M5.4's.**
+Towards Windows for the reveal; towards the distribution so that a
+`\\wsl.localhost\…` path typed into the *local* add-repository form can be
+refused with a pointer at what the person meant. Two prefixes are recognised
+because `\\wsl$\` is the older spelling and still resolves, and both separators
+because `git rev-parse --show-toplevel` answers `//wsl.localhost/Ubuntu/…` with
+forward slashes - which is the form the guard is most likely to be shown and the
+one a backslash-only test would miss.
+
+**Agent access needed nothing, and that is the interesting part.** `app.mcp`
+answers "the launcher, as the host resolves it", which was M4.4's whole point,
+and a distribution resolves it to `/home/xfor/.gitwarren/bin/gitwarren-mcp` for
+the same reason `pc-wsl` did over `ssh`. The Agent Access page was already
+fetching through `useApi()` after M4.4's fix, so the per-host page works on a WSL
+host without a line. The local answer on this machine is
+`C:\Users\micha\.gitwarren\bin\gitwarren-mcp.cmd`, which is a pleasing check that
+the two really are different machines rather than one path being shown twice.
+
+**Verified end to end through the real window over CDP.** The host derives
+`wsl+Ubuntu` with `editor_target` still NULL, so it is derived and not stored.
+`reviews.filePath` on the host answered
+`/home/xfor/github.com/klarluft/gitwarren-app/docs/across-hosts.md`, which became
+`vscode://vscode-remote/wsl+Ubuntu/home/xfor/…/docs/across-hosts.md:1` - and
+pressing it through `shell.openInEditor` started
+`ms-vscode-remote.remote-wsl-0.104.3\dist\node\wslDaemon.js`, which is the
+extension resolving the authority rather than a URL that merely looks right. The
+editor picker offered VS Code, Cursor and the JetBrains IDEs, which is
+`remotelyOpenable` reducing a real list for the first time - the Mac in M4.4 had
+one editor and could not exercise it.
+
+Pressing "Show in file manager" on a repository of the WSL host opened an
+Explorer window on
+`file://wsl.localhost/Ubuntu/home/xfor/github.com/klarluft/gitwarren-app`, read
+back out of the shell rather than assumed. `app.mcp` answered the distribution's
+launcher for the host and this machine's `.cmd` for no host.
+
+And the other half of M5's verify line, because the PC is the one machine that
+can check it: `C:\Users\micha\gitwarren-app` added as an ordinary local
+repository reads its git state on NTFS (branch `main`, root commit
+`59843fd3f8ab`), and the distribution's checkout of the same project reports the
+*same root commit* at `/home/xfor/github.com/klarluft/gitwarren-app`. M4.3 built
+that grouping across a network; here it groups two filesystems on one desk.
+
+On the screens: the Hosts screen lists the distribution; Add offers "Connect by
+SSH / WSL" with SSH the default, and choosing WSL replaces the text field with
+the picker, which shows `Ubuntu — already added` beside the two `docker-desktop`
+rows. No horizontal scroll at 390 px on the home screen, the Hosts screen, the
+host's repository list, or with the Add dialog open. No console errors or
+warnings anywhere in the run.
+
+**Not done in M5.3, and why.** Deep links still carry no host, unchanged from
+M4.3 and M4.4: a `gitwarren://` link written inside the distribution opens this
+machine's review of that number, and that is rule 4 needing the loopback
+fragment to grow a host segment, which belongs with M6's live links. The
+attachment path was not re-verified on this carrier - it is
+`shared/rpc-wire.ts` and the router, neither of which can tell `wsl.exe` from
+`ssh`, and M4.4 proved the bytes - so what M5 checked is that nothing about it
+is carrier-specific rather than that an image round-trips again.
 
 ### M6 — Tailnet and live updates
 

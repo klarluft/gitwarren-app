@@ -7,10 +7,10 @@
  * stream. Separate from `verify-m5-1.mjs` because it shuts the distribution
  * down, which is rude to do in the middle of another check.
  *
- *   node --import tsx scripts/verify-m5-1-terminate.mjs [distro]
+ *   node --import tsx scripts/verify/m5-1-terminate.mjs [distro]
  */
 import { spawn } from 'node:child_process'
-import { connectOverWsl } from '../src/core/hosts/wsl.ts'
+import { connectOverWsl } from '../../src/core/hosts/wsl.ts'
 
 const distro = process.argv[2] ?? 'Ubuntu'
 let failures = 0

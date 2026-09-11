@@ -7,10 +7,10 @@
  * back. Every interesting bug in M4 was found this way and none of them by a
  * test passing.
  *
- *   node --import tsx scripts/verify-m5-1.mjs [distro]
+ *   node --import tsx scripts/verify/m5-1.mjs [distro]
  */
-import { connectOverWsl } from '../src/core/hosts/wsl.ts'
-import { createHostPool } from '../src/core/hosts/pool.ts'
+import { connectOverWsl } from '../../src/core/hosts/wsl.ts'
+import { createHostPool } from '../../src/core/hosts/pool.ts'
 
 const distro = process.argv[2] ?? 'Ubuntu'
 let failures = 0

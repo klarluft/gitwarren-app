@@ -13,9 +13,9 @@
  *   .\node_modules\.bin\electron.cmd . --remote-debugging-port=9222 `
  *     --user-data-dir="$env:TEMP\gw-m5-chrome"
  *
- * then: node scripts/verify-m5-app.mjs [distro]
+ * then: node scripts/verify/m5-app.mjs [distro]
  */
-import { Cdp, wait } from './cdp.mjs'
+import { Cdp, wait } from '../cdp.mjs'
 
 const distro = process.argv[2] ?? 'Ubuntu'
 let failures = 0

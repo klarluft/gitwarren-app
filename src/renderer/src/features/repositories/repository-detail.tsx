@@ -22,6 +22,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { CACHE_KEYS } from '@/lib/api'
 import { errorMessage, isDisconnection } from '@/lib/errors'
 import { useApi, useHost, useHostScope } from '@/lib/host-scope'
+import { useRevealPath } from '@/lib/reveal-path'
 import { useRegisterCommands, type Command } from '@/features/commands/command-registry'
 import { navigate } from '@/lib/router'
 import { ReviewList } from '@/features/reviews/review-list'
@@ -39,6 +40,12 @@ export function RepositoryDetail({ repositoryId }: { repositoryId: number }) {
     CACHE_KEYS.repository(repositoryId, host),
     () => api.repositories.get({ id: repositoryId })
   )
+
+  // After the fetch, because it needs the path - and unconditionally, because a
+  // hook cannot be called only once the row has arrived. An empty path answers
+  // for this machine and is never read: every use of it is already inside a
+  // `repository === undefined ? … :` branch.
+  const revealPath = useRevealPath(repository?.path ?? '')
 
   useRegisterCommands(
     useMemo<Command[]>(
@@ -58,9 +65,10 @@ export function RepositoryDetail({ repositoryId }: { repositoryId: number }) {
               },
               // A shell with no file manager to reach contributes no command
               // and no `o` key, rather than one that answers with a sentence.
-              // Neither does a repository on another machine, whose folder this
-              // machine's file manager does not have.
-              ...(api.capabilities.revealPath && host === undefined
+              // Neither does a repository on a machine whose paths this one
+              // cannot name - which since M5 is a question `useRevealPath`
+              // answers, rather than "is it remote".
+              ...(api.capabilities.revealPath && revealPath !== null
                 ? ([
                     {
                       id: 'repository:reveal',
@@ -73,12 +81,16 @@ export function RepositoryDetail({ repositoryId }: { repositoryId: number }) {
                       // A missing folder cannot be revealed, and saying so in
                       // the palette beats a key that silently does nothing.
                       disabled: !repository.git.exists,
-                      run: () => void api.system.revealPath(repository.path)
+                      run: () => void api.system.revealPath(revealPath)
                     }
                   ] satisfies Command[])
                 : [])
             ],
-      [api, host, repository]
+      // `revealPath` is in here because the command's `run` closes over it, and
+      // it arrives a frame late on a host: the host list has to load before this
+      // machine knows whether it can name that file. Without it the `o` key
+      // would keep the value from the render where the answer was still null.
+      [api, host, repository, revealPath]
     )
   )
 
@@ -152,14 +164,14 @@ export function RepositoryDetail({ repositoryId }: { repositoryId: number }) {
           </div>
 
           <div className="flex shrink-0 items-center gap-1">
-            {api.capabilities.revealPath && host === undefined && (
+            {api.capabilities.revealPath && revealPath !== null && (
               <Tooltip label={missing ? 'Folder is missing' : 'Show in file manager'}>
                 <Button
                   variant="ghost"
                   size="icon"
                   aria-label="Show in file manager"
                   disabled={missing}
-                  onClick={() => void api.system.revealPath(repository.path)}
+                  onClick={() => void api.system.revealPath(revealPath)}
                 >
                   <FolderOpen />
                 </Button>

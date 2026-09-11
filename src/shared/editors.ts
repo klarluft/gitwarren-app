@@ -57,9 +57,17 @@ export interface EditorLink extends EditorInfo {
  *
  * The stored `editor_target` wins when there is one, and NULL means derive it -
  * which is the common case and the reason the column is nullable rather than
- * filled in at Add time with a guess nobody has checked. It is kept apart from
- * `target` because the two coincide today and stop coinciding at M5, where the
- * carrier is `wsl.exe -d Ubuntu` and the editor form is `wsl+Ubuntu`.
+ * filled in at Add time with a guess nobody has checked.
+ *
+ * M4.4 wrote down that the derivation would stop being one rule at M5, and this
+ * is it: the two authorities are `ssh-remote+xfor@pc-wsl` and `wsl+Ubuntu`, and
+ * they are different enough that a prefix swap is the whole of the difference.
+ * That is exactly why `editor_target` is kept apart from `target` - the carrier
+ * and the editor name the same machine in two vocabularies, and only one of them
+ * is `ssh`'s. VS Code's remote authorities are the source: `ssh-remote+` comes
+ * from ms-vscode-remote.remote-ssh and `wsl+` from ms-vscode-remote.remote-wsl,
+ * and a link is inert without the matching extension - which is silent, and
+ * caught M4.4 out on the Mac.
  *
  * Here rather than in the hosts service because both shells need it and only
  * one of them can read a database: a browser tab opens the same URLs and works
@@ -70,7 +78,8 @@ export function editorTargetFor(host: {
   target: string
   editorTarget: string | null
 }): string {
-  return host.editorTarget ?? `ssh-remote+${host.target}`
+  if (host.editorTarget !== null) return host.editorTarget
+  return host.kind === 'wsl' ? `wsl+${host.target}` : `ssh-remote+${host.target}`
 }
 
 /**

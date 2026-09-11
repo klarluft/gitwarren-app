@@ -159,3 +159,29 @@ test('the editor target is derived from the ssh target, and overridden when set'
     'wsl+Ubuntu'
   )
 })
+
+test('a WSL host derives the editor form its own extension understands', () => {
+  // The thing M4.4 wrote down and M5 had to make true: the carrier is
+  // `wsl.exe -d Ubuntu` and the editor authority is `wsl+Ubuntu`, which is why
+  // `editor_target` is a column apart from `target` rather than a derivation of
+  // it. `ssh-remote+` comes from ms-vscode-remote.remote-ssh and `wsl+` from
+  // ms-vscode-remote.remote-wsl - different extensions, and a link is inert
+  // without the matching one.
+  assert.equal(editorTargetFor({ kind: 'wsl', target: 'Ubuntu', editorTarget: null }), 'wsl+Ubuntu')
+  // An override still wins, for the person whose distribution is registered
+  // under another name.
+  assert.equal(
+    editorTargetFor({ kind: 'wsl', target: 'Ubuntu', editorTarget: 'ssh-remote+box' }),
+    'ssh-remote+box'
+  )
+})
+
+test('a WSL file gets a URL the remote-wsl extension can open', () => {
+  const path = '/home/xfor/github.com/klarluft/gitwarren-app/README.md'
+  const remote = editorTargetFor({ kind: 'wsl', target: 'Ubuntu', editorTarget: null })
+
+  assert.equal(
+    editorLink('vscode')?.remoteUrl?.(remote, path, 3),
+    `vscode://vscode-remote/wsl+Ubuntu${path}:3`
+  )
+})
