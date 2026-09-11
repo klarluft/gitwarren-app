@@ -1114,13 +1114,41 @@ installers, and uploads them plus the manifests to a GitHub release for the
 current tag. The release is created as a **draft** — publish it in the GitHub UI
 when you are ready, and that is the moment clients begin to see the update.
 
-Publishing also fans out to two other places, both on the `release: published`
-event: `deploy-site.yml` rebuilds gitwarren.com so its download buttons point at
-the new assets, and `homebrew-tap.yml` asks
+Publishing a *stable* release also fans out to two other places, both on the
+`release: published` event: `deploy-site.yml` rebuilds gitwarren.com so its
+download buttons point at the new assets, and `homebrew-tap.yml` asks
 [klarluft/homebrew-tap](https://github.com/klarluft/homebrew-tap) to move its
 cask to the new version and checksums. The tap needs a `HOMEBREW_TAP_TOKEN`
 secret for that nudge to be immediate; without one it still catches the
 release on its own schedule within a few hours.
+
+### Prereleases
+
+A tag carrying a prerelease component — `v0.1.7-beta.3` — is a build for
+testers, and the pipeline keeps it away from everyone else. The draft is
+created `--prerelease`, and both fan-outs above decline to run for one: the
+website goes on advertising the newest stable release, and the Homebrew cask
+stays where it is.
+
+That flag is load-bearing. GitHub's `/releases/latest` skips a prerelease, and
+that endpoint is what electron-updater asks on behalf of every install running
+a stable version — `allowPrerelease` is derived from the *installed* version,
+so a 0.1.6 install never looks at a beta. Nothing else in the release says so:
+the update manifests inside a beta are still named `latest.yml`, because
+electron-builder derives no channel for the GitHub provider. Clear the flag,
+or tick *Set as the latest release* while publishing, and every stable install
+takes the beta on its next six-hourly check.
+
+So publish one explicitly rather than through the UI's defaults:
+
+```bash
+gh release edit v0.1.7-beta.3 --draft=false --prerelease --latest=false
+```
+
+Testers keep updating among themselves from there — a beta install looks for
+`beta-mac.yml`, gets a 404, and falls back to the `latest.yml` in the same
+release — and each one moves to the next stable release on its own, with no
+reinstall, as long as that version is higher than the beta they are on.
 
 To build without publishing (for local testing):
 
