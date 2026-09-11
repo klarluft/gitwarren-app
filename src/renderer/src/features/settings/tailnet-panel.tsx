@@ -25,6 +25,32 @@
  * the switch is the one the machine reported - `http` or `https`, whichever
  * happened.
  *
+ * ## The wait is shown, because the switch cannot show it
+ *
+ * The consequence of not being optimistic is that between the click and the
+ * machine's answer the switch sits in its old position, and a switch that has
+ * not moved is indistinguishable from a click that did not land. `tailscale
+ * serve` is fast when the tailnet has certificates and slow when it has to
+ * provision one, so the gap is real either way and the panel says what is
+ * happening in it rather than leaving the user to guess. Same `Loader2` the
+ * host dialogs use, for the same reason.
+ *
+ * ## The URL is a thing to use, not a thing to read
+ *
+ * It was prose - "Open it at <url>" - and prose is the one shape that serves
+ * neither of the two things anybody does with it. The address is for *another*
+ * device: a phone, the laptop in the other room. So the first affordance is
+ * copy, because the trip it has to make is into a message or a password
+ * manager, and a URL you cannot select is a URL you retype by hand off a
+ * screen, `tail688c0c` and all.
+ *
+ * The second is the link itself, for the one question this machine can answer
+ * on its own - whether the thing works at all. `target="_blank"` is what makes
+ * that open the real browser rather than navigating the app window away from
+ * the app: the main process catches it in `setWindowOpenHandler` and hands it
+ * to `shell.openExternal`. In a browser tab it is simply a link, which is the
+ * same reason `components/markdown.tsx` spells its anchors that way.
+ *
  * ## Absent rather than disabled when there is no Tailscale
  *
  * Rule 3: Tailscale is discovery and identity, never a dependency. A machine
@@ -33,19 +59,25 @@
  * argument `ShellCapabilities` makes about a control that explains itself when
  * pressed.
  */
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import useSWR from 'swr'
-import { Globe } from 'lucide-react'
+import { Globe, Loader2 } from 'lucide-react'
 import { Switch } from '@/components/ui/switch'
 import { Card } from '@/components/ui/card'
 import { Breakable } from '@/components/breakable'
+import { CopyButton } from '@/components/copy-button'
 import { api, CACHE_KEYS } from '@/lib/api'
 import { errorMessage } from '@/lib/errors'
 
 export function TailnetPanel() {
   const { data: tailnet, mutate } = useSWR(CACHE_KEYS.tailnet, () => api.hosts.tailnet())
-  const [busy, setBusy] = useState(false)
+  // Null when nothing is in flight; otherwise what was asked for, which is the
+  // only thing the panel is entitled to claim before the machine answers.
+  const [pending, setPending] = useState<boolean | null>(null)
+  const busy = pending !== null
   const [failure, setFailure] = useState<string | null>(null)
+  // The anchor below, so a refused clipboard can select it instead.
+  const webRootRef = useRef<HTMLAnchorElement>(null)
 
   // Nothing until the first read lands, and nothing at all on a machine with no
   // Tailscale. A switch that appeared and then vanished would be worse than one
@@ -53,18 +85,19 @@ export function TailnetPanel() {
   if (!tailnet?.available) return null
 
   async function toggle(next: boolean): Promise<void> {
-    setBusy(true)
+    setPending(next)
     setFailure(null)
     try {
       // No optimistic value, deliberately - see the header. `tailscale serve`
       // can take a second or two, and showing "on" during it would be showing
-      // the request rather than the machine.
+      // the request rather than the machine. The pending line below is how the
+      // user knows the click landed without being told an outcome yet.
       await mutate(api.hosts.setTailnetExposure({ exposed: next }), { revalidate: false })
     } catch (error) {
       setFailure(errorMessage(error))
       void mutate()
     } finally {
-      setBusy(false)
+      setPending(null)
     }
   }
 
@@ -87,17 +120,38 @@ export function TailnetPanel() {
         />
       </div>
 
-      {tailnet.exposed && tailnet.webRoot ? (
-        // Shown rather than described, because it is the thing a person types
-        // into a phone. `Breakable` so it wraps at its separators and stays
-        // selectable at 390 px - the rule M3.5 set and M4.5 found the hard
-        // edge of.
-        <p className="text-xs text-muted-foreground">
-          Open it at{' '}
-          <span className="font-mono">
-            <Breakable text={tailnet.webRoot} />
-          </span>
+      {busy ? (
+        // Which direction, because "putting it on" and "taking it off" fail
+        // differently and the user is waiting on one specific thing.
+        <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <Loader2 className="size-3 shrink-0 animate-spin" />
+          {pending ? 'Putting this machine on your tailnet…' : 'Taking it off your tailnet…'}
         </p>
+      ) : null}
+
+      {!busy && tailnet.exposed && tailnet.webRoot ? (
+        <div className="flex items-center gap-1">
+          {/* `Breakable` so it wraps at its separators and stays selectable at
+              390 px - the rule M3.5 set and M4.5 found the hard edge of. The
+              anchor is the same element the copy button selects when the
+              clipboard is refused, which is why it holds the ref. */}
+          <a
+            ref={webRootRef}
+            href={tailnet.webRoot}
+            target="_blank"
+            rel="noreferrer noopener"
+            data-selectable
+            className="min-w-0 flex-1 font-mono text-xs text-primary underline underline-offset-2 hover:no-underline"
+          >
+            <Breakable text={tailnet.webRoot} />
+          </a>
+          <CopyButton
+            label="Copy this machine's tailnet address"
+            text={tailnet.webRoot}
+            source={webRootRef}
+            className="shrink-0"
+          />
+        </div>
       ) : null}
 
       {failure ? <p className="text-xs text-destructive">{failure}</p> : null}
