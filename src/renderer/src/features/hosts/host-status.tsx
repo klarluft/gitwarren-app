@@ -21,15 +21,37 @@ import type { HostWithState } from '@shared/schemas'
 
 export type Reachability = 'up' | 'down' | 'unknown'
 
-export function reachabilityOf(host: HostWithState): Reachability {
+/**
+ * `observed` is the asking side's own evidence, and it wins.
+ *
+ * A row's `state` comes from the pool, but the *row* is a read like any other
+ * and is exactly as old as the last time the list was fetched. M4.5 found the
+ * two saying different things out loud: open a review on a host in a window
+ * that has just started, and the strip above the diff said "Not tried yet"
+ * about the machine that had this moment served it - because `hosts.list` was
+ * answered before anything had connected and nothing re-asked. Whoever has had
+ * an answer out of the machine knows better than a cached list, in exactly the
+ * way `lib/host-reachability.ts` argues about the disconnection itself.
+ *
+ * Undefined when the caller has observed nothing, which is not the same as
+ * having observed nothing good - see the paragraph above about never tried.
+ */
+export function reachabilityOf(host: HostWithState, observed?: Reachability): Reachability {
+  if (observed !== undefined) return observed
   if (host.state.connected) return 'up'
   // A host with a failure behind it is down even while its backoff is running;
   // a host with none has simply not been asked.
   return host.state.failures > 0 || host.state.lastError ? 'down' : 'unknown'
 }
 
-export function ReachabilityBadge({ host }: { host: HostWithState }) {
-  switch (reachabilityOf(host)) {
+export function ReachabilityBadge({
+  host,
+  observed
+}: {
+  host: HostWithState
+  observed?: Reachability
+}) {
+  switch (reachabilityOf(host, observed)) {
     case 'up':
       return (
         <Badge variant="success">

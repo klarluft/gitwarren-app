@@ -1586,7 +1586,8 @@ them verifiable against the real `pc-wsl` node rather than against a mock:
    listed under their host, clones grouped by root commit across hosts.
    *(done — see below.)*
 4. **Attachments, editors and agent access per host.** *(done — see below.)*
-5. **Disconnection.** The stale banner and the silent refetch.
+5. **Disconnection.** The stale banner and the silent refetch. *(done — see
+   below. M4 is complete.)*
 
 **M4.1, done on the Mac against the WSL node, 10 September.** The novelty is
 one file and an argument vector. Everything else M4 needs had already been
@@ -2199,6 +2200,236 @@ tests and not by the machine. A browser tab was checked at the HTTP endpoint and
 not with a browser open in front of it. And deep links still carry no host, so a
 `gitwarren://` link written on `pc-wsl` opens the Mac's review of that number —
 unchanged from M4.3, and still M6's.
+
+**M4.5, done on the Mac against the WSL node, 11 September.** A machine can now
+go away in the middle of being reviewed. The banner is the visible half and was
+the easy one; what the slice is actually about is the two halves either side of
+it — knowing, and coming back:
+
+    lib/host-reachability.ts    which machines have stopped answering
+    onErrorRetry                something has to go on asking
+    use-reconnect.ts            one read coming back brings the rest with it
+    ShellConnection             the *other* disconnection
+
+**The push nobody built, and why that is the same argument as M4.2's.**
+`core/hosts/pool.ts` has carried an `onStateChange` hook since M4.1 with a
+comment saying this slice would render it. Nothing passes it, and it is still
+nothing. A push from the pool has nowhere to travel: `RpcEvent` in
+`shared/rpc.ts` is reserved for M6 and nothing emits on it, so the state would
+have had to reach a screen down an Electron IPC channel for the window *and*
+down the WebSocket for a tab — two half-built event channels, in a
+request/response protocol, for one banner. That is exactly what M4.2 refused to
+invent for a progress bar, and the refusal is easier here, because in this case
+the signal already exists.
+
+The signal is the reads the screen is making anyway. An open review polls
+`reviews.open` every fifteen seconds; when the machine goes away that read fails
+with `HOST_OFFLINE`, and when it comes back the same read succeeds. Both halves
+of "disconnection" are already arriving, on the one path that also knows whether
+there is anything on screen to mark stale. `lib/api.ts`'s `ask` is where every
+question this window asks of another computer passes with the host still in
+scope, so it is the one place that can notice, and it is four lines.
+
+What the pool knows and this does not is the state of hosts *nobody is looking
+at* — which is precisely the set with no screen to put a banner on. That is
+M6's `host.state` event, where a machine going away is news whether or not
+anything is open on it, and the hook's comment now says so.
+
+Polling `hosts.list` was the other candidate and is worse than either. It is
+cheap — `hostsService.list` reads the pool rather than connecting — but the
+pool's state only *changes* when something connects, so the poll would report
+the past for ever unless some other read were doing the real work. Two
+questions, one answer, and a standing chance of the two disagreeing on one
+screen. Which they did, and see below.
+
+**Two disconnections, two sentences, and neither can see the other's evidence.**
+A host that is asleep and a browser tab whose socket has dropped both end in a
+stale screen, and they are different in all three of the ways that matter, so
+they are two components rather than one with a branch in it.
+
+*Different evidence.* A machine that has gone away is learned from requests that
+fail. A dropped socket fails nothing: `web/carrier.ts` queues whatever is asked
+while it is down, so nothing settles, no error is thrown, and an outcome-based
+signal is blind to it by construction. Only the socket knows —
+`createWebCarrier` has exposed `connected()` and `onConnectionChange()` since
+M3 with nothing subscribing, and `ShellConnection` is what finally does. In the
+Electron window it is a constant `true`, because the other end of that carrier
+is the main process of the same application and cannot go away without taking
+the window with it.
+
+*Different reach.* A sleeping host makes that machine's screens stale; a dropped
+socket makes every screen stale, this computer's included, and while it is down
+nothing can be claimed about any host. So `ConnectionBanner` sits above
+`HostBanner` in `App.tsx` and its sentence wins.
+
+*Different remedy.* A host gets "Try again", because somebody pressing it knows
+something the backoff timer does not — it is `hosts.probe`, the one call that
+ignores backoff, and the reason that method exists. The tab gets no button, and
+that is honest rather than missing: the carrier is already reconnecting on its
+own ladder, and a reload would need the very server that is not answering.
+
+**Stale is content you keep, and that turned out to be six screens rather than
+one.** The rule is one sentence — a disconnection is the only error that says
+nothing *about* the data, because it means the question could not be asked,
+while every other error is an answer that contradicts what is on screen — and
+`isDisconnection` in `lib/errors.ts` is the whole of it. Applying it was the
+work: the review header, the files tab, the commits tab, the repository list,
+the review list and the repository detail each had their own replace-on-error,
+and the conversation tab said it a second time in red under a banner that had
+just said it. A card is now for having *nothing* to show; `repository-list.tsx`
+keeps M4.3's "This host is not answering" for exactly that case, which is what
+arriving cold at a machine that is already asleep looks like.
+
+Nothing is dimmed, nothing is disabled and there is no per-row marker. A diff
+that was readable a second ago is still readable, a reviewer mid-file keeps
+their place, and one strip saying so out loud is the whole of the marking.
+Writes are not blocked either: a comment typed against a machine that has gone
+fails on submit with `ssh`'s own sentence, in the composer, with the text still
+in the box — which is better than a disabled button that loses what somebody was
+in the middle of writing.
+
+**One read is the machine's heartbeat, and the rest come back with it.** A
+review screen holds half a dozen keys, and most of them are `LIVE_READ_OPTIONS`
+reads that deliberately never retry, because a diff is expensive and re-running
+it behind somebody's back is not a favour. So recovery is not each key finding
+its own way back: the one read that *is* retrying announces the machine, and
+`use-reconnect.ts` revalidates everything scoped to it at once, so the screen
+redraws whole rather than in pieces over the following minutes. Revalidating by
+key suffix is what makes that a single line, and it is not a trick — `scoped()`
+in `lib/api.ts` puts the instance id on the end of every key that names
+something a host owns, for the sake of the family-wide `startsWith`
+invalidation at the front; asking from the other end gives "everything about
+that machine".
+
+**Verified end to end against `pc-wsl` through the shipping code**, with the
+cable pulled four different ways. No reinstall was needed and that is worth
+noting: M4.5 adds no method and changes no frame, so the daemon M4.4 left on
+that box answered it unchanged — the first slice of M4 for which version skew
+had nothing to say.
+
+The host added and reachable in 224 ms, its instance id learned, and review 2
+opened at `#/h/<instance>/reviews/2/files` with its diff. Then, with the
+launcher moved aside *and* the running daemon killed — moving it is not enough,
+the pool is holding a pipe into a process that is already up — the strip became
+*pc-wsl stopped answering*, with *GitWarren is not installed on xfor@pc-wsl:
+~/.gitwarren/bin/gitwarren was not found*, *Showing what was loaded at 07:41*,
+and a Try again; the 287 lines of review and diff underneath were the same 287
+lines. Putting the launcher back, the screen came back **on its own after 32
+seconds** — no click, no focus, no navigation.
+
+Mid-request, which is what M4's verify line actually asks for: killing the
+`ssh` the pool was holding while a request was travelling on it failed that
+request in 13 ms with *The connection to xfor@pc-wsl was terminated (SIGKILL)*,
+nothing retried, and the diff stayed. Driven through a real *Refresh* press so
+the request in flight was one the app made, the banner rose and the files tab
+kept its diff; the review poll noticed the machine again **5 seconds** later and
+pulled the diff back with it. Try again, pressed while the machine was still
+away, failed honestly and left the screen alone; pressed a moment after the
+launcher was restored it had the review back in **0.5 seconds**, which is the
+backoff being ignored on purpose.
+
+Arriving cold at a sleeping host is the other shape: `#/h/<instance>/` after a
+reload said *pc-wsl · Unreachable* in the strip and carried M4.3's card in the
+content, once rather than twice. A comment typed while the machine was away kept
+its draft and showed `ssh`'s sentence under the composer — and it was the failed
+*write* that raised the banner, which is the whole design in one gesture.
+
+In a Chrome tab on the loopback view: stopping the app under it produced
+*GitWarren is not answering*, the home screen still on screen behind it, and
+`shell.connection.connected()` false; fifteen seconds later the second sentence
+about a restarted GitWarren appeared. No console errors or warnings in any of
+it, and no horizontal scroll at 390 px.
+
+**Five things bit.**
+
+*The poll stops at the exact moment there is something to notice.* SWR's
+`refreshInterval` looks like it is already the heartbeat and it is not: the poll
+is skipped for as long as the cached error is set — `if (!getCache().error && …)`
+in `use-swr` — and this app has set `shouldRetryOnError: false` globally since
+M1. So the fifteen-second revalidation that would have seen the machine come
+back stopped the first time it failed, and an open review stayed offline until
+somebody focused the window. The banner was perfect and permanent. The fix is an
+`onErrorRetry` that says no to everything except a disconnection and retries
+that at a steady fifteen seconds, only while the document is visible; what it
+costs is bounded a layer down, because a host in backoff refuses in
+microseconds and at most one `ssh` a minute per machine actually happens. Worth
+noticing that the flag's original reasoning was right and is now written out in
+prose rather than expressed by being off: an error is normally an *answer*, and
+a `NOT_FOUND` will not become found by being asked again.
+
+*A healthy start was being offered as a cause of death.* The first failure
+message to reach a screen read *The connection to xfor@pc-wsl was terminated
+(SIGKILL). [gitwarren-serve] ready (instance …, protocol v1, database: …)* —
+because `describeExit` appends the tail of stderr, and stderr is where M4.1 put
+the daemon's start-up banner precisely so it could not hurt the framing on
+stdout. Two kinds of line on one stream, and only one of them is ever an
+explanation: proof that the daemon started is the one thing that cannot be why
+it stopped. The banner's prefix now lives in `shared/rpc.ts` because the two
+ends of the pipe both need it — one to write it, one to leave it out — and every
+other line is still kept, because any of them might be the reason. M4.1 and M4.2
+never saw this: their failures were all *before* a start, where stderr holds
+only what `ssh` said.
+
+*Keeping the content meant finding every screen that throws it away.* The review
+header was the obvious one. The files tab was not, and it is the one that
+mattered — killing the `ssh` under a *Refresh* left the banner correct and the
+diff gone, which is the exact failure the slice exists to prevent, found by
+pressing the button rather than by reading the code. Six screens in the end, and
+the reason it was six is that "could not load" and "is momentarily out of touch"
+had never needed telling apart before there was a network in the middle.
+
+*The badge over the diff disagreed with the diff, in both directions.* Opening a
+review on a host in a freshly started window showed *Not tried yet* over a diff
+that machine had just served, because `hosts.list` was answered before anything
+had connected and nothing re-asked. So `reachabilityOf` now takes what the
+asking side has observed, and that wins over the row. The first attempt at it
+still said *Not tried yet*, which is the more interesting half: the store
+announced a change of state and treated "answered" as no change, so the badge
+was never told. Never heard from is a state, and leaving it is news — one extra
+announcement per machine per window, and the sentence is right.
+
+*It passed the no-horizontal-scroll check and was unreadable anyway.* At 390 px
+the buttons beside the message are `shrink-0` and the text column had `min-w-0`,
+so `ssh`'s sentence came out one word per line down the left of the screen
+inside a box that measured exactly 390 px wide. A floor on the text column makes
+the row wrap and gives the buttons a line of their own. Worth writing down
+because the check that M3.5 established — `scrollWidth === clientWidth` — is
+necessary and says nothing at all about whether anybody can read the result.
+
+**What M4.5 found next door.** A browser tab cannot get itself back after the
+app it was served by is restarted, and this is by design rather than a bug:
+`core/web/token.ts` mints its token per *launch* and gives three reasons for it,
+the first of which is that revoking it should be `quit`. The consequence had
+simply never been looked at from the tab's side — the socket retries for ever
+against a server that answers 401, which is a spinner pretending to be progress.
+Nothing here changes the token, because persisting it would trade away the
+property that module was built for. What changed is that the banner stops
+pretending: after fifteen seconds it says that a restarted GitWarren means an
+expired link and a new one has to be opened from the app. Conditional on
+purpose — a page cannot tell a restart from a blip, both being a socket that
+will not open, and the confident version of that sentence would send somebody to
+re-open an app that is fine.
+
+**Not done in M4.5, and why.** There are still no events: the fifteen-second
+poll is the whole of how this app learns anything, and a machine that goes away
+while nothing is open on it is noticed the next time somebody looks. That is
+M6, and `onStateChange` is the hook it will use. Nothing marks individual rows
+as stale, deliberately — one strip is the whole of the marking, and a screen
+covered in little clocks would be worse at saying the one thing that is true.
+`ConnectionBanner` is only ever seen in a tab, since the window's carrier cannot
+lose its other end; the Electron half is a constant and two lines. And a review
+open on a machine that comes back does not learn what *changed* while it was
+away beyond what a refetch shows — comments an agent wrote in the meantime
+appear, because the whole review is one read, but nothing points at them.
+
+**M4 is complete.** From the Mac, a WSL node is added by SSH target, has
+GitWarren installed onto it over the pipe, and is then a machine whose
+repositories, reviews, diffs, comments, attachments and editor links all work
+from here; the agent inside WSL reads the same reviews over its own local MCP;
+and when the machine goes away the screen says so, keeps what it had, and comes
+back by itself. The gap table below still reads true as written — disconnection
+was always split between M4 and M6, and what M6 owns is the heartbeat, not the
+banner.
 
 ### M5 — WSL from Windows
 

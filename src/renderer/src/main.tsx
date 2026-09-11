@@ -3,7 +3,19 @@ import { createRoot } from 'react-dom/client'
 import { SWRConfig } from 'swr'
 import { App } from './App'
 import { api } from './lib/api'
+import { isDisconnection } from './lib/errors'
 import './index.css'
+
+/**
+ * How often to ask a machine that has stopped answering whether it is back.
+ *
+ * The same fifteen seconds an open review already polls at, because it is the
+ * same question. What it costs is bounded by the pool rather than by this
+ * number: `core/hosts/pool.ts` refuses immediately while its backoff is
+ * running, so four out of five of these are a rejected promise and no process,
+ * and at most one connection a minute per machine actually reaches `ssh`.
+ */
+const OFFLINE_RETRY_MS = 15_000
 
 /** Follow the OS appearance, and keep following it if the user switches. */
 function applyColourScheme(): void {
@@ -41,7 +53,43 @@ createRoot(container).render(
         // it - a branch may well have changed while you were in the terminal.
         revalidateOnFocus: true,
         revalidateOnReconnect: false,
-        shouldRetryOnError: false
+        /**
+         * On, so that `onErrorRetry` below is consulted at all - and it is what
+         * still says no to everything except a disconnection.
+         *
+         * The flag was `false` because an error is normally an *answer*: a
+         * `NOT_FOUND` will not become found by being asked again, and a broken
+         * git will not mend itself between two revalidations. A machine that is
+         * asleep is the one error that is about the question not having been
+         * asked, and it is expected to stop being true - which is why it is the
+         * one case that retries, and why leaving the refusal expressed here in
+         * code is better than turning a flag back on.
+         */
+        shouldRetryOnError: true,
+        /**
+         * A machine that stopped answering is asked again, at a steady interval.
+         *
+         * SWR's `refreshInterval` looks like it should already do this and does
+         * not: the poll is skipped for as long as the cached error is set (in
+         * `use-swr`: `if (!getCache().error && …)`), so the fifteen-second
+         * revalidation that would notice a machine coming back stops at the
+         * exact moment there is something to notice. With retries off, an open
+         * review against a sleeping host stayed offline until somebody focused
+         * the window. Found by unplugging `pc-wsl` and waiting; see M4.5 in
+         * docs/across-hosts.md.
+         *
+         * Steady rather than exponential, because what is being waited for is a
+         * laptop opening its lid, and the backoff that protects `ssh` from a
+         * machine that is switched off already exists one layer down. Only
+         * while the document is visible: a window in the background has
+         * `revalidateOnFocus` to bring it up to date the moment it is looked at,
+         * and nothing to show in the meantime.
+         */
+        onErrorRetry: (error, _key, _config, revalidate, { retryCount }) => {
+          if (!isDisconnection(error)) return
+          if (document.visibilityState !== 'visible') return
+          setTimeout(() => revalidate({ retryCount }), OFFLINE_RETRY_MS)
+        }
       }}
     >
       <App />

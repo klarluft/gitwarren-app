@@ -17,6 +17,18 @@ export function errorCode(error: unknown): AppErrorCode | null {
   return error instanceof AppError ? error.code : null
 }
 
+/**
+ * A failure that says nothing about the data - the question could not be asked.
+ *
+ * The distinction M4.5 turns on. Every other error is an *answer* about what
+ * was asked for, and replaces what is on screen because it contradicts it; a
+ * disconnection contradicts nothing, so the screen keeps what it had and the
+ * banner says it is stale. See `features/hosts/host-banner.tsx`.
+ */
+export function isDisconnection(error: unknown): boolean {
+  return errorCode(error) === 'HOST_OFFLINE'
+}
+
 /** Field-level messages keyed by form field, ready to render inline. */
 export function fieldErrors(error: unknown): Record<string, string[]> {
   return error instanceof AppError && error.fieldErrors ? error.fieldErrors : {}

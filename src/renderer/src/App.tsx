@@ -18,6 +18,7 @@ import { useRef } from 'react'
 // sibling file. A data: URI is allowed by that same policy, and at this size
 // costs less than the exception would.
 import logo from './assets/logo.png?inline'
+import { ConnectionBanner } from './components/connection-banner'
 import { ScrollToTop } from './components/scroll-to-top'
 import { Kbd } from './components/ui/kbd'
 import { TooltipProvider } from './components/ui/tooltip'
@@ -29,6 +30,7 @@ import { CommandRegistryProvider } from './features/commands/command-registry'
 import { HostBanner } from './features/hosts/host-banner'
 import { HostsCard } from './features/hosts/hosts-card'
 import { HostsPage } from './features/hosts/hosts-page'
+import { useRefetchOnReconnect } from './features/hosts/use-reconnect'
 import { SettingsPanel } from './features/settings/settings-panel'
 import { RepositoryDetail } from './features/repositories/repository-detail'
 import { RepositoryList } from './features/repositories/repository-list'
@@ -56,6 +58,11 @@ export function App() {
   // The app scrolls inside <main>, not the window, so anything that wants to
   // know or change the scroll position needs a handle on that element.
   const scroller = useRef<HTMLElement>(null)
+  // Here rather than in the banner that shows the disconnection, because
+  // bringing a screen back is not the banner's job and a machine can come back
+  // while nothing about it is on screen. Once, at the top, for the same reason
+  // the host scope is read once: two subscribers would refetch twice.
+  useRefetchOnReconnect()
 
   return (
     // One provider for the whole app: Base UI groups tooltips through it, so
@@ -83,7 +90,13 @@ export function App() {
                 route.name === 'review' ? reviewWidth(route.tab) : 'max-w-3xl'
               )}
             >
-              <div className="mb-6">
+              {/* `gap-3` so the two can be on screen at once; an empty box is
+                  still zero high, so the spacing below is unchanged. */}
+              <div className="mb-6 flex flex-col gap-3">
+                {/* Above the host strip deliberately: a page that cannot reach
+                    its own core has nothing to say about anybody else's
+                    machine. See `connection-banner.tsx`. */}
+                <ConnectionBanner />
                 <UpdateBanner />
               </div>
 

@@ -76,6 +76,20 @@ import type {
 export const RPC_PROTOCOL_VERSION = 1
 
 /**
+ * The first thing a `serve --stdio` daemon writes, and it writes it on stderr.
+ *
+ * Here rather than in `daemon/daemon.ts` because two files need it and they are
+ * on opposite ends of a pipe. The daemon prints it; `core/hosts/ssh.ts` has to
+ * recognise it in order to *leave it out* of what it tells a person went wrong.
+ * That stream carries two completely different kinds of line - a healthy start,
+ * and why the far end died - and M4.5 found the first being quoted as if it
+ * were the second: "The connection to xfor@pc-wsl was terminated (SIGKILL).
+ * [gitwarren-serve] ready (instance …, protocol v1, database: …)". Both halves
+ * true, the second one no help at all.
+ */
+export const DAEMON_READY_PREFIX = '[gitwarren-serve] ready'
+
+/**
  * Who just answered.
  *
  * `instanceId` is the durable identity of the install (`core/instance.ts`) and

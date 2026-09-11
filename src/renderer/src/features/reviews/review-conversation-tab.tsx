@@ -22,7 +22,7 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Markdown } from '@/components/markdown'
-import { errorMessage } from '@/lib/errors'
+import { errorMessage, isDisconnection } from '@/lib/errors'
 import { absoluteTime, relativeTime } from '@/lib/format'
 import { replace } from '@/lib/router'
 import { CommentComposer } from '../comments/comment-composer'
@@ -108,7 +108,10 @@ export function ReviewConversationTab({ review, onEdit }: ReviewConversationTabP
 
       {isLoading && <Skeleton className="h-24 w-full" />}
 
-      {error !== undefined && error !== null && (
+      {/* Not for a disconnection: this tab already keeps its threads when a
+          read fails, and `HostBanner` has said the machine is away in as many
+          words. A second red line under it would be the same news twice. */}
+      {error !== undefined && error !== null && !isDisconnection(error) && (
         <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {errorMessage(error)}
         </p>

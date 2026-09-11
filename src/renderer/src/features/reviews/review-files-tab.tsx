@@ -37,7 +37,7 @@ import {
 } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 
-import { errorMessage } from '@/lib/errors'
+import { errorMessage, isDisconnection } from '@/lib/errors'
 import { formatStep } from '@/lib/keys'
 import { plural } from '@/lib/format'
 import { useApi, useHost } from '@/lib/host-scope'
@@ -697,7 +697,13 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
 
   if (isLoading) return <LoadingState />
 
-  if (error !== undefined) {
+  // The diff outlives the machine that produced it. This is the tab M4.5 was
+  // written for - somebody halfway down a file, with a thread open - and
+  // replacing it with a card about a laptop would cost them their place to tell
+  // them something `HostBanner` is already saying above the tab strip. Every
+  // other error still replaces it, because every other error contradicts what
+  // is on screen. See `isDisconnection` in `lib/errors.ts`.
+  if (error !== undefined && !(data !== undefined && isDisconnection(error))) {
     return (
       <Card className="flex flex-col items-center gap-3 border-destructive/40 px-6 py-10 text-center">
         <div className="rounded-full bg-destructive/10 p-3 text-destructive">

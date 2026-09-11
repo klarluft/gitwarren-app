@@ -10,7 +10,7 @@ import { Tooltip } from '@/components/ui/tooltip'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
-import { errorMessage } from '@/lib/errors'
+import { errorMessage, isDisconnection } from '@/lib/errors'
 import { useRegisterCommands, type Command } from '@/features/commands/command-registry'
 import { absoluteTime, relativeTime } from '@/lib/format'
 import { useHostScope } from '@/lib/host-scope'
@@ -38,6 +38,10 @@ export function ReviewList({ repositoryId }: { repositoryId: number }) {
     repositoryId,
     filter === 'all' ? undefined : filter
   )
+
+  // The list we already have outlives the machine that served it going away -
+  // see `review-detail.tsx` for the argument, and `HostBanner` for the notice.
+  const stale = reviews !== undefined && isDisconnection(error)
 
   useRegisterCommands(
     useMemo<Command[]>(
@@ -121,7 +125,7 @@ export function ReviewList({ repositoryId }: { repositoryId: number }) {
 
       {isLoading && <LoadingState />}
 
-      {!isLoading && error !== undefined && (
+      {!isLoading && error !== undefined && !stale && (
         <Card className="flex flex-col items-center gap-3 border-destructive/40 px-6 py-10 text-center">
           <div className="rounded-full bg-destructive/10 p-3 text-destructive">
             <AlertCircle className="size-6" />
@@ -134,11 +138,11 @@ export function ReviewList({ repositoryId }: { repositoryId: number }) {
         </Card>
       )}
 
-      {!isLoading && error === undefined && reviews?.length === 0 && (
+      {!isLoading && (error === undefined || stale) && reviews?.length === 0 && (
         <EmptyState filter={filter} onCreate={() => setFormOpen(true)} />
       )}
 
-      {!isLoading && error === undefined && reviews && reviews.length > 0 && (
+      {!isLoading && (error === undefined || stale) && reviews && reviews.length > 0 && (
         <ul className="flex flex-col gap-2">
           {reviews.map((review) => (
             <li key={review.id}>

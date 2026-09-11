@@ -44,7 +44,7 @@ import { closeDatabase, getDatabase } from '../core/db/client.js'
 import { getInstanceId } from '../core/instance.js'
 import { getDatabasePath } from '../core/paths.js'
 import { serveStdio } from '../core/rpc/stdio.js'
-import { RPC_PROTOCOL_VERSION } from '../shared/rpc.js'
+import { DAEMON_READY_PREFIX, RPC_PROTOCOL_VERSION } from '../shared/rpc.js'
 import { runListen } from './listen.js'
 
 const USAGE = `gitwarren serve --stdio
@@ -85,8 +85,10 @@ export function runDaemon(argv: readonly string[]): boolean {
   // start debugging a missing database.
   getDatabase()
 
+  // The prefix is shared with `core/hosts/ssh.ts`, which has to recognise this
+  // line to keep it out of a failure message. See `DAEMON_READY_PREFIX`.
   console.error(
-    `[gitwarren-serve] ready (instance ${getInstanceId()}, protocol v${RPC_PROTOCOL_VERSION}, ` +
+    `${DAEMON_READY_PREFIX} (instance ${getInstanceId()}, protocol v${RPC_PROTOCOL_VERSION}, ` +
       `database: ${getDatabasePath()})`
   )
 

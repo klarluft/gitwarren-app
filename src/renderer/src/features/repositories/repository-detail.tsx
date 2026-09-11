@@ -20,7 +20,7 @@ import { Tooltip } from '@/components/ui/tooltip'
 import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { CACHE_KEYS } from '@/lib/api'
-import { errorMessage } from '@/lib/errors'
+import { errorMessage, isDisconnection } from '@/lib/errors'
 import { useApi, useHost, useHostScope } from '@/lib/host-scope'
 import { useRegisterCommands, type Command } from '@/features/commands/command-registry'
 import { navigate } from '@/lib/router'
@@ -95,7 +95,12 @@ export function RepositoryDetail({ repositoryId }: { repositoryId: number }) {
     )
   }
 
-  if (error !== undefined || !repository) {
+  // A disconnection over a repository we already have is staleness, not
+  // failure - see the same guard in `review-detail.tsx` and `isDisconnection`
+  // in `lib/errors.ts`. `HostBanner` is what says so.
+  const stale = repository !== undefined && isDisconnection(error)
+
+  if (!repository || (error !== undefined && !stale)) {
     return (
       <Card className="flex flex-col items-center gap-3 border-destructive/40 px-6 py-12 text-center">
         <div className="rounded-full bg-destructive/10 p-3 text-destructive">
