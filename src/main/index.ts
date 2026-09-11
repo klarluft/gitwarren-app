@@ -40,6 +40,7 @@ import {
   setWindowFactory,
   takePendingRoute
 } from './deep-link.js'
+import { startForwardingEvents, stopForwardingEvents } from './events.js'
 import { registerIpcHandlers } from './ipc.js'
 import { startLinkServer, stopLinkServer } from './link-server.js'
 import { wasOpenedAtLogin } from './login-item.js'
@@ -248,6 +249,12 @@ if (process.argv.includes('--serve')) {
     registerAttachmentProtocol()
     registerIpcHandlers()
 
+    // Before the first window, so that a write which happens during startup -
+    // an agent already running against this data directory - is not announced
+    // into a silence. The forwarder reads the window list at delivery time, so
+    // there is nothing here that depends on a window existing yet.
+    startForwardingEvents()
+
     // Written before anything else needs it. An agent may be configured against
     // this path already and start the moment the user does, so the file should
     // be current before the window is even up.
@@ -316,6 +323,7 @@ if (process.argv.includes('--serve')) {
 
   app.on('before-quit', () => {
     quitting = true
+    stopForwardingEvents()
     disposeUpdater()
     destroyTray()
     stopLinkServer()

@@ -12,11 +12,11 @@
  * throws if it is missing. The socket underneath it is still connecting at that
  * moment, which is fine and deliberate - see `carrier.ts` on queueing.
  */
-import { createWebCarrier } from './carrier'
+import { createWebCarrier, type WebCarrier } from './carrier'
 import { createWebShell } from './shell'
 import { isLoopbackFragment, routeForLoopbackFragment } from './loopback-fragment'
 import { hrefFor } from '@shared/routes'
-import { outcomeOf, type BridgeCarrier, type Carrier } from '@shared/rpc'
+import { outcomeOf, type BridgeCarrier } from '@shared/rpc'
 import type { GitWarrenBridge } from '@shared/api'
 
 /**
@@ -32,9 +32,14 @@ import type { GitWarrenBridge } from '@shared/api'
  * The round trip through `toSerialized` and back is the price, and it is a
  * plain object copy on a path that is already a network request.
  */
-function asBridgeCarrier(carrier: Carrier): BridgeCarrier {
+function asBridgeCarrier(carrier: WebCarrier): BridgeCarrier {
   return {
-    request: (method, params, host) => outcomeOf(() => carrier.request(method, params, host))
+    request: (method, params, host) => outcomeOf(() => carrier.request(method, params, host)),
+    // Passed straight through. An event crosses no boundary here - there is no
+    // `contextBridge` in a tab - so unlike the request half there is nothing to
+    // repackage, and the listener the renderer registers is the one the socket
+    // calls.
+    onEvent: (listener) => carrier.onEvent(listener)
   }
 }
 

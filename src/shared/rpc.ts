@@ -149,15 +149,69 @@ export type RpcOutcome<T = unknown> = { result: T } | { error: SerializedAppErro
 export type RpcResponse<T = unknown> = RpcOutcome<T> & { id: number }
 
 /**
+ * The three things that are ever announced.
+ *
+ * A closed set, and small on purpose. An event is a *reason to re-ask* and
+ * never the answer (see `core/events.ts`), so the vocabulary only has to be
+ * fine enough to name a family of cache keys - which is the same granularity
+ * the renderer already invalidates at after one of its own writes.
+ *
+ * `host.state` is the odd one and is the reason the channel exists at all. The
+ * other two are about data and are known only to the machine that owns it;
+ * this one is about a *machine* and is minted by the pool of whichever install
+ * is doing the reaching. It therefore never travels a wire - see the note on
+ * `RpcEvent.host`.
+ */
+export const RPC_EVENTS = {
+  /** A review, a repository or a reviewed mark changed on the sender. */
+  reviewsChanged: 'reviews.changed',
+  /** A comment or a thread changed on the sender. */
+  commentsChanged: 'comments.changed',
+  /** A host this install reaches became reachable, or stopped being. */
+  hostState: 'host.state'
+} as const
+
+export type RpcEventName = (typeof RPC_EVENTS)[keyof typeof RPC_EVENTS]
+
+/**
  * A push from whoever owns the data. Carries no id: nobody asked for it.
  *
- * Nothing emits one yet - the renderer polls, and M6 is where events replace
- * that - but the shape belongs next to the other two, because a carrier reading
- * a stream has to be able to tell an event from an answer.
+ * Reserved at M1 with nothing emitting on it, and the comment then said the
+ * shape was here so that "the message simply arrives". That turned out to be
+ * true and to be worth most of a slice: `core/rpc/stdio-client.ts` was written
+ * against this shape in M4 and routes an event to its `onEvent` hook rather
+ * than looking for a request to answer, so the stdio carrier needed no change
+ * at all in M6.
+ *
+ * `data` is `null` today for every name. It is kept in the shape rather than
+ * removed because leaving it out would make adding a scope later a protocol
+ * change, and because a frame with no payload field is the sort of thing a
+ * hand-written peer gets wrong. What it must never become is the *content* that
+ * changed - `core/events.ts` has the argument.
  */
 export interface RpcEvent<T = unknown> {
+  /**
+   * One of `RPC_EVENTS` - but typed as a plain string, deliberately.
+   *
+   * `RpcEventName` is the vocabulary this install *emits*. What it *receives*
+   * comes off a wire from a separately installed peer that may be newer, and
+   * narrowing this would make the receiving side's "ignore what you do not
+   * recognise" look like dead code to the compiler rather than like the
+   * protocol rule it has been since `RPC_PROTOCOL_VERSION` was written.
+   */
   event: string
   data: T
+  /**
+   * Which install this is news about. Added on arrival, never on the wire.
+   *
+   * A daemon announcing `comments.changed` is saying "on me", and it has no
+   * idea what instance id the *listener* files it under - it may be reached by
+   * two GitWarrens at once. So the carrier that received it stamps the host it
+   * had already resolved, which is the only side that knows, and the renderer
+   * then invalidates `…@<host>` rather than every machine's keys at once. The
+   * same asymmetry as `RpcRequest.host`: absent means this install.
+   */
+  host?: string
 }
 
 export type RpcMessage = RpcRequest | RpcResponse | RpcEvent
@@ -498,6 +552,21 @@ export interface BridgeCarrier {
     params: RpcParams<M>,
     host?: string
   ): Promise<RpcOutcome<RpcResult<M>>>
+  /**
+   * Events from the core this bridge is attached to. Returns an unsubscribe.
+   *
+   * On the carrier rather than on `ShellApi`, because an event is a message
+   * from the *core* and the carrier is the renderer's door to it - the two
+   * shells differ in how it arrives (an IPC channel, a frame on the socket) in
+   * exactly the way they already differ for a request. It is the same reason
+   * `ShellConnection` is on the shell and this is not: one is a fact about the
+   * transport, the other is news from the far end of it.
+   *
+   * Deliberately not typed per event name. Every subscriber wants all of them -
+   * see `subscribeToEvents` in `core/events.ts` - and a bridge that had to be
+   * edited to add a name would be another list to keep in step.
+   */
+  onEvent(listener: (event: RpcEvent) => void): () => void
 }
 
 /**

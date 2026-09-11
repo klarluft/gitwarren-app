@@ -4,6 +4,7 @@ import { SWRConfig } from 'swr'
 import { App } from './App'
 import { api } from './lib/api'
 import { isDisconnection } from './lib/errors'
+import { startListeningForEvents } from './lib/events'
 import './index.css'
 
 /**
@@ -41,6 +42,17 @@ applyColourScheme()
 api.navigation.onDeepLink((hash) => {
   window.location.hash = hash
 })
+
+/**
+ * Live updates, subscribed for the life of the window.
+ *
+ * Beside the deep-link listener for the same two reasons: it belongs to the
+ * window rather than to anything React renders, and it has to be listening
+ * before the first paint so that a comment written while the app was starting
+ * is not missed. What arrives is a name, never data - see `lib/events.ts` - so
+ * this line cannot put anything on screen that a read did not answer.
+ */
+startListeningForEvents((listener) => window.gitwarren.carrier.onEvent(listener))
 
 const container = document.getElementById('root')
 if (!container) throw new Error('Root element is missing from index.html')

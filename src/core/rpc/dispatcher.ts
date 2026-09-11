@@ -26,6 +26,7 @@
  * different piece of software. Shell capabilities live in `main/ipc.ts` and
  * never enter this map.
  */
+import { emitForMethod } from '../events.js'
 import { getInstanceId } from '../instance.js'
 import { describeMcpLaunch } from '../mcp-launcher.js'
 import { APP_VERSION } from '../version.js'
@@ -234,7 +235,14 @@ export async function dispatch<M extends RpcMethod>(
     // Traced here rather than in a carrier, so that counting round trips per
     // screen works the same however the request arrived - the measurement M1
     // exists to improve, and the one M4 will want again over a real network.
-    return await traced(method, () => handlers[method](params))
+    const result = await traced(method, () => handlers[method](params))
+    // After the work, never before: an event is a claim that something changed,
+    // and a method that threw changed nothing. This is the human surface - see
+    // the note at the top of this file - so it is exactly the writes a person
+    // made. An agent's writes never pass here and announce themselves from the
+    // MCP process instead.
+    emitForMethod(method)
+    return result
   } catch (error) {
     const appError = AppError.from(error)
     if (appError.code === 'INTERNAL') {

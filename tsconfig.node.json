@@ -35,6 +35,8 @@
     "src/renderer/src/lib/__tests__/fuzzy.test.ts",
     "src/renderer/src/lib/host-reachability.ts",
     "src/renderer/src/lib/__tests__/host-reachability.test.ts",
+    "src/renderer/src/lib/event-scope.ts",
+    "src/renderer/src/lib/__tests__/event-scope.test.ts",
     "src/renderer/src/features/reviews/diff-search.ts",
     "src/renderer/src/features/reviews/__tests__/diff-search.test.ts",
     "src/web/loopback-fragment.ts",

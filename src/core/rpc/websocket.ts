@@ -36,8 +36,9 @@
  */
 import type { WebSocket } from 'ws'
 import { handleRoutedRequest } from '../hosts/router.js'
+import { subscribeToEvents } from '../events.js'
 import { AppError } from '../../shared/errors.js'
-import type { RpcRequest, RpcResponse } from '../../shared/rpc.js'
+import type { RpcEvent, RpcRequest, RpcResponse } from '../../shared/rpc.js'
 
 /**
  * How long a peer has to answer a ping before it is treated as gone.
@@ -68,12 +69,28 @@ function asRequest(value: unknown): RpcRequest | null {
 export function serveWebSocket(socket: WebSocket): void {
   let alive = true
 
-  const write = (message: RpcResponse): void => {
+  const write = (message: RpcResponse | RpcEvent): void => {
     // A response for a socket that has closed is not an error worth logging on
     // every navigation - a tab going away mid-request is ordinary.
     if (socket.readyState !== socket.OPEN) return
     socket.send(JSON.stringify(message))
   }
+
+  /**
+   * Events out, to whoever is holding this socket.
+   *
+   * The one thing on this connection that nobody asked for, and the reason it
+   * is safe to write without being asked is that it carries no data - see
+   * `core/events.ts`. A socket that has closed is skipped by `write` rather
+   * than unsubscribing eagerly, because the close handler below is what owns
+   * the lifetime and two owners is how a leak starts.
+   *
+   * `host` is deliberately not stamped here. This daemon is announcing "on me",
+   * and it does not know what instance id the listener files it under - it may
+   * be reached by two GitWarrens at once, and a browser tab served by this very
+   * process calls it "local". The receiving carrier is the side that knows.
+   */
+  const unsubscribe = subscribeToEvents(write)
 
   const refuse = (id: number, message: string): void => {
     write({ id, error: new AppError('INVALID_INPUT', message).toSerialized() })
@@ -129,6 +146,7 @@ export function serveWebSocket(socket: WebSocket): void {
 
   socket.on('close', () => {
     clearInterval(heartbeat)
+    unsubscribe()
   })
 
   socket.on('error', (error: Error) => {

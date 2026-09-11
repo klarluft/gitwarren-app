@@ -121,7 +121,18 @@ export const IPC_CHANNELS = {
    * Main -> renderer push carrying a hash to move to, sent when a
    * `gitwarren://` deep link arrives while the app is already running.
    */
-  navigationDeepLink: 'navigation:deepLink'
+  navigationDeepLink: 'navigation:deepLink',
+  /**
+   * Main -> renderer push carrying an `RpcEvent`: something changed, go and
+   * re-read it.
+   *
+   * The window's half of what a browser tab gets as a frame on its socket. It
+   * is a *carrier* channel rather than a shell one - see `BridgeCarrier.onEvent`
+   * - which is why it is here next to `rpcRequest` rather than beside the two
+   * pushes above, both of which are about this shell (an update downloading, a
+   * link the OS handed us) rather than about the core's data.
+   */
+  rpcEvent: 'rpc:event'
 } as const
 
 /**
@@ -185,7 +196,8 @@ export const SHELL_CHANNELS = [
 /** Main -> renderer pushes. Nothing handles these; they are sent. */
 export const PUSH_CHANNELS = [
   IPC_CHANNELS.updatesChanged,
-  IPC_CHANNELS.navigationDeepLink
+  IPC_CHANNELS.navigationDeepLink,
+  IPC_CHANNELS.rpcEvent
 ] as const
 
 export interface AppInfo {
