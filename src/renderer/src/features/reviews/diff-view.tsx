@@ -438,14 +438,47 @@ export function FileDiffCard({
     setExpanded(true)
   }
 
+  /**
+   * The sections of the body, in the order they are drawn.
+   *
+   * Named rather than asked inline, because the rules between them are now the
+   * header's to draw. The header is sticky, so a line belonging to the *top* of
+   * the first section scrolls up underneath it and leaves the file name sitting
+   * straight on the code; the header carries its own bottom rule instead, and
+   * each section below asks only whether something precedes it.
+   */
+  const showsOrphans = expanded && orphans.length > 0 && comments !== undefined
+  const showsDiff = expanded && hasBody
+  const showsImageDiff = expanded && showsImage && source !== undefined
+  const showsBinaryNote = expanded && !hasBody && file.isBinary && !showsImage
+  const showsBody = showsOrphans || showsDiff || showsImageDiff || showsBinaryNote
+
   return (
-    <Card className="overflow-hidden">
+    // `clip` rather than `hidden`: both cut the diff to the card's rounded
+    // corners, but `hidden` makes the card a scroll container of its own, and a
+    // scroll container that cannot scroll is a scrollport the sticky header
+    // below would be pinned inside - never moving, never sticking.
+    <Card className="overflow-clip">
       {/* Not one big button any more: the header carries actions of its own,
           and a button inside a button is not a thing the DOM allows. */}
       {/* Wraps, and the path keeps a floor of a few inches: on a narrow window
           the badges drop to a line of their own rather than squeezing the path
           into a column one character wide. */}
-      <div className="flex w-full flex-wrap items-center gap-1 pr-2">
+      <div
+        className={cn(
+          // Sticky, so a file taller than the window never leaves the reader
+          // wondering which file they are in: the path, the stat, the reviewed
+          // checkbox and the actions stay in reach the whole way down it. It
+          // sticks *inside its own card*, so it gives way to the next file's
+          // header rather than outliving the diff it names.
+          //
+          // `--diff-sticky-top` is whatever the tab has parked above it - the
+          // find bar, when that is open. On its own the header rests against
+          // the top of the scroller.
+          'sticky top-[var(--diff-sticky-top,0px)] z-10 flex w-full flex-wrap items-center gap-1 bg-card pr-2',
+          showsBody && 'border-b border-border'
+        )}
+      >
         <div className="flex min-w-0 grow basis-64 items-center gap-1">
           {/* The toggle takes only the room the path needs rather than the whole
               row, so the copy button can sit against the end of the path and
@@ -558,8 +591,8 @@ export function FileDiffCard({
         </div>
       </div>
 
-      {expanded && orphans.length > 0 && comments && (
-        <div className="flex flex-col gap-3 border-t border-border bg-muted/20 p-3">
+      {showsOrphans && comments && (
+        <div className="flex flex-col gap-3 bg-muted/20 p-3">
           <p className="text-xs text-muted-foreground">
             {orphans.length === 1 ? 'This comment is' : 'These comments are'} on code that is not in
             the diff any more.
@@ -595,8 +628,8 @@ export function FileDiffCard({
         </div>
       )}
 
-      {expanded && hasBody && (
-        <div className="border-t border-border">
+      {showsDiff && (
+        <div className={cn(showsOrphans && 'border-t border-border')}>
           {/* `@container` makes this element an inline-size container, which is
               what lets a comment inside it be sized to the *visible* width
               rather than to the width of the scrolled code. */}
@@ -661,12 +694,19 @@ export function FileDiffCard({
         </div>
       )}
 
-      {expanded && showsImage && source && (
-        <ImageDiff file={file} reviewId={source.reviewId} changes={source.changes} />
+      {showsImageDiff && source && (
+        <div className={cn((showsOrphans || showsDiff) && 'border-t border-border')}>
+          <ImageDiff file={file} reviewId={source.reviewId} changes={source.changes} />
+        </div>
       )}
 
-      {expanded && !hasBody && file.isBinary && !showsImage && (
-        <p className="border-t border-border px-3 py-3 text-xs text-muted-foreground">
+      {showsBinaryNote && (
+        <p
+          className={cn(
+            'px-3 py-3 text-xs text-muted-foreground',
+            showsOrphans && 'border-t border-border'
+          )}
+        >
           Binary file — no text diff to show.
         </p>
       )}

@@ -10,7 +10,14 @@
  * the edit you are making right now is a question you ask per visit, and each
  * answer is cached under its own SWR key so switching back is instant.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties
+} from 'react'
 import {
   AlertCircle,
   ArrowDown,
@@ -127,6 +134,37 @@ function scrollParent(element: HTMLElement): HTMLElement {
     if (overflow === 'auto' || overflow === 'scroll') return node
   }
   return document.documentElement
+}
+
+/**
+ * The gap the tab leaves between the blocks stacked down it - `gap-3`.
+ *
+ * Written out here because the sticky offset is arithmetic done in JS: a header
+ * parking directly against the underside of the find bar reads as one welded
+ * bar, and the gap it rests below is the same one it would have had in the flow.
+ */
+const STICKY_GAP = '0.75rem'
+
+/**
+ * The height of an element as it changes, for whoever has to leave room for it.
+ *
+ * A ref alone would not do: the bar appears and disappears, and its height is
+ * whatever its own content and the reader's font size make it, so the number
+ * has to be measured rather than assumed and has to arrive as state.
+ */
+function useMeasuredHeight(): [(node: HTMLDivElement | null) => void, number] {
+  const [node, setNode] = useState<HTMLDivElement | null>(null)
+  const [height, setHeight] = useState(0)
+
+  useEffect(() => {
+    if (node === null) return
+    const observer = new ResizeObserver(() => setHeight(node.offsetHeight))
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [node])
+
+  // An unmounted element takes up no room, whatever the last reading of it was.
+  return [setNode, node === null ? 0 : height]
 }
 
 /**
@@ -387,6 +425,21 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
   const paths = useMemo(() => files.map((file) => file.path), [files])
   const activePath = useActiveFile(paths)
   const find = useDiffFind(files)
+  const [bindFindBar, findBarHeight] = useMeasuredHeight()
+
+  /**
+   * Where a sticky thing in this tab parks, and how far below the top of the
+   * scroller a scrolled-to card comes to rest.
+   *
+   * Both shift down by the find bar when it is open, because it is sticky too
+   * and sits above everything else: a file header pinned to the top of the
+   * scroller would spend the whole search hidden behind it.
+   */
+  const stickyTop = find.open ? `calc(${findBarHeight}px + ${STICKY_GAP})` : '0px'
+  const stickyStyle = {
+    '--diff-sticky-top': stickyTop,
+    '--diff-scroll-top': `calc(${stickyTop} + 0.5rem)`
+  } as CSSProperties
 
   /**
    * The fingerprint of every file *as it is being shown*, which is what a
@@ -820,7 +873,7 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
         </div>
       </div>
 
-      {find.open && <DiffFindBar find={find} />}
+      {find.open && <DiffFindBar ref={bindFindBar} find={find} />}
 
       {changes !== 'committed' && data.workingTree?.isDirty && (
         <WorkingTreeBanner workingTree={data.workingTree} />
@@ -919,7 +972,7 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
       ) : (
         // `items-start` so the tree can stick to the top of the viewport while
         // the diff beside it scrolls; a stretched column would never stick.
-        <div className="flex items-start gap-4">
+        <div className="flex items-start gap-4" style={stickyStyle}>
           {listOpen && (
             // Two shapes, one element. Wide: a sticky sidebar that keeps its
             // own place while the diff scrolls past it, wider still where there
@@ -933,7 +986,7 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
                 'rounded-lg border border-border bg-card/50 px-1',
                 narrow
                   ? 'w-full'
-                  : 'sticky top-2 max-h-[calc(100dvh-6rem)] w-56 shrink-0 overflow-y-auto xl:w-64 2xl:w-72'
+                  : 'sticky top-[var(--diff-scroll-top,0.5rem)] max-h-[calc(100dvh-6rem)] w-56 shrink-0 overflow-y-auto xl:w-64 2xl:w-72'
               )}
             >
               <ChangedFilesTree
@@ -961,7 +1014,7 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
                 key={`${file.oldPath ?? ''}:${file.path}`}
                 id={fileDomId(file.path)}
                 data-file-path={file.path}
-                className="scroll-mt-2"
+                className="scroll-mt-[var(--diff-scroll-top,0.5rem)]"
               >
                 <FileDiffCard
                   // Remounted when the view changes: that is a different diff
