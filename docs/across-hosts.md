@@ -2469,7 +2469,7 @@ happen first:
    through `\\wsl.localhost`, and the Agent Access page for a distro.
    *(done — see below.)*
 4. **The guard.** A `\\wsl.localhost` path refused as a *local* repository,
-   with a pointer to the thing the person meant. *(planned.)*
+   with a pointer to the thing the person meant. *(done — see below.)*
 
 **What was settled before any of it was written.**
 
@@ -2919,6 +2919,71 @@ attachment path was not re-verified on this carrier - it is
 `shared/rpc-wire.ts` and the router, neither of which can tell `wsl.exe` from
 `ssh`, and M4.4 proved the bytes - so what M5 checked is that nothing about it
 is carrier-specific rather than that an image round-trips again.
+
+**M5.4, done on the PC, 11 September.** The guard, and it is the part of this
+milestone only this machine could have found - because the way to discover what
+the app did with a `\\wsl.localhost` path was to type one in.
+
+**What it did was lie, and then work badly.** Typing
+`\\wsl.localhost\Ubuntu\home\xfor\github.com\klarluft\gitwarren-app` into the
+add-repository form answered *"This folder is not inside a git repository"*. It
+is one. What happens is that Windows git refuses a working tree owned by another
+user - `fatal: detected dubious ownership in repository at
+'//wsl.localhost/Ubuntu/home/xfor/…'` - and `resolveRepositoryRoot` reads any
+non-zero `rev-parse` as "not a repository". True of the exit code, false about
+the folder, and it sends a person to check whether they picked the right one.
+
+The worse half is what happens to somebody who reads git's message and follows
+its advice, which is right there in the error and entirely reasonable: add a
+`safe.directory` exception. Then it *succeeds*, and the repository they get is
+wrong in three ways at once, each measured here rather than assumed.
+
+- **Its git runs over SMB.** `git status` on this project: 479 ms through
+  `\\wsl.localhost`, 74 ms inside the distribution.
+- **It reports a different diff.** Windows git saw two `.sh` scripts as modified
+  with zero content change, where the distribution saw a clean tree. The cause
+  is the executable bit, which is not visible across that share - so the *same
+  repository* has two answers to "what has changed" depending on which side is
+  asked, and the one GitWarren would show is the wrong one.
+- **Its reviews land in the wrong database.** They would be in the Windows
+  install's SQLite, where the agent running inside WSL cannot see them over its
+  own local MCP. That is rule 1 - a host owns its repositories - and it is the
+  entire reason the distribution is a *host* rather than a folder.
+
+So the guard is not tidiness about a path format. It is the difference between
+this milestone working and appearing to.
+
+**It fires before the filesystem is touched, and that ordering is the point.**
+The path is real, the directory exists, and git will answer *something* about
+it - so every check downstream produces a plausible response to the wrong
+question. `refuseWslPath` is the first line of `resolveRepositoryRoot`, ahead of
+even `isDirectory`.
+
+The message carries both halves of the remedy, because "no" is not advice: which
+host to add, and which path to add on it once they have - *That folder is inside
+the WSL distribution "Ubuntu", not on this machine. Add Ubuntu as a WSL host,
+then add /home/xfor/github.com/klarluft/gitwarren-app as a repository on it — so
+its reviews live where the code does and the agent in WSL can read them.* The
+second sentence is the translation `shared/wsl.ts` already does for the Explorer
+reveal, running the other way, which is why that module has two functions.
+
+**It fires on every platform, not only on Windows.** The string means the same
+thing wherever it is read, the advice is the same, and a guard that exists on
+one operating system is one that no test on another can check - which for this
+repository means one that CI would never run. Both UNC spellings are recognised
+and both separators, because `\\wsl$\` still resolves and because
+`git rev-parse --show-toplevel` answers `//wsl.localhost/Ubuntu/…` with forward
+slashes, which is the form somebody is most likely to have copied from an error
+message. An ordinary `\\fileserver\share` is *not* caught, and has a test saying
+so: a file server is a perfectly reasonable place to keep a repository and has
+none of the three problems above.
+
+**Verified by typing one in, through the real dialog.** `repositories.add` with
+that path refused with `INVALID_INPUT` and the sentence above, the advice under
+the `path` input rather than in the dialog's banner - which is M4.4's bridge fix
+still holding. Pressing Add in the form left the dialog open with *Add "Ubuntu"
+as a WSL host and add this repository there.* under the field, and the local
+repository list afterwards held only `C:\Users\micha\gitwarren-app`.
 
 ### M6 — Tailnet and live updates
 

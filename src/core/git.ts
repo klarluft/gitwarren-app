@@ -10,7 +10,58 @@
 import { basename } from 'node:path'
 import { AppError } from '../shared/errors.js'
 import { canonicalise, isDirectory, runGit } from './git-exec.js'
+import { wslPathFromWindows } from '../shared/wsl.js'
 import type { RepositoryGitState } from '../shared/schemas.js'
+
+/**
+ * Refuse a path that names a file inside a WSL distribution.
+ *
+ * Checked before anything touches the filesystem, and that ordering is the
+ * whole point: the path *works*, so every later step gives a plausible answer
+ * to the wrong question. Typing
+ * `\\wsl.localhost\Ubuntu\home\xfor\github.com\klarluft\gitwarren-app` into the
+ * add-repository form before M5.4 got *"This folder is not inside a git
+ * repository"* - because Windows git refuses a working tree owned by another
+ * user with `fatal: detected dubious ownership`, and the service reads any
+ * non-zero `rev-parse` as "not a repository". That sentence is false, and it
+ * sends a person to check whether they picked the right folder.
+ *
+ * The worse half is what happens to somebody who follows git's own advice and
+ * adds a `safe.directory` exception. Then it succeeds, and they get a
+ * repository that is wrong in three ways at once:
+ *
+ * - Its git runs over SMB. `git status` on this project took 479 ms through
+ *   `\\wsl.localhost` against 74 ms inside the distribution.
+ * - It reports a **different diff**. Measured here: two `.sh` scripts showed as
+ *   modified with zero content change, because the executable bit is not
+ *   visible across that share - so the same repository has two answers to "what
+ *   has changed" depending on which side is asked.
+ * - Its reviews live in the *Windows* database, where the agent running inside
+ *   WSL cannot see them over its own local MCP - which is the one thing rule 1
+ *   exists to prevent, and the whole point of adding the distribution as a host
+ *   instead.
+ *
+ * So this is not tidiness about a path format. It is the difference between the
+ * milestone working and appearing to.
+ *
+ * Fired on every platform rather than only on Windows. The string is
+ * unambiguous wherever it is read, the advice is the same, and a guard that
+ * only exists on one operating system is one no test on another can check.
+ */
+function refuseWslPath(inputPath: string): void {
+  const wsl = wslPathFromWindows(inputPath)
+  if (!wsl) return
+
+  throw new AppError(
+    'INVALID_INPUT',
+    `That folder is inside the WSL distribution "${wsl.distro}", not on this machine. ` +
+      `Add ${wsl.distro} as a WSL host, then add ${wsl.path} as a repository on it — ` +
+      'so its reviews live where the code does and the agent in WSL can read them.',
+    {
+      path: [`Add "${wsl.distro}" as a WSL host and add this repository there.`]
+    }
+  )
+}
 
 /**
  * Resolve any path inside a repository to that repository's canonical root.
@@ -25,6 +76,10 @@ import type { RepositoryGitState } from '../shared/schemas.js'
  * enumerates worktrees from whichever one it was given (see `git-compare.ts`).
  */
 export async function resolveRepositoryRoot(inputPath: string): Promise<string> {
+  // Before `isDirectory`, because a `\\wsl.localhost` path is a perfectly real
+  // directory and every check after this one would pass.
+  refuseWslPath(inputPath)
+
   if (!(await isDirectory(inputPath))) {
     throw new AppError('PATH_NOT_FOUND', `No such folder: ${inputPath}`, {
       path: ['That folder does not exist.']
