@@ -38,6 +38,8 @@
  * repository path can appear under the path input again.
  */
 import { resultOf, type RpcMethod, type RpcParams, type RpcResult } from '@shared/rpc'
+import { errorMessage, isDisconnection } from './errors'
+import { reportHostAnswered, reportHostUnreachable } from './host-reachability'
 import type { GitWarrenApi, GitWarrenBridge } from '@shared/api'
 import type { DiffChanges } from '@shared/git'
 
@@ -58,13 +60,38 @@ const { carrier, shell } = bridge
  * throw. `resultOf` is the shared unwrapper every carrier uses, which is what
  * makes a `NOT_FOUND` from a daemon over `ssh` reach a component as the same
  * `AppError` a local call would have thrown.
+ *
+ * It is also where M4.5 learns which machines are still answering. Every
+ * question this window asks of another computer passes through here with the
+ * host still in scope, which makes it the one place that can notice a machine
+ * going away without anybody having to push anything - see
+ * `lib/host-reachability.ts` for why that is the signal rather than the pool's
+ * own `onStateChange`.
  */
 function ask<M extends RpcMethod>(
   method: M,
   params: RpcParams<M>,
   host?: string
 ): Promise<RpcResult<M>> {
-  return carrier.request(method, params, host).then(resultOf)
+  const answered = carrier.request(method, params, host).then(resultOf)
+  // Nothing to observe about this install. A local call cannot be a
+  // disconnection, and there is no banner for one to raise.
+  if (host === undefined) return answered
+
+  return answered.then(
+    (result) => {
+      reportHostAnswered(host)
+      return result
+    },
+    (error: unknown) => {
+      // Only a transport failure says anything about the machine - the rule the
+      // pool applies before touching its backoff ladder, arriving at the other
+      // end of the same wire. A `NOT_FOUND` is proof the far end is there.
+      if (isDisconnection(error)) reportHostUnreachable(host, errorMessage(error))
+      else reportHostAnswered(host)
+      throw error
+    }
+  )
 }
 
 /**
@@ -199,7 +226,11 @@ function buildApi(host: string | undefined): GitWarrenApi {
       setOpenAtLogin: (openAtLogin) => shell.system.setOpenAtLogin(openAtLogin)
     },
     navigation: shell.navigation,
-    updates: shell.updates
+    updates: shell.updates,
+    // Unbound like the two above, and for the same reason: it is about the
+    // shell the person is using, not about any machine a route names. A tab
+    // that has lost its socket has lost it for every screen at once.
+    connection: shell.connection
   }
 }
 

@@ -35,7 +35,7 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsCount, TabsList, TabsPanel, TabsTab } from '@/components/ui/tabs'
-import { errorMessage } from '@/lib/errors'
+import { errorMessage, isDisconnection } from '@/lib/errors'
 import { plural } from '@/lib/format'
 import { useHostScope } from '@/lib/host-scope'
 import { useRegisterCommands, type Command } from '@/features/commands/command-registry'
@@ -179,7 +179,15 @@ export function ReviewDetail({ reviewId, tab, focus }: ReviewDetailProps) {
 
   if (isLoading) return <LoadingState />
 
-  if (error !== undefined || !review) {
+  // A disconnection with a review already in hand is staleness, not failure:
+  // nothing has contradicted what is on screen, the question simply could not
+  // be asked. So the review stays exactly as it was - scroll position, open
+  // thread, expanded file and all - and `HostBanner` says so above it. Every
+  // other error still replaces the screen, because every other error is an
+  // answer *about* this review. See `isDisconnection` in `lib/errors.ts`.
+  const stale = review !== undefined && isDisconnection(error)
+
+  if (!review || (error !== undefined && !stale)) {
     return (
       <Card className="flex flex-col items-center gap-3 border-destructive/40 px-6 py-12 text-center">
         <div className="rounded-full bg-destructive/10 p-3 text-destructive">

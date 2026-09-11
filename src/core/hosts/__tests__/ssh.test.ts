@@ -13,8 +13,16 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { connectOverSsh, isLocalOnly, sshArgs, REMOTE_LAUNCHER, SSH_OPTIONS } from '../ssh.js'
+import {
+  connectOverSsh,
+  describeExit,
+  isLocalOnly,
+  sshArgs,
+  REMOTE_LAUNCHER,
+  SSH_OPTIONS
+} from '../ssh.js'
 import { rpcMethodNames } from '../../rpc/dispatcher.js'
+import { DAEMON_READY_PREFIX } from '../../../shared/rpc.js'
 
 test('the command starts the launcher, not a versioned path', () => {
   const args = sshArgs('xfor@pc-wsl')
@@ -55,6 +63,29 @@ test('a host that cannot be resolved says what ssh said, not that a stream ended
   assert.match(reason, /ssh could not connect/i)
   assert.match(reason, /no-such-host/i)
   connection.close()
+})
+
+test('a healthy start is never offered as the reason a connection died', () => {
+  // Found in M4.5 by killing the `ssh` under an open review: the daemon had
+  // started perfectly and said so on stderr, and the banner came back stuck to
+  // the end of the failure - "The connection to xfor@pc-wsl was terminated
+  // (SIGKILL). [gitwarren-serve] ready (instance …, protocol v1, database: …)".
+  // Both halves true; the second one the opposite of an explanation.
+  const banner = `${DAEMON_READY_PREFIX} (instance 4e0b0adb, protocol v1, database: /home/xfor/db)`
+
+  const killed = describeExit('xfor@pc-wsl', null, 'SIGKILL', banner)
+  assert.equal(killed, 'The connection to xfor@pc-wsl was terminated (SIGKILL).')
+
+  // Anything else on that stream might genuinely be why, so it is kept - even
+  // when the banner is sitting above it.
+  const withReason = describeExit(
+    'xfor@pc-wsl',
+    1,
+    null,
+    `${banner}\nsqlite: database is locked`
+  )
+  assert.match(withReason, /sqlite: database is locked/)
+  assert.doesNotMatch(withReason, /ready \(instance/)
 })
 
 test('host management is answered here and never sent to a host', () => {

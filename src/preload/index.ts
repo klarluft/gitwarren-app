@@ -136,6 +136,21 @@ const bridge: GitWarrenBridge = {
         return () => ipcRenderer.off(IPC_CHANNELS.updatesChanged, handler)
       }
     },
+    /**
+     * Always up, and not as a simplification.
+     *
+     * The other end of this carrier is the main process of the same
+     * application: it cannot go away without taking this window with it, and
+     * `ipcRenderer.invoke` pairs every request with its answer over a channel
+     * with nothing between the two. There is no state here to report and
+     * nothing that could ever change it, so the subscription is a no-op rather
+     * than a listener that would never fire. `web/shell.ts` is where this
+     * question has a real answer.
+     */
+    connection: {
+      connected: () => true,
+      subscribe: () => () => {}
+    },
     navigation: {
       onDeepLink: (listener: (hash: string) => void) => {
         const handler = (_event: Electron.IpcRendererEvent, hash: string): void => listener(hash)

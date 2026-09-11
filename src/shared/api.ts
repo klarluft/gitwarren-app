@@ -447,6 +447,33 @@ export interface GitWarrenApi {
     /** Returns an unsubscribe function. */
     subscribe(listener: (status: UpdateStatus) => void): () => void
   }
+  /** Whether this window or tab can still reach its own core. See `ShellConnection`. */
+  connection: ShellConnection
+}
+
+/**
+ * Whether this shell can still reach the core it was handed.
+ *
+ * Not the same question as whether a *host* is answering, and M4.5 kept the two
+ * apart deliberately. A host that has gone away is learned from requests that
+ * fail (`renderer/lib/host-reachability.ts`); this one cannot be, because a
+ * browser tab whose socket has dropped does not fail its requests at all -
+ * `web/carrier.ts` queues them until it reconnects, so nothing settles and
+ * there is no outcome to read. Only the socket knows.
+ *
+ * They also have different blast radii, which is why they are two banners and
+ * not one component with a branch in it. A machine that is asleep makes *that*
+ * machine's screens stale; a socket that has dropped makes every screen stale,
+ * this computer's included, and while it is down nothing can be claimed about
+ * any host - so its sentence is the one that wins.
+ *
+ * Constant `true` in the Electron window, where the other end of the carrier is
+ * a process that cannot go away without taking this one with it.
+ */
+export interface ShellConnection {
+  connected(): boolean
+  /** Returns an unsubscribe function. */
+  subscribe(listener: (connected: boolean) => void): () => void
 }
 
 /**
@@ -521,6 +548,16 @@ export interface ShellApi {
   system: GitWarrenApi['system']
   updates: GitWarrenApi['updates']
   navigation: GitWarrenApi['navigation']
+  /**
+   * Whether the carrier underneath this shell is up.
+   *
+   * On this side of the line because it is a fact about the transport this
+   * shell built, and the transports differ: the preload has an IPC channel to
+   * its own main process, a tab has a socket that can drop. Not on the
+   * dispatcher for the obvious reason - asking a machine whether it can be
+   * reached only works when it can.
+   */
+  connection: ShellConnection
   /**
    * A picker, then straight into `attachments.ingest`.
    *

@@ -37,6 +37,11 @@
  * kinder than hopeful here: the UI can say "not reachable" now, and M4.5's
  * banner has something to render.
  *
+ * It is also what bounds M4.5's retry. A screen that has gone stale asks again
+ * every fifteen seconds for as long as somebody is looking at it, and four out
+ * of five of those cost a rejected promise and no process. Whatever the UI
+ * asks for, at most one `ssh` a minute per host actually happens.
+ *
  * One deliberate exception: an explicit probe from the Hosts screen ignores the
  * backoff, because a person pressing a button has information the timer does
  * not - they just turned the machine on.
@@ -78,7 +83,23 @@ export interface HostPoolOptions {
   /** Swappable for tests; the default opens a real `ssh`. */
   connect?: (route: HostRoute, onClose: (error: AppError) => void) => SshConnection
   now?: () => number
-  /** Notified whenever a host's reachability changes. M4.5 renders this. */
+  /**
+   * Notified whenever a host's reachability changes. Nothing passes it yet.
+   *
+   * It was written for M4.5's banner and M4.5 did not use it, which is worth
+   * recording rather than deleting. A push from here has nowhere to go: the
+   * event channel in `shared/rpc.ts` is reserved for M6 and nothing emits on
+   * it, so reaching a screen would have meant an Electron IPC channel for the
+   * window *and* a WebSocket message for a tab - two half-built event channels
+   * for one banner, which is the thing M4.2 refused to build for a progress
+   * bar. And it was not needed: a screen already asks this machine questions,
+   * so the answers it gets are the disconnection, and
+   * `renderer/lib/host-reachability.ts` reads them there.
+   *
+   * What this hook can see that a screen cannot is a host nobody is looking at,
+   * which is why it belongs to M6's `host.state` event - where a machine going
+   * away is news whether or not anything is open on it.
+   */
   onStateChange?: (hostId: number, state: HostState) => void
 }
 

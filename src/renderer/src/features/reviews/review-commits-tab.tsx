@@ -10,7 +10,7 @@ import { AlertCircle, GitCommitHorizontal, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
-import { errorMessage } from '@/lib/errors'
+import { errorMessage, isDisconnection } from '@/lib/errors'
 import { absoluteTime, plural, relativeTime } from '@/lib/format'
 import { CompareErrorCard, NoWorktreeNotice, WorkingTreeBanner } from './compare-notices'
 import { useReviewCommits } from './use-reviews'
@@ -23,7 +23,9 @@ export function ReviewCommitsTab({ review }: { review: Review }) {
 
   if (isLoading) return <LoadingState />
 
-  if (error !== undefined) {
+  // Kept when the machine goes away, for the reason `review-files-tab.tsx`
+  // spells out: a disconnection contradicts nothing already on screen.
+  if (error !== undefined && !(data !== undefined && isDisconnection(error))) {
     return (
       <Card className="flex flex-col items-center gap-3 border-destructive/40 px-6 py-10 text-center">
         <div className="rounded-full bg-destructive/10 p-3 text-destructive">

@@ -62,6 +62,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import type { Readable } from 'node:stream'
 import { createStdioClient, type StdioClient } from '../rpc/stdio-client.js'
 import { AppError } from '../../shared/errors.js'
+import { DAEMON_READY_PREFIX } from '../../shared/rpc.js'
 import type { RpcMethod, RpcParams, RpcResult } from '../../shared/rpc.js'
 
 /** The launcher M2 promised would stay put. */
@@ -370,14 +371,33 @@ export function isLocalOnly(method: string): boolean {
  * launcher is not there - which before M4.2 is the single most likely outcome
  * of adding a host, and deserves to say what to do about it rather than
  * "exited with code 127".
+ *
+ * Exported for its own test. Everything else about a connection needs a real
+ * `ssh` to say anything about, and this is the one part that is a pure function
+ * of an exit status and a stream - which is also where M4.5 found it quoting
+ * the daemon's start-up banner as if it were a cause of death.
  */
-function describeExit(
+export function describeExit(
   target: string,
   code: number | null,
   signal: NodeJS.Signals | null,
   stderr: string
 ): string {
-  const tail = stderr.trim().split('\n').slice(-3).join(' ').trim()
+  // Two different kinds of line arrive on that stream, and only one of them is
+  // an explanation. A daemon that started announces itself there (M4.1 put the
+  // banner on stderr precisely so it could not hurt the framing on stdout), and
+  // quoting it back at somebody whose connection has just died reads as though
+  // it were the cause: "The connection to xfor@pc-wsl was terminated (SIGKILL).
+  // [gitwarren-serve] ready (instance …)". Proof of a healthy start is the one
+  // thing that cannot be why it stopped. Every other line the daemon or `ssh`
+  // wrote is kept, because any of them might be.
+  const tail = stderr
+    .trim()
+    .split('\n')
+    .filter((line) => !line.trimStart().startsWith(DAEMON_READY_PREFIX))
+    .slice(-3)
+    .join(' ')
+    .trim()
   const detail = tail ? ` ${tail}` : ''
 
   if (code === 127) {

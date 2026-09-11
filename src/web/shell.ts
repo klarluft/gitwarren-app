@@ -38,7 +38,7 @@ import { editorLink, editorTargetFor, linkableEditors } from '@shared/editors'
 import { WEB_PATHS, webAttachmentSrc } from '@shared/web'
 import type { AppInfo, EditorList, ShellApi, UpdateStatus } from '@shared/api'
 import type { Attachment, OpenReviewFileInput } from '@shared/schemas'
-import type { Carrier } from '@shared/rpc'
+import type { WebCarrier } from './carrier'
 
 /** Nothing to unsubscribe from. Returned by the subscriptions a tab cannot have. */
 const NO_SUBSCRIPTION = (): void => {}
@@ -170,7 +170,15 @@ function pickImageFile(): Promise<File | null> {
   })
 }
 
-export function createWebShell(carrier: Carrier): ShellApi {
+/**
+ * `WebCarrier` rather than `Carrier`, since M4.5.
+ *
+ * The extra two methods are `connected` and `onConnectionChange`, and they are
+ * the whole reason this shell can answer a question the preload's cannot: a tab
+ * is the one shell whose link to its own core can go away while the page stays
+ * on screen. See `ShellConnection`.
+ */
+export function createWebShell(carrier: WebCarrier): ShellApi {
   /**
    * Ask the host where the file is, then hand the URL to this machine.
    *
@@ -278,6 +286,22 @@ export function createWebShell(carrier: Carrier): ShellApi {
       installNow: () =>
         unsupported('Installing an update', 'Update GitWarren the way you installed it.'),
       subscribe: () => NO_SUBSCRIPTION
+    },
+    /**
+     * The socket, as the one thing on this page that can quietly stop being
+     * there.
+     *
+     * Passed straight through from the carrier, which has had both halves since
+     * M3 with nothing subscribing to either. What makes it worth surfacing now
+     * is what a drop actually does: in-flight requests are rejected, and
+     * everything after that is *queued* rather than failed - so a tab whose
+     * server has gone away shows the last thing it loaded, forever, with no
+     * spinner and no error. It is the quietest failure in the app and the only
+     * one nothing can infer from an outcome.
+     */
+    connection: {
+      connected: () => carrier.connected(),
+      subscribe: (listener) => carrier.onConnectionChange(listener)
     },
     navigation: {
       // Deep links need no channel here. The route is in the hash, the router

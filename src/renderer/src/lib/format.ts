@@ -37,6 +37,21 @@ export function absoluteTime(iso: string | null): string {
   return Number.isNaN(timestamp) ? iso : ABSOLUTE.format(timestamp)
 }
 
+const CLOCK = new Intl.DateTimeFormat(undefined, { timeStyle: 'short' })
+
+/**
+ * "14:32", for something that happened while the window was open.
+ *
+ * A clock time rather than `relativeTime`, and the difference matters for the
+ * one caller: the disconnection banner says when what is on screen was loaded,
+ * and it is only redrawn when the machine's state changes. A relative phrase
+ * would freeze at "just now" and stay there for the rest of the outage, while
+ * a clock time is as true an hour later as it was at the time.
+ */
+export function timeOfDay(timestamp: number): string {
+  return CLOCK.format(timestamp)
+}
+
 /**
  * "412 KB". Powers of two with the units people expect next to a file, which
  * is what every git host prints beside an image.

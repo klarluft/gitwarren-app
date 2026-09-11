@@ -15,9 +15,14 @@
  * stops being a broken app and becomes an ordinary answer: the machine is
  * asleep. `HOST_OFFLINE` therefore gets its own state with the sentence `ssh`
  * produced and a Try again, rather than the generic failure a missing git would
- * give - the two need completely different things done about them. What that
- * state currently depends on, and where it therefore does and does not render,
- * is written down next to it in `ErrorState`.
+ * give - the two need completely different things done about them.
+ *
+ * Since M4.5 that card is for having *nothing* to show, and only that. A
+ * disconnection with rows already on screen leaves them exactly where they are:
+ * they are the last true answer that machine gave, nothing has contradicted
+ * them, and `HostBanner` says above them that they are old. Replacing a list
+ * somebody was reading with a notice about a laptop is the one thing a stale
+ * screen is not allowed to cost.
  *
  * ## Clones, and which direction the comparison runs
  *
@@ -41,7 +46,7 @@ import { Tooltip } from '@/components/ui/tooltip'
 import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { api, CACHE_KEYS } from '@/lib/api'
-import { errorCode, errorMessage } from '@/lib/errors'
+import { errorCode, errorMessage, isDisconnection } from '@/lib/errors'
 import { useHost } from '@/lib/host-scope'
 import { useRegisterCommands, type Command } from '@/features/commands/command-registry'
 import { RepositoryCard, type Elsewhere } from './repository-card'
@@ -96,6 +101,11 @@ export function RepositoryList() {
     () => localClonesByRoot(host, localRepositories),
     [host, localRepositories]
   )
+
+  // The rows stay when the machine that served them goes away; `ErrorState`
+  // below is for having nothing to show, not for having something old. See the
+  // note at the top of this file.
+  const stale = repositories !== undefined && isDisconnection(error)
 
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState<RepositoryWithGitState | undefined>(undefined)
@@ -169,15 +179,15 @@ export function RepositoryList() {
 
       {isLoading && <LoadingState />}
 
-      {!isLoading && error !== undefined && (
+      {!isLoading && error !== undefined && !stale && (
         <ErrorState error={error} onRetry={() => void refresh()} />
       )}
 
-      {!isLoading && error === undefined && repositories?.length === 0 && (
+      {!isLoading && (error === undefined || stale) && repositories?.length === 0 && (
         <EmptyState onAdd={openAdd} />
       )}
 
-      {!isLoading && error === undefined && repositories && repositories.length > 0 && (
+      {!isLoading && (error === undefined || stale) && repositories && repositories.length > 0 && (
         <ul className="flex flex-col gap-2">
           {repositories.map((repository) => (
             <li key={repository.id}>
@@ -256,16 +266,12 @@ function ErrorState({ error, onRetry }: { error: unknown; onRetry: () => void })
   // produced ("Could not resolve hostname", "Permission denied (publickey)")
   // is the only thing on the screen that says what to go and fix.
   //
-  // This branch reaches a browser tab today and not the Electron window, and
-  // the reason is older than this slice: `contextBridge` strips everything but
-  // `message` off a rejection, so `AppError.code` and `fieldErrors` do not
-  // survive the preload - which is also why the add-repository form has been
-  // showing duplicate-path errors in its general slot rather than under the
-  // field. M4.3 found it and deliberately did not fix it here; see "What
-  // M4.3 found and left alone" in docs/across-hosts.md. In the window the
-  // generic state below still renders `errorMessage(error)`, which is the same
-  // sentence - it just arrives under a heading about git rather than about a
-  // sleeping machine.
+  // It reaches both shells. It did not when M4.3 wrote it: `contextBridge`
+  // strips everything but `message` off a rejection, so `AppError.code` did not
+  // survive the preload and this branch was unreachable in the window. The
+  // `BridgeCarrier` change that landed straight after M4.3 fixed that at the
+  // boundary, which is what M4.5 is built on - every "is this a disconnection?"
+  // in the renderer is a question about a code.
   if (code === 'HOST_OFFLINE') {
     return (
       <Card className="flex flex-col items-center gap-3 border-dashed px-6 py-12 text-center">
