@@ -90,6 +90,16 @@ fourth lived in a script CI never ran, which is why the tarball build is a step
 now — and `npm run build` is a step for a separate reason, that CI never ran the
 bundler at all.
 
+One caveat on that fourth, measured by putting the bug back and pushing it:
+the tarball step on `windows-latest` would **not** have caught `du -h`. The
+runner carries Git for Windows, whose MSYS2 `usr/bin` is on PATH and supplies
+`du`, so the step printed a size and passed. A missing Unix binary is the class
+of Windows problem this runner cannot reproduce, because it is a friendlier
+environment than the shell the bug was found in. The step still earns its place
+for everything in that script that is Node's or the filesystem's rather than
+PATH's — but it runs the script on Windows, which is not the same claim as
+catching that bug.
+
 macOS is in the matrix for a fifth thing, which is not a breakage but a
 disagreement: `tailscale serve` needs `--operator` on Linux and succeeds
 silently as the user on macOS. What exposed it was two platforms differing,

@@ -118,9 +118,23 @@ jobs:
       # to; see the note there on why that is a list of names and not a count.
       - run: npm test
 
-      # The daemon tarball, which CI has never built and which is where `du -h`
-      # lived: the script packed a 44 MB archive successfully and then died
+      # The daemon tarball, which CI has never built. This is the script where
+      # `du -h` lived - it packed a 44 MB archive successfully and then died
       # reporting its size, on the one platform nothing ran it.
+      #
+      # Be careful about what that means, because it was measured rather than
+      # assumed and the answer was not the flattering one. Putting `du -h` back
+      # and pushing it did *not* turn this step red: `windows-latest` carries
+      # Git for Windows, whose MSYS2 `usr/bin` is on PATH and supplies `du`, so
+      # the step printed `45M` and passed. This runner is a friendlier place
+      # than the plain Windows shell that found the bug, and a missing Unix
+      # binary is precisely the class of Windows problem it cannot reproduce.
+      #
+      # The step is kept because what it does cover is everything in that
+      # script that is Node's or the filesystem's rather than PATH's - path
+      # handling, the extraction, the staging, the archive - on three operating
+      # systems instead of none. It is honest to say it runs the script on
+      # Windows, and dishonest to say it would have caught `du -h`.
       #
       # One target on every host rather than all four, because nothing in that
       # script is compiled - it downloads a Node binary and copies a

@@ -4058,9 +4058,27 @@ waited until release day, and it never ran
 `scripts/build-daemon-tarball.mjs`, which is where `du -h` lived. Both are
 steps now, and `npm test` fails if a test skips itself without being named,
 so the fifth skip below stops being indistinguishable from a test that quietly
-stopped running. The missing `ws` in the next entry is the one thing here it
-still would not have caught, and the note there says why. Reasoned about in
-the comments in `.github/workflows/ci.yml`, summarised in
+stopped running.
+
+Two things the job proved about itself, neither of them by being read. *It
+found a Windows bug on its first run*: nine assertions in
+`dispatcher.test.ts` compared a stored repository path against
+`C:\Users\RUNNER~1\…`, an 8.3 short name, because the test realpathed its
+temporary directory with plain `realpathSync` where `canonicalise` uses
+`realpath.native`. Only the native call expands a short name. It does not
+reproduce on a Windows profile that has no short name, which is why running
+the suite on the PC did not find it. *And it failed to fail once, usefully*:
+`du -h` put back deliberately did **not** turn Windows red, because
+`windows-latest` carries Git for Windows and its MSYS2 `du` on PATH. The
+runner is a friendlier environment than the shell that bug was found in, so a
+missing Unix binary is a class of Windows failure it cannot reproduce - which
+is written down in `ci.yml` rather than quietly hoped over. A break one level
+below PATH, `path.sep` asserted as `/`, turned Windows red and left the other
+two green, which is the check the job actually passes on.
+
+The missing `ws` in the next entry is the other thing it would not have
+caught, and the note there says why. Reasoned about in the comments in
+`.github/workflows/ci.yml`, summarised in
 [What CI runs](../CONTRIBUTING.md#what-ci-runs); not a milestone, so it does
 not appear above.
 
