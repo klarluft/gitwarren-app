@@ -106,7 +106,8 @@ export type RemoveRepositoryInput = z.input<typeof removeRepositoryInputSchema>
 export const MAX_TARGET_LENGTH = 255
 
 export const hostIdSchema = z.number().int().positive()
-export const hostKindSchema = z.enum(['ssh', 'wsl'])
+export const hostKindSchema = z.enum(['ssh', 'wsl', 'websocket'])
+export type HostKind = z.infer<typeof hostKindSchema>
 
 /**
  * An SSH destination.
@@ -162,9 +163,55 @@ export const wslDistroNameSchema = z
     message: 'That is not a WSL distribution name.'
   })
 
-/** Whichever of the two a host of this kind is addressed by. */
-export function hostTargetSchemaFor(kind: 'ssh' | 'wsl'): z.ZodType<string> {
-  return kind === 'wsl' ? wslDistroNameSchema : sshTargetSchema
+/**
+ * A machine that is listening, addressed as a name or as a whole origin.
+ *
+ * Looser than the two above and deliberately so, because what is on the other
+ * side is different in kind. An `ssh` target and a distribution name both
+ * become *arguments to a program this machine runs*, so the metacharacter
+ * refusals there are about what a string in a form can be talked into doing
+ * locally. This one becomes a URL handed to `new URL`, which parses rather than
+ * executes; there is no shell anywhere on that path.
+ *
+ * So the check is that it parses at all and names a host - and that it is not
+ * loopback, which is the one mistake worth catching in the form. Adding
+ * `localhost` as a host of *this* install would be a machine describing itself,
+ * and what it would produce is an instance-id collision with a row that does
+ * not exist yet: M4.1's report fires on connect, which is late enough to be
+ * confusing when the answer is simply "that is this computer".
+ */
+export const tailnetTargetSchema = z
+  .string()
+  .trim()
+  .min(1, 'Enter the machine, like pc-wsl or pc-wsl.tail0123.ts.net.')
+  .max(MAX_TARGET_LENGTH)
+  .refine((value) => !value.startsWith('-'), {
+    message: 'A machine name cannot start with "-".'
+  })
+  .refine(
+    (value) => {
+      try {
+        const url = new URL(/^https?:\/\//i.test(value) ? value : `http://${value}`)
+        return url.hostname.length > 0
+      } catch {
+        return false
+      }
+    },
+    { message: 'That is not a machine name or an address.' }
+  )
+  .refine(
+    (value) => {
+      const host = value.replace(/^https?:\/\//i, '').split(/[:/]/)[0]?.toLowerCase() ?? ''
+      return host !== 'localhost' && host !== '127.0.0.1' && host !== '::1'
+    },
+    { message: 'That is this computer. A host is another machine.' }
+  )
+
+/** Whichever of the three a host of this kind is addressed by. */
+export function hostTargetSchemaFor(kind: HostKind): z.ZodType<string> {
+  if (kind === 'wsl') return wslDistroNameSchema
+  if (kind === 'websocket') return tailnetTargetSchema
+  return sshTargetSchema
 }
 
 /**

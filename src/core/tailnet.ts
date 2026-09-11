@@ -137,20 +137,49 @@ export function forgetTailscaleBinary(): void {
   resolved = null
 }
 
-/** One `tailscale` invocation. Never throws; stdout, or null. */
+/**
+ * One `tailscale` invocation. Never throws.
+ *
+ * Two shapes of answer, because the two kinds of caller want different things.
+ *
+ * A *read* - `status`, `serve status` - wants stdout or nothing. Every way of
+ * failing is the same answer to it: the tailnet is not available here.
+ * `tailscale` distinguishes "not installed", "not logged in" and "daemon not
+ * running" in its prose, and none of those changes what this application does,
+ * which is offer the tailnet or not offer it.
+ *
+ * A *write* - `serve` - is different, and M6.4 found out why on a real Linux
+ * box. `tailscale serve` requires root there unless somebody has run
+ * `tailscale set --operator=$USER`, and it refuses with *Access denied: serve
+ * config denied* plus the exact command that fixes it. Swallowing that leaves
+ * a settings switch that flips back with no explanation, which is the worst
+ * possible version: the user has done nothing wrong, the remedy is one command,
+ * and the app has said nothing. So the failure text is kept and handed up.
+ */
 async function tailscale(args: string[], timeout: number): Promise<string | null> {
+  return (await runTailscale(args, timeout)).stdout
+}
+
+interface TailscaleRun {
+  /** Stdout when it succeeded, null when it did not. */
+  stdout: string | null
+  /** What it said when it failed, trimmed. Empty when there was nothing. */
+  failure: string
+}
+
+async function runTailscale(args: string[], timeout: number): Promise<TailscaleRun> {
   const binary = await tailscaleBinary()
-  if (binary === null) return null
+  if (binary === null) {
+    return { stdout: null, failure: 'Tailscale is not installed on this machine.' }
+  }
   try {
     const { stdout } = await run(binary, args, { timeout, maxBuffer: 8 * 1024 * 1024 })
-    return stdout
-  } catch {
-    // Every failure is the same answer to every caller here: not available, or
-    // not now. `tailscale` distinguishes "not installed", "not logged in",
-    // "daemon not running" and "this tailnet cannot do that" in its exit codes
-    // and its prose, and none of those changes what this application does -
-    // which is offer the tailnet or not offer it.
-    return null
+    return { stdout, failure: '' }
+  } catch (error) {
+    // `tailscale` writes its refusals to stderr and, usefully, includes the
+    // command that would work. `execFile`'s error carries both streams.
+    const { stderr, stdout } = error as { stderr?: string; stdout?: string }
+    return { stdout: null, failure: `${stderr ?? ''}${stdout ?? ''}`.trim() }
   }
 }
 
@@ -308,18 +337,39 @@ export async function tailnetServeOrigin(port: number): Promise<string | null> {
  * throws: a settings toggle that failed should say so on the panel, not take a
  * window down.
  */
-export async function serveTailnet(port: number): Promise<string | null> {
+export async function serveTailnet(port: number): Promise<ServeResult> {
   const target = `http://${LINK_SERVER_HOST}:${port}`
 
   // `--bg` or the command holds the terminal forever. It is background state on
   // the machine either way, which is why `tailnetServeOrigin` reads it back
   // instead of this function remembering what it did.
-  await tailscale(['serve', '--bg', '--https', String(port), target], SERVE_TIMEOUT_MS)
+  await runTailscale(['serve', '--bg', '--https', String(port), target], SERVE_TIMEOUT_MS)
   const secure = await tailnetServeOrigin(port)
-  if (secure !== null) return secure
+  if (secure !== null) return { origin: secure, failure: '' }
 
-  await tailscale(['serve', '--bg', '--http', String(port), target], SERVE_TIMEOUT_MS)
-  return tailnetServeOrigin(port)
+  const plain = await runTailscale(
+    ['serve', '--bg', '--http', String(port), target],
+    SERVE_TIMEOUT_MS
+  )
+  const origin = await tailnetServeOrigin(port)
+  // The HTTPS attempt's failure is deliberately not reported. On a tailnet
+  // without certificates it always fails, and saying so would be telling every
+  // user about a thing that is not wrong - see the header. The plain attempt is
+  // the one whose refusal means something.
+  return { origin, failure: origin === null ? plain.failure : '' }
+}
+
+/**
+ * What happened when this machine was asked to serve.
+ *
+ * `origin` is where it landed, or null. `failure` is what `tailscale` said
+ * about the refusal, kept verbatim rather than classified: its message names
+ * the exact command that would fix the common case, and no paraphrase of ours
+ * would be as useful as the sentence its authors wrote.
+ */
+export interface ServeResult {
+  origin: string | null
+  failure: string
 }
 
 /**

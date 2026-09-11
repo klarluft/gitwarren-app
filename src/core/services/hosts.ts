@@ -41,6 +41,7 @@ import { hosts, type HostRow } from '../db/schema.js'
 import { hostPool, type HostRoute } from '../hosts/pool.js'
 import { installOnHost } from '../hosts/install.js'
 import { listDistros } from '../hosts/wsl.js'
+import { normaliseTarget } from '../hosts/websocket.js'
 import { refreshExposure, setExposed } from '../web/exposure.js'
 import { AppError } from '../../shared/errors.js'
 import { parseWithSchema as parse } from '../../shared/validation.js'
@@ -117,6 +118,17 @@ function requireRow(id: number): HostRow {
  * stopped distinguishing anything.
  */
 function defaultLabelFor(target: string): string {
+  // A websocket target is a URL, so the label people recognise is the first
+  // label of its hostname: `http://pc-wsl.tail688c0c.ts.net:41427` is `pc-wsl`.
+  // The full name is still on the row and is what gets connected to; this is
+  // only what a card says.
+  if (/^https?:\/\//i.test(target)) {
+    try {
+      return new URL(target).hostname.split('.')[0] || target
+    } catch {
+      return target
+    }
+  }
   const withoutUser = target.includes('@') ? target.slice(target.indexOf('@') + 1) : target
   return withoutUser || target
 }
@@ -215,7 +227,13 @@ export const hostsService = {
   },
 
   add(input: unknown): HostWithState {
-    const { target, label, kind = 'ssh', editorTarget } = parse(addHostInputSchema, input)
+    const { target: typed, label, kind = 'ssh', editorTarget } = parse(addHostInputSchema, input)
+    // Stored in the form the carrier will use, not in the form somebody typed.
+    // `pc-wsl` and `http://pc-wsl:41427` are the same machine, and letting both
+    // into the table would mean two rows the unique index cannot see are one -
+    // which M4.1's collision report would then catch on connect, far later than
+    // it needs to be caught.
+    const target = kind === 'websocket' ? normaliseTarget(typed) : typed
 
     try {
       const row = getDatabase()

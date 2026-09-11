@@ -47,6 +47,7 @@
  * not - they just turned the machine on.
  */
 import { connectOverSsh } from './ssh.js'
+import { connectOverWebSocket } from './websocket.js'
 import { connectOverWsl } from './wsl.js'
 import type { HostConnection } from './carrier.js'
 import { AppError } from '../../shared/errors.js'
@@ -91,8 +92,11 @@ export interface HostRoute {
    * operating systems - what a host runs is discovered by asking it, never
    * declared. See the note on `hosts.kind` in `core/db/schema.ts`.
    */
-  kind: 'ssh' | 'wsl'
-  /** What that carrier is handed: an `ssh` destination, or a distro name. */
+  kind: 'ssh' | 'wsl' | 'websocket'
+  /**
+   * What that carrier is handed: an `ssh` destination, a distro name, or the
+   * origin of a machine that is already listening.
+   */
   target: string
 }
 
@@ -401,13 +405,14 @@ export function createHostPool({
  * Everything above is about *when* to connect, and none of it changed when M5
  * added a second way of reaching a machine - which is the whole argument for
  * the pool being a separate module from `ssh.ts`. A switch rather than a
- * registry: two carriers, and M6's WebSocket will be a third, is not a number
- * that earns indirection.
+ * registry: three carriers is not a number that earns indirection.
  */
 function defaultConnect(route: HostRoute, onClose: (error: AppError) => void): HostConnection {
   switch (route.kind) {
     case 'wsl':
       return connectOverWsl({ distro: route.target, onClose })
+    case 'websocket':
+      return connectOverWebSocket({ target: route.target, onClose })
     case 'ssh':
       return connectOverSsh({ target: route.target, onClose })
   }

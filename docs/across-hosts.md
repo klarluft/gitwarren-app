@@ -3121,7 +3121,7 @@ Before them, one spike that had to happen first, because it decides whether the
    that goes into an MCP result once a host listens. The phone works at the end
    of this one. *(done — see below.)*
 4. **The listening carrier.** The third `HostConnection`: a WebSocket client in
-   the app, reaching a machine that listens rather than one it spawns.
+   the app, reaching a machine that listens rather than one it spawns. *(done — see below.)*
 5. **Events across a host, and `host.state`.** `RpcEvent` on a wire in the one
    direction nothing has exercised, and the pool's `onStateChange` finally
    rendered — which is what greys a machine nobody is looking at.
@@ -3590,6 +3590,104 @@ said the right thing ("what neither may be is *the other one*") while the code
 did not. A page acts on the server that served it; the origin check now takes
 which authority the request arrived at and accepts exactly one value. The next
 authority added would have been wrong the same way.
+
+**M6.4, done on the Mac against the real tailnet, 11 September.** The third
+`HostConnection`, and the first that does not start a process. `ssh.ts` and
+`wsl.ts` both spawn `gitwarren serve --stdio` and own its lifetime; here the
+daemon was running before this app opened and will still be running after it
+quits.
+
+M5's extraction earned its keep: `core/hosts/carrier.ts` is used rather than
+paralleled, `createStdioClient` is reused for something that is not a pipe at
+all, and `core/hosts/pool.ts` gained a `case` and nothing else. Everything about
+*when* to connect - the idle timeout, the backoff ladder, the once-per-
+generation failure count - applied unchanged to a carrier it was written years
+of milestones before.
+
+**What a socket has instead of stderr and an exit.** The other two carriers
+explain a failure from the last few lines the far end printed, and wait for an
+exit to get them. There is no such stream here, and the substitutes are
+better: the HTTP status of a refused handshake, and the close code of a
+connection that stopped. Both arrive *after* the event that made anyone ask,
+which is the M4.1 lesson in a new shape, so `diagnostics()` waits the same
+`EXIT_GRACE_MS` for the same reason.
+
+The statuses need translating, and that is the part worth having written. A
+`401` over the tailnet is never about a token - the token is not consulted on
+that authority at all - so the sentence is *"pc-wsl does not recognise you as
+its owner. Both machines have to be signed in to the same Tailscale account."*
+A `403` means the switch is off over there, and says so.
+
+**And a heartbeat, for a reason the server's does not cover.**
+`core/rpc/websocket.ts` has pinged since M3 with a comment predicting that
+half-open connections would be "Tuesday" over the tailnet. That one protects the
+*server* from tabs that went away. This end needs its own, because the thing
+M6.5 is about is a machine switched off with nobody looking at it - and a
+carrier that only learns from requests would learn nothing, there being no
+requests. Ten seconds between pings, thirty seconds of silence before the
+connection is given up on.
+
+**Installing onto a listening host is refused, and it is not a gap.** `ssh` and
+`wsl.exe` reach a machine by starting a process on it, which is what makes an
+installer possible; a WebSocket reaches a daemon, and everything a daemon can be
+asked is a method on the dispatcher - which may never start a process. A
+listening host is one that already has GitWarren on it *by construction*: if it
+did not, there would be nothing to connect to. The message says to update it at
+that machine, or to add it as an SSH host.
+
+**The target is stored as an origin, not as typed.** `pc-wsl` and
+`http://pc-wsl:41427` are the same machine, and letting both into the table
+would be two rows the unique index cannot see are one - caught later by M4.1's
+collision report, far later than it needs to be. So `normaliseTarget` runs on
+add, the stored value is what the carrier uses, and a host that worked yesterday
+is not re-guessed today. That last point is M6.0's finding again: whether a
+tailnet can do HTTPS is a property of the *tailnet*, so the scheme is a fact to
+be remembered rather than a default to be applied.
+
+**Verified over a genuine tailnet hop.** `scripts/verify/m6-4.mjs`, with this
+install added as a websocket host under its own MagicDNS name: the request
+leaves the app, goes out to `tailscaled`, comes back through `tailscale serve`
+to loopback with an identity header, through the gate, and is answered. **48
+ms.** The instance id and the daemon version were learned and written back, the
+install attempt was refused with `FORBIDDEN`, `hosts.list` was answered locally
+rather than forwarded, and a name that does not resolve failed with *"could not
+be found. It may be off the tailnet."*
+
+Both ends being this machine makes it a smaller test than the milestone's verify
+line and not a fake one: every part between them - the proxy, the header, the
+gate, the socket - is the real thing, and none of it knows the two ends are
+related.
+
+**Two things bit, and the first is the more embarrassing.**
+
+*A carrier that refuses the request that caused it to exist is not a carrier.*
+The pool opens a connection *because* something asked a question, so the first
+request is always in flight before the handshake finishes - and every one of
+them failed in five milliseconds with "the connection is not open". This is
+written down in `web/carrier.ts`, in as many words, as the first of the three
+things a socket has that an IPC channel does not; it was written at M3 and had
+to be learned again here by watching it fail. Frames are queued until `open` and
+flushed, and the queue is dropped rather than drained if the socket dies, because
+retrying is the carrier deciding what a missing answer meant.
+
+The fix improved the diagnosis for free, which is the tell that it was the right
+one: a name that does not resolve used to report "not open" - true, useless, the
+exact failure mode M4.1's `diagnostics()` exists to prevent - and now reports
+what DNS said, because the request waits long enough to be told.
+
+*`tailscale serve` needs root on Linux, and the app was silent about it.* On
+this Mac the command succeeds as the user. On `pc-wsl` it refuses with *Access
+denied: serve config denied* and names the remedy - `sudo tailscale set
+--operator=$USER`, once. `core/tailnet.ts` was swallowing every failure equally,
+which is right for a *read* (not installed, not logged in and daemon-down are
+one answer: no tailnet here) and wrong for a *write*: the switch sprang back
+with no explanation, the user had done nothing wrong, and the fix was one
+command the tool had already printed. Writes now keep their failure text and
+`setExposed` throws it, so the panel says it.
+
+Worth noticing that this is invisible on the machine most likely to be
+*developed* on and waiting on the machine most likely to be a *host*. It is the
+same shape as M5.0's `ci.yml` finding one layer up.
 
 ## Agent setup
 

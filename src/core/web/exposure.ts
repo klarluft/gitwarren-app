@@ -32,6 +32,7 @@ import {
   unserveTailnet
 } from '../tailnet.js'
 import { writeDaemonExposure } from '../daemon-runtime.js'
+import { AppError } from '../../shared/errors.js'
 import type { TailnetGate } from './origin.js'
 import type { TailnetExposure } from '../../shared/schemas.js'
 
@@ -124,9 +125,30 @@ export async function refreshExposure(): Promise<TailnetExposure> {
  * user they were reachable when they were not.
  */
 export async function setExposed(exposed: boolean): Promise<TailnetExposure> {
+  let refusal = ''
   if (servedPort !== 0) {
-    if (exposed) await serveTailnet(servedPort)
+    if (exposed) refusal = (await serveTailnet(servedPort)).failure
     else await unserveTailnet(servedPort)
   }
-  return refreshExposure()
+
+  const now = await refreshExposure()
+  // Asked for and did not get. Thrown rather than returned quietly, because the
+  // caller is a switch somebody just flipped: a control that springs back with
+  // no explanation is the worst version of this, and the remedy is usually one
+  // command that `tailscale` has already named.
+  //
+  // M6.4 found the case on a real Linux box. `tailscale serve` needs root there
+  // unless `tailscale set --operator=$USER` has been run once, and it refuses
+  // with *Access denied: serve config denied* plus that exact command. On macOS
+  // the same call succeeds as the user, so this is invisible until somebody
+  // runs GitWarren on the machine most likely to be a host.
+  if (exposed && !now.exposed) {
+    throw new AppError(
+      'INTERNAL',
+      refusal
+        ? `Tailscale would not put this machine on your tailnet. ${refusal}`
+        : 'Tailscale would not put this machine on your tailnet.'
+    )
+  }
+  return now
 }

@@ -89,7 +89,7 @@ export type NewPrincipalRow = typeof principals.$inferInsert
  *
  * ## What `kind` will and will not grow into
  *
- * `ssh` and `wsl` here, `websocket` at M6. It discriminates over *carriers*,
+ * `ssh`, `wsl` and, since M6, `websocket`. It discriminates over *carriers*,
  * not over operating systems: what a host runs is discovered by asking it
  * (`uname -sm`, for M4.2's installer), never declared in a form, because a
  * person choosing "Linux" from a dropdown is a person who can choose wrong.
@@ -114,7 +114,7 @@ export const hosts = sqliteTable(
     /** What the person calls this machine. Theirs to choose; never matched on. */
     label: text('label').notNull(),
     /** Which carrier reaches it. */
-    kind: text('kind', { enum: ['ssh', 'wsl'] })
+    kind: text('kind', { enum: ['ssh', 'wsl', 'websocket'] })
       .notNull()
       .default('ssh'),
     /**
@@ -122,6 +122,14 @@ export const hosts = sqliteTable(
      * and it carries the Unix user, because spike S1 found that a bare MagicDNS
      * name requests the *client's* username and is refused by the tailnet
      * policy. `xfor@pc-wsl`, not `pc-wsl`.
+     *
+     * For `websocket`, an origin: `http://pc-wsl.tail688c0c.ts.net:41427`. A
+     * name typed on its own is given the fixed link port and plain http, which
+     * is what this tailnet actually serves - see `normaliseTarget` in
+     * `core/hosts/websocket.ts`. It is stored whole rather than as a hostname
+     * plus an assumed scheme, because M6.0 found that whether a tailnet can do
+     * HTTPS is a property of the *tailnet* rather than of the machine, and a
+     * host that worked yesterday must not be re-guessed today.
      *
      * For `wsl`, the distribution name and nothing else: `Ubuntu`. There is no
      * user half, and M5 decided there should not be one. `wsl.exe -d Ubuntu`

@@ -107,6 +107,26 @@ export const runOnHost: RunOnHost = (route, options) => {
       return runOverWsl({ distro: route.target, ...options })
     case 'ssh':
       return runOverSsh({ target: route.target, ...options })
+    case 'websocket':
+      // There is no shell on this carrier and there must not be one. `ssh` and
+      // `wsl.exe` reach a machine by *starting a process on it*, which is what
+      // makes an installer possible at all; a WebSocket reaches a daemon that
+      // is already running, and everything it can be asked to do is a method on
+      // the dispatcher - which, by the note at the top of
+      // `core/rpc/dispatcher.ts`, may never start a process.
+      //
+      // So this is not a gap to be filled later. A listening host is one that
+      // already has GitWarren on it, by construction: if it did not, there
+      // would be nothing to connect to. Installing onto it is somebody's job at
+      // that machine, or M4's `ssh` carrier's, and the message says which.
+      return Promise.reject(
+        new AppError(
+          'FORBIDDEN',
+          `${route.target} is reached over its own network connection, so GitWarren cannot be ` +
+            `installed onto it from here - a machine that answers is a machine that already has ` +
+            `it. Update it on that machine, or add it as an SSH host to install over a shell.`
+        )
+      )
   }
 }
 
