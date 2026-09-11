@@ -9,6 +9,14 @@ name: Homebrew tap
 # release starts life as a draft, and only publishing makes its assets
 # visible to the API the bump reads from.
 #
+# Prereleases are deliberately not announced. The tap's bump.sh resolves the
+# latest published release with `--exclude-pre-releases` when it is given no
+# tag, but this dispatch hands it one - and an explicit tag is taken as given,
+# prerelease or not. So a beta announced from here would land in the cask and
+# reach every `brew upgrade` on the next run. Saying nothing leaves the tap's
+# own six-hourly schedule to find the newest stable release, which is the
+# right answer for a beta: no bump at all.
+#
 # Needs HOMEBREW_TAP_TOKEN — a fine-grained PAT for the klarluft/homebrew-tap
 # repository with *Contents: read and write* (a repository_dispatch counts as
 # a write to contents). Without it the job is skipped rather than failed: the
@@ -21,6 +29,7 @@ on:
 jobs:
   notify:
     name: Ask the tap to bump
+    if: github.event.release.prerelease == false
     runs-on: ubuntu-latest
     env:
       HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
