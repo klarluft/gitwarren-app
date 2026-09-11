@@ -33,6 +33,7 @@ import { APP_VERSION } from '../version.js'
 import { attachmentsService } from '../services/attachments.js'
 import { commentsService } from '../services/comments.js'
 import { fsService } from '../services/fs.js'
+import { discoverPeers } from '../hosts/discover.js'
 import { hostsService, tailnetService } from '../services/hosts.js'
 import { repositoriesService } from '../services/repositories.js'
 import { reviewedFilesService } from '../services/reviewed-files.js'
@@ -126,8 +127,14 @@ function toIngestSource(params: unknown): { bytes: Buffer; originalName?: string
  *
  * Synchronous: the instance id is a cached file read and the version is a
  * build-time constant.
+ *
+ * Exported since M6.6 for one other caller: the discovery probe in
+ * `core/web/handler.ts`, which answers the same shape over HTTP to a peer that
+ * has no carrier yet. Shared rather than rebuilt, because "who is answering" is
+ * one question and two answers to it would eventually disagree about a protocol
+ * number.
  */
-function describeThisInstance(): HostIdentity {
+export function describeThisInstance(): HostIdentity {
   return {
     instanceId: getInstanceId(),
     protocol: RPC_PROTOCOL_VERSION,
@@ -167,6 +174,7 @@ const handlers: {
   // About this machine's own reachability, never a host's - `isLocalOnly`
   // refuses the whole prefix, which is what stops a GUI on one machine
   // starting `tailscale serve` on another. See the note in `shared/rpc.ts`.
+  'hosts.discover': () => discoverPeers(),
   'hosts.tailnet': () => tailnetService.read(),
   'hosts.setTailnetExposure': (params) => tailnetService.set(params),
 

@@ -984,3 +984,35 @@ export const setTailnetExposureInputSchema = z.object({
 })
 
 export type SetTailnetExposureInput = z.infer<typeof setTailnetExposureInputSchema>
+
+/**
+ * A machine on the tailnet that answered a probe.
+ *
+ * Not a host row and deliberately shaped so it could never be mistaken for one:
+ * it has no `id`, because nothing has been added. Discovery proposes and a
+ * person decides - see `core/hosts/discover.ts` on why that line matters more
+ * than it looks.
+ */
+export const discoveredPeerSchema = z.object({
+  /** Its MagicDNS name: `pc-wsl.tail688c0c.ts.net`. */
+  dnsName: z.string(),
+  /** Where it answered, which is what becomes `hosts.target` if it is added. */
+  origin: z.string(),
+  /** Who it said it is. The only field that can tell two names for one box apart. */
+  instanceId: z.string(),
+  /** What it is running, for a person to compare against their own. */
+  version: z.string().nullable(),
+  /**
+   * The label of the row this machine is already in the list as, or null.
+   *
+   * A *label* rather than a boolean, because "you have this already" is not
+   * useful without "as what": `pc-wsl` reached over SSH and `pc-wsl` reached
+   * over the tailnet are one machine, and the question a person has is which
+   * row it is. M4.1's collision report says the same thing after an insert and
+   * a connection; this says it before either, because the probe already carried
+   * the instance id.
+   */
+  alreadyAdded: z.string().nullable()
+})
+
+export type DiscoveredPeer = z.infer<typeof discoveredPeerSchema>

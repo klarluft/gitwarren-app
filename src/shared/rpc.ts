@@ -30,6 +30,7 @@ import type {
   HostWithState,
   InstallOnHostInput,
   InstallReport,
+  DiscoveredPeer,
   RemoveHostInput,
   SetTailnetExposureInput,
   TailnetExposure,
@@ -354,6 +355,19 @@ export interface RpcMethods {
    * anywhere asks what is installed. The same shape `hosts.distros` uses to
    * make a Mac not offer a WSL host.
    */
+  /**
+   * Machines on this install's tailnet that are running GitWarren.
+   *
+   * Under `hosts.` with the others, and the prefix is doing the same work: what
+   * peers a machine can see is that machine's own business, and a GUI must not
+   * be able to ask a host to go scanning on its behalf.
+   *
+   * A *read* in the sense that matters - it adds nothing and changes nothing -
+   * but not a cheap one, which is why it is in `READ_METHODS` for coalescing
+   * and is asked only when a screen that shows it is opened. See
+   * `core/hosts/discover.ts` for when it runs and what it costs.
+   */
+  'hosts.discover': { params: void; result: DiscoveredPeer[] }
   'hosts.tailnet': { params: void; result: TailnetExposure }
   'hosts.setTailnetExposure': { params: SetTailnetExposureInput; result: TailnetExposure }
 
@@ -495,6 +509,7 @@ export const READ_METHODS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
   'hosts.list',
   'hosts.get',
   'hosts.distros',
+  'hosts.discover',
   'hosts.tailnet',
   // `hosts.probe` is deliberately absent. It reads in the sense that it changes
   // no host row a caller can see, but it opens a connection and clears a

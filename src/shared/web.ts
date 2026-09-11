@@ -82,7 +82,25 @@ export const WEB_PATHS = {
    * which it could already cause by writing to the database it can already
    * open. See `core/web/notify.ts`.
    */
-  notify: `${WEB_PREFIX}/notify`
+  notify: `${WEB_PREFIX}/notify`,
+  /**
+   * "Is there a GitWarren here, and which one?" - the one question a machine
+   * this install has no relationship with is allowed to ask.
+   *
+   * A `GET` rather than `app.instance` over the carrier, because a probe is
+   * asked of peers there is no connection to yet and opening one is a stronger
+   * act than asking whether anybody is home. It also has to be cheap: discovery
+   * asks every online peer at once, and most of them are phones that will
+   * refuse the TCP connect.
+   *
+   * Behind the same gate as everything else, which is what makes it safe to
+   * answer at all: on the tailnet authority it requires the owner's login, so
+   * only the owner's own devices can learn that this machine runs GitWarren.
+   * What comes back is `HostIdentity` - the same shape `app.instance` returns,
+   * because it is the same question asked before there is a carrier rather than
+   * after.
+   */
+  discover: `${WEB_PREFIX}/discover`
 } as const
 
 /**

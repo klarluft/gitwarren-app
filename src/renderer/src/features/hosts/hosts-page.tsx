@@ -38,6 +38,7 @@ import { api, CACHE_KEYS } from '@/lib/api'
 import { errorMessage } from '@/lib/errors'
 import { navigate } from '@/lib/router'
 import { useRegisterCommands, type Command } from '@/features/commands/command-registry'
+import { DiscoveredHosts } from './discovered-hosts'
 import { HostCard } from './host-card'
 import { HostFormDialog } from './host-form-dialog'
 import { InstallResultDialog, type InstallOutcome } from './install-result-dialog'
@@ -164,6 +165,12 @@ export function HostsPage() {
           </div>
         </div>
       </div>
+
+      {/* Above the list rather than below it: a machine you have not added yet
+          is the thing you came here to do something about, and a proposal
+          under twelve rows is a proposal nobody sees. It draws nothing at all
+          when there is nothing to propose. */}
+      <DiscoveredHosts />
 
       {isLoading && <LoadingState />}
 

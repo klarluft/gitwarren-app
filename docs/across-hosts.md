@@ -3126,7 +3126,7 @@ Before them, one spike that had to happen first, because it decides whether the
    direction nothing has exercised, and the pool's `onStateChange` finally
    rendered — which is what greys a machine nobody is looking at. *(done — see below.)*
 6. **Discovery.** Peers from `tailscale status --json`, proposed rather than
-   added.
+   added. *(done — see below.)*
 7. **Links across installs, and the words.** What a `gitwarren://<other-id>/…`
    link does now that there is somewhere for it to go, and the README, the
    tagline and Known limitations catching up with the thing that shipped.
@@ -3255,17 +3255,24 @@ to every machine on the list, which is what `core/hosts/pool.ts` exists to avoid
 and what M4.3 refused to do to render a home screen — and it would be worse
 here, because the list includes machines that are not this user's problem.
 
-So it is a screen-triggered read with a bounded cost, and the cost is worth
-computing rather than hand-waving. The candidate set is peers from `tailscale
-status --json` that are `Online` and carry the same `UserID` as `Self` — an
-ownership check from the same file the identity check reads, not a guess. Each
-candidate gets one HTTP `GET` with a one-second timeout. A phone is not
-filtered out by its `OS` field, because a blocklist of operating systems is the
-same shape as M5.2's blocklist of distribution names and goes stale the same
-way; it is filtered out by *answering nothing*, which costs a refused TCP
-connect in single-digit milliseconds. Nine phones and one PC is ten parallel
-connects, nine of them refused, once, when a screen is opened. That is the
-whole bill.
+So it is a screen-triggered read with a bounded cost. The candidate set is
+peers from `tailscale status --json` that are `Online` and carry the same
+`UserID` as `Self` — an ownership check from the same file the identity check
+reads, not a guess. Each candidate gets one HTTP `GET` with a one-second
+timeout, all of them in parallel. A phone is not filtered out by its `OS`
+field, because a blocklist of operating systems is the same shape as M5.2's
+blocklist of distribution names and goes stale the same way; it is filtered out
+by *answering nothing*.
+
+*(This paragraph originally said that answering nothing "costs a refused TCP
+connect in single-digit milliseconds", and M6.6 measured otherwise: on a real
+tailnet a peer with nothing on the port takes about 800 ms to refuse, because
+reaching it means NAT traversal or a relay first. The bill is therefore not
+"nine cheap refusals" but **one probe timeout, once, however many peers there
+are** — measured at 1046 ms for this four-node tailnet. The estimate was wrong
+in a way that does not change the design and does change what the number means,
+which is exactly the sort of thing worth leaving visible rather than quietly
+editing.)*
 
 *Discovery proposes; it never adds.* `isLocalOnly` refuses the whole `hosts.`
 prefix so that a hub cannot be talked into becoming a mesh, and a discovery that
@@ -3766,6 +3773,73 @@ local shell, `ssh`'s own concatenation of its arguments, and the remote *zsh*
 that M4.2 found is the login shell on that box. A script file crosses once and
 is read by `sh`. It is the same lesson M5.1 learned about `wsl.exe --`, in a
 place where it cost a confusing half hour rather than a bug.
+
+**M6.6, done on the Mac against the real tailnet, 11 September.** "The PC
+appears on the Mac with no configuration", and the design work was all in the
+second half of that sentence rather than the first.
+
+**What "no configuration" constrains is what the *user* types, not what the app
+does while nobody is watching.** So discovery runs when somebody opens the Hosts
+screen, or presses "Look again", and at no other time - no timer, no startup
+scan, no revalidation on focus. Probing every peer on a schedule would be a
+connection to every machine you own, which is what `core/hosts/pool.ts` exists
+to avoid and what M4.3 refused to do to render a home screen.
+
+The SWR options on `CACHE_KEYS.discovered` say so explicitly rather than by
+omission - `revalidateOnFocus: false`, `revalidateIfStale: false`,
+`refreshInterval: 0` - because this is the one read in the application that
+costs a connection attempt per peer, and a default that is right everywhere else
+is wrong here.
+
+**The probe is a `GET`, not `app.instance` over a carrier.** A method needs the
+socket, the socket needs an upgrade, and that is a lot of ceremony to ask of
+peers that will not answer - but the better reason is what it *means*: a probe
+is asked of machines this install has no relationship with, and opening a
+carrier to one is a stronger act than asking whether anybody is home. It is
+`WEB_PATHS.discover`, behind the same gate as everything else, so on the tailnet
+authority it requires the owner's login and only the owner's own devices can
+learn that a machine runs GitWarren. What it answers is `HostIdentity` - the
+same shape `app.instance` returns, shared rather than rebuilt, because it is the
+same question asked before there is a connection rather than after.
+
+**It proposes; it never adds.** `isLocalOnly` refuses the whole `hosts.` prefix
+so a hub cannot be talked into becoming a mesh, and a discovery that inserted
+rows would have walked around that from the other side.
+
+**And a machine you already have is shown rather than hidden, naming the row.**
+This is the case the brief asked to be checked and it is not hypothetical:
+`pc-wsl` is already an `ssh` row on this Mac from M4 and it is the same box.
+Dropping it from the list would be M5.2's rejected blocklist all over again - a
+listing that silently omits rows is one you cannot trust when what you wanted is
+missing. So it appears with *Already added as pc-wsl* where the button would be.
+M4.1's collision report says the same thing on connect, after an insert; here
+the instance id arrived with the probe, so it can be said before anybody presses
+anything.
+
+**Verified with an empty host list.** `scripts/verify/m6-6.mjs`: nothing
+configured, `hosts.discover` found `pc-wsl.tail688c0c.ts.net` running
+0.1.7-beta.1 and reporting `4e0b0adb…`; this Mac was not proposed to itself;
+adding the proposal produced a working host on the first probe with the instance
+id discovery already knew; a second scan reported it as *Already added as
+pc-wsl*; and with the row replaced by an `ssh` row for the same machine, it was
+still reported as already added rather than offered as new.
+
+**The estimate in the plan was wrong, and it is left visible.** That paragraph
+said a peer with nothing on the port costs "a refused TCP connect in single-digit
+milliseconds", so the bill would be "nine cheap refusals". Measured: the phone
+on this tailnet takes **768 ms** to refuse, and a full scan of four nodes takes
+**1046 ms**. Refusing means being *reached* first, and on a tailnet that is NAT
+traversal or a relay before there is anything to refuse with.
+
+So the honest description of the cost is the opposite shape: not many small
+things, but **one probe timeout, once, however many peers there are**, because
+they run in parallel. Nothing about the design changes - it was already
+parallel, already bounded, already screen-triggered - but what
+`PROBE_TIMEOUT_MS` is choosing turns out to be the duration of the whole scan
+rather than a safety net on a fast case, and the comment on it now says that.
+The guess was wrong in a way that would have been invisible on a LAN and is the
+first thing anybody notices on a tailnet, which is the argument for measuring
+against the real one in one sentence.
 
 ## Agent setup
 

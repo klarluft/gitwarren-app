@@ -162,6 +162,7 @@ function buildApi(host: string | undefined): GitWarrenApi {
       // actively wrong rather than merely refused: this is about the
       // reachability of the machine holding the core, which in a browser tab
       // is the machine that served the tab and never the one a route names.
+      discover: () => ask('hosts.discover', undefined),
       tailnet: () => ask('hosts.tailnet', undefined),
       setTailnetExposure: (input) => ask('hosts.setTailnetExposure', input)
     },
@@ -296,6 +297,15 @@ export const CACHE_KEYS = {
    * this window is driving, not about any machine a route happens to name.
    */
   tailnet: 'tailnet',
+  /**
+   * What is on the tailnet that is not in the list yet.
+   *
+   * Unscoped like the other `hosts.` keys, and deliberately *not* fetched
+   * anywhere but the Hosts screen: this is the one read in the app that costs a
+   * connection attempt per peer, so a key that something else subscribed to
+   * would turn opening any screen into a scan. See `core/hosts/discover.ts`.
+   */
+  discovered: 'discovered-peers',
   repositories: (host?: string) => scoped('repositories', host),
   repository: (repositoryId: number, host?: string) =>
     scoped(`repository:${repositoryId}`, host),

@@ -30,6 +30,7 @@ import type {
   InstallOnHostInput,
   InstallReport,
   WslDistro,
+  DiscoveredPeer,
   RemoveHostInput,
   SetTailnetExposureInput,
   TailnetExposure,
@@ -336,6 +337,8 @@ export interface GitWarrenApi {
      * on a headless box needs; a GUI looking at a remote host cannot reach
      * across and start `tailscale serve` there.
      */
+    /** Machines on this tailnet running GitWarren. Proposals, never rows. */
+    discover(): Promise<DiscoveredPeer[]>
     tailnet(): Promise<TailnetExposure>
     setTailnetExposure(input: SetTailnetExposureInput): Promise<TailnetExposure>
   }

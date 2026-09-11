@@ -67,6 +67,7 @@ import { WebSocketServer } from 'ws'
 import { serveWebSocket } from '../rpc/websocket.js'
 import { serveAttachment } from './attachments.js'
 import { serveNotify } from './notify.js'
+import { describeThisInstance } from '../rpc/dispatcher.js'
 import {
   isAllowedHost,
   isAllowedOrigin,
@@ -355,6 +356,17 @@ export function createWebHandler({
         // owner, and telling them how the owner gets in would be the wrong
         // help.
         response.writeHead(401, UNAUTHORIZED_HEADERS).end(UNAUTHORIZED_PAGE)
+        return true
+      }
+
+      // Who this install is, for a peer deciding whether to propose it. It is
+      // behind the same gate as everything else - on the tailnet that means the
+      // owner's login - so this is not an unauthenticated announcement, it is
+      // one machine of the owner's telling another. See `core/hosts/discover.ts`.
+      if (pathname === WEB_PATHS.discover) {
+        response
+          .writeHead(200, { ...NO_STORE, 'Content-Type': 'application/json; charset=utf-8' })
+          .end(request.method === 'HEAD' ? undefined : JSON.stringify(describeThisInstance()))
         return true
       }
 
