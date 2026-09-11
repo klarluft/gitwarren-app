@@ -64,6 +64,13 @@
       "when": 1789074697080,
       "tag": "0008_hosts",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1789076799454,
+      "tag": "0009_host_daemon_version",
+      "breakpoints": true
     }
   ]
 }

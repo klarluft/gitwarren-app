@@ -53,3 +53,25 @@ export function ensureDataDirectory(): string {
   mkdirSync(dir, { recursive: true })
   return dir
 }
+
+/**
+ * Where daemon tarballs downloaded for other machines are kept.
+ *
+ * In the data directory rather than beside the install, for the reason M4's
+ * installer exists at all: the file is fetched *once* and then streamed to as
+ * many hosts as share an architecture, so it has to outlive an app update. It
+ * is also the half of the design that makes an air-gapped host work — the
+ * machine with a browser does the downloading, and the host on the other end of
+ * the pipe never talks to GitHub.
+ *
+ * Deliberately not swept on startup. A 45 MB file per architecture per version
+ * is small next to what it saves on a slow link, and deleting one is
+ * `rm -rf` in a directory the user can find; guessing when a version stops
+ * being interesting is the kind of cleverness that deletes the file someone was
+ * about to reinstall from.
+ */
+export const DAEMON_CACHE_DIR_NAME = 'daemon-cache'
+
+export function getDaemonCacheDirectory(): string {
+  return join(getDataDirectory(), DAEMON_CACHE_DIR_NAME)
+}

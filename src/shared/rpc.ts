@@ -26,6 +26,8 @@ import type {
   Attachment,
   GetHostInput,
   HostWithState,
+  InstallOnHostInput,
+  InstallReport,
   RemoveHostInput,
   UpdateHostInput,
   Comment,
@@ -189,6 +191,16 @@ export interface RpcMethods {
   'hosts.remove': { params: RemoveHostInput; result: { id: number } }
   /** Reach a host now, ignoring backoff. Answers with what happened. */
   'hosts.probe': { params: GetHostInput; result: HostWithState }
+  /**
+   * Put the daemon on a host, or say that it is already there.
+   *
+   * The slowest method in this interface by a wide margin - a download and a
+   * 45 MB stream - and the only one with no timeout on either side, which is
+   * deliberate: there is no number of seconds after which abandoning a
+   * part-finished install would be an improvement. See `core/hosts/install.ts`
+   * on why it reports nothing until it is done.
+   */
+  'hosts.install': { params: InstallOnHostInput; result: InstallReport }
 
   'repositories.list': { params: void; result: RepositoryWithGitState[] }
   'repositories.get': { params: GetRepositoryInput; result: RepositoryWithGitState }

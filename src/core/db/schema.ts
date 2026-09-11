@@ -131,6 +131,24 @@ export const hosts = sqliteTable(
      * written down - the Hosts screen asks the carrier, which knows.
      */
     lastSeenAt: text('last_seen_at'),
+    /**
+     * Which GitWarren was on the host the last time it said, and NULL until it
+     * has said anything.
+     *
+     * Stored for the same reason `instance_id` is, and learned in the same
+     * place from the same `app.instance` answer: it is a fact about the install
+     * over there, not about whether it is awake, so it survives the machine
+     * being switched off. That is what lets the Hosts screen say "0.1.6, update
+     * available" for a host it has not connected to since - and the alternative,
+     * asking every host on every list, would connect to all of them to render a
+     * list, which is precisely what the connect-on-use pool exists to avoid.
+     *
+     * It is allowed to be wrong in exactly one way: someone upgrades the daemon
+     * on the host by hand, and this says the old version until the next
+     * connect. That is the same staleness `last_seen_at` has, and the install
+     * button re-reads the truth before it does anything.
+     */
+    daemonVersion: text('daemon_version'),
     createdAt: text('created_at')
       .notNull()
       .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`)

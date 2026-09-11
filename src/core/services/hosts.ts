@@ -29,20 +29,28 @@
  * because they asked for a repository list. The pool decides when, and the only
  * deliberate reach is `probe`, which exists so the Hosts screen can offer a
  * button that says "try now" and mean it.
+ *
+ * `install` is the second deliberate reach, and the exception that proves the
+ * rule: putting software on somebody's machine is emphatically something a
+ * person does, and it is the one thing here that must never happen because a
+ * screen happened to render.
  */
 import { asc, eq } from 'drizzle-orm'
 import { getDatabase } from '../db/client.js'
 import { hosts, type HostRow } from '../db/schema.js'
 import { hostPool, type HostRoute } from '../hosts/pool.js'
+import { installOnHost } from '../hosts/install.js'
 import { AppError } from '../../shared/errors.js'
 import { parseWithSchema as parse } from '../../shared/validation.js'
 import {
   addHostInputSchema,
   getHostInputSchema,
+  installOnHostInputSchema,
   removeHostInputSchema,
   updateHostInputSchema,
   type Host,
-  type HostWithState
+  type HostWithState,
+  type InstallReport
 } from '../../shared/schemas.js'
 
 function toHost(row: HostRow): Host {
@@ -54,6 +62,7 @@ function toHost(row: HostRow): Host {
     target: row.target,
     editorTarget: row.editorTarget,
     lastSeenAt: row.lastSeenAt,
+    daemonVersion: row.daemonVersion,
     createdAt: row.createdAt
   }
 }
@@ -101,9 +110,13 @@ function asDuplicateError(error: unknown, target: string): AppError {
  * "the pipe opened" and "the daemon answered" are different claims and only the
  * second one is worth writing down.
  */
-function recordSeen(row: HostRow, instanceId: string | null): void {
+function recordSeen(row: HostRow, instanceId: string | null, daemonVersion?: string): void {
   const database = getDatabase()
   const lastSeenAt = new Date().toISOString()
+  // Written on every sighting rather than only on a change, because the host
+  // being upgraded by someone else is exactly the case this column exists to
+  // notice, and it costs the same UPDATE either way.
+  const version = daemonVersion ? { daemonVersion } : {}
 
   if (instanceId && instanceId !== row.instanceId) {
     const other = database.select().from(hosts).where(eq(hosts.instanceId, instanceId)).get()
@@ -115,11 +128,19 @@ function recordSeen(row: HostRow, instanceId: string | null): void {
         { target: ['This machine is already in the list under another name.'] }
       )
     }
-    database.update(hosts).set({ instanceId, lastSeenAt }).where(eq(hosts.id, row.id)).run()
+    database
+      .update(hosts)
+      .set({ instanceId, lastSeenAt, ...version })
+      .where(eq(hosts.id, row.id))
+      .run()
     return
   }
 
-  database.update(hosts).set({ lastSeenAt }).where(eq(hosts.id, row.id)).run()
+  database
+    .update(hosts)
+    .set({ lastSeenAt, ...version })
+    .where(eq(hosts.id, row.id))
+    .run()
 }
 
 export const hostsService = {
@@ -224,16 +245,72 @@ export const hostsService = {
 
     // Reached. Ask who that was, and remember it.
     let instanceId: string | null = null
+    let version: string | undefined
     try {
       const info = await hostPool.request(routeFor(row), 'app.instance')
       instanceId = info.instanceId
+      version = info.version
     } catch {
       // A host too old to answer `app.instance` is still a usable host; it just
       // stays anonymous, and `instance_id` keeps saying "not met" - which is
       // true in the only sense that matters here.
     }
 
-    recordSeen(row, instanceId)
+    recordSeen(row, instanceId, version)
     return withState(requireRow(id))
+  },
+
+  /**
+   * Put GitWarren on a host, and note what it turned out to be running.
+   *
+   * The connection is dropped first, and that is not tidiness. The pool may be
+   * holding a pipe into the daemon that is about to be replaced on disk, and an
+   * `ssh` still attached to the old `lib/gitwarren.cjs` would go on answering
+   * from a directory that has been moved out from under it - the version this
+   * function reads back at the end would then be the new one while the carrier
+   * kept using the old. Hanging up costs a 178 ms reconnect on the multiplexed
+   * channel and removes the whole question.
+   *
+   * The install itself is `core/hosts/install.ts`; what belongs here is what
+   * touches the database - forgetting the connection, writing down the version
+   * that is now over there, and then reaching the machine again.
+   *
+   * That last step is not tidiness either. Without it the row handed back says
+   * `connected: false, failures: 0`, which the screen renders as "not tried
+   * yet" - immediately after somebody watched a progress spinner put GitWarren
+   * onto that machine. The daemon has never been *spoken to*, only installed,
+   * and the honest way to fix the sentence is to speak to it. It costs a
+   * multiplexed reconnect, and it is how the instance id gets learned for a
+   * host that has just met GitWarren for the first time.
+   *
+   * The probe's own failure is swallowed on purpose: an install that worked
+   * followed by a connection that did not is still an install that worked, and
+   * reporting it as a failed install would send someone to fix the wrong thing.
+   * Whatever went wrong is on the row, in `state.lastError`, where the screen
+   * shows it.
+   */
+  async install(input: unknown): Promise<InstallReport> {
+    const { id, force } = parse(installOnHostInputSchema, input)
+    const row = requireRow(id)
+
+    // The pool may be holding a pipe into the daemon that is about to be
+    // replaced on disk. See the note above.
+    hostPool.disconnect(id)
+    const report = await installOnHost(routeFor(row), { force })
+
+    getDatabase()
+      .update(hosts)
+      .set({ daemonVersion: report.version })
+      .where(eq(hosts.id, id))
+      .run()
+
+    try {
+      await hostsService.probe({ id })
+    } catch {
+      // Two machines under one name is the case that lands here, and it is
+      // reported the next time anybody probes rather than as a failed install.
+    }
+
+    return { ...report, host: withState(requireRow(id)) }
   }
 }

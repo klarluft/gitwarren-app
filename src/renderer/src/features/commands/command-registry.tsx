@@ -39,6 +39,10 @@ export const COMMAND_GROUPS = [
   'Navigate',
   'Reviews',
   'Repositories',
+  // Below Repositories because it is contributed by one screen that has to be
+  // gone to, so it is only ever present when it is already what you are
+  // looking at.
+  'Hosts',
   'Application'
 ] as const
 

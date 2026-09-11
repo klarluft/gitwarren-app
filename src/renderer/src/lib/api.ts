@@ -41,6 +41,15 @@ export const api: GitWarrenApi = {
   // and leaves the button out; see `ShellCapabilities` on why that is better
   // than a button that explains itself when pressed.
   capabilities: shell.capabilities,
+  hosts: {
+    list: () => carrier.request('hosts.list', undefined),
+    get: (input) => carrier.request('hosts.get', input),
+    add: (input) => carrier.request('hosts.add', input),
+    update: (input) => carrier.request('hosts.update', input),
+    remove: (input) => carrier.request('hosts.remove', input),
+    probe: (input) => carrier.request('hosts.probe', input),
+    install: (input) => carrier.request('hosts.install', input)
+  },
   repositories: {
     list: () => carrier.request('repositories.list', undefined),
     get: (input) => carrier.request('repositories.get', input),
@@ -103,6 +112,17 @@ export const api: GitWarrenApi = {
  * built with, which is what you want after creating or closing a review.
  */
 export const CACHE_KEYS = {
+  /**
+   * One key for the whole list, like `repositories`.
+   *
+   * There is no per-host key on purpose. A host row carries live reachability,
+   * so anything that changes one host's state has almost certainly changed the
+   * neighbours' too - a laptop closing its lid takes every host on that tailnet
+   * with it - and re-reading the list is one local SQLite read plus a lookup in
+   * the pool. Splitting it would buy nothing and would let two rows on one
+   * screen disagree about what time it is.
+   */
+  hosts: 'hosts',
   repositories: 'repositories',
   repositoryRefs: (repositoryId: number) => `repository-refs:${repositoryId}`,
   reviews: (repositoryId?: number, status?: string) =>

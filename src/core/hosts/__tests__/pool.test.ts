@@ -201,3 +201,73 @@ test('an error from the host is the host working, not the host being down', asyn
   // The round trip succeeded. The machine is fine and stays fine.
   assert.deepEqual(pool.state(route.id), { connected: true, failures: 0 })
 })
+
+test('a pipe that dies under a request is one failure, not two', async () => {
+  // This is the shape a real `ssh` has and the fake above did not: when the far
+  // end goes, the close handler fires *and* every request waiting on it
+  // rejects. Counting both made one press of "Try now" climb two rungs of the
+  // backoff ladder, so a machine that was switched off went from a one-second
+  // wait to a fifteen-second one after two attempts instead of four. Found
+  // against `pc-wsl` while verifying M4.2, by reading a `failures: 2` that
+  // should have said 1.
+  const { pool, fake } = fakePool({
+    answer: () =>
+      new Promise((_resolve, reject) => {
+        fake.closeLast(new AppError('HOST_OFFLINE', 'The connection to the host closed.'))
+        reject(new AppError('HOST_OFFLINE', 'The connection to the host closed.'))
+      })
+  })
+
+  await assert.rejects(pool.request(route, 'repositories.list'))
+
+  const state = pool.state(route.id)
+  assert.equal(state.failures, 1)
+  // And the explanation is the one that waited for `ssh` to exit, not the one
+  // that was all anybody knew at the instant stdout ended. The count takes the
+  // earliest, the message takes the latest.
+  assert.match(state.lastError ?? '', /Host is down/)
+  // First rung, because this was the first failure.
+  assert.equal(state.retryAfter, undefined)
+
+  // And the ladder still climbs on the next one.
+  await assert.rejects(pool.request(route, 'repositories.list'))
+  assert.equal(pool.state(route.id).failures, 2)
+  assert.equal(typeof pool.state(route.id).retryAfter, 'number')
+})
+
+test('a second failure on the same dead connection is still one rung', async () => {
+  // Two requests in flight when the pipe goes is one event, not two, and a
+  // screen that had opened a review and a diff at once must not be punished
+  // twice for one network blip.
+  const { pool, fake } = fakePool({
+    answer: () =>
+      new Promise((_resolve, reject) =>
+        setTimeout(() => reject(new AppError('HOST_OFFLINE', 'gone')), 0)
+      )
+  })
+
+  const first = pool.request(route, 'repositories.list')
+  const second = pool.request(route, 'reviews.list')
+  fake.closeLast(new AppError('HOST_OFFLINE', 'The connection to the host closed.'))
+
+  await assert.rejects(first)
+  await assert.rejects(second)
+
+  assert.equal(pool.state(route.id).failures, 1)
+})
+
+test('a fresh connection that fails is a new rung, not a repeat of the old one', async () => {
+  const { pool, fake, advance } = fakePool({
+    answer: () => Promise.reject(new AppError('HOST_OFFLINE', 'gone'))
+  })
+
+  await assert.rejects(pool.request(route, 'repositories.list'))
+  assert.equal(pool.state(route.id).failures, 1)
+
+  // Past the first rung, so a new connection is opened - and its failure has to
+  // count, or a host that is down would sit at one failure forever.
+  advance(BACKOFF_MS[1] + 1)
+  await assert.rejects(pool.request(route, 'repositories.list'))
+  assert.equal(pool.state(route.id).failures, 2)
+  assert.equal(fake.connects, 2)
+})

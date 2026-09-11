@@ -158,6 +158,7 @@ const handlers: {
   'hosts.update': (params) => hostsService.update(params),
   'hosts.remove': (params) => hostsService.remove(params),
   'hosts.probe': (params) => hostsService.probe(params),
+  'hosts.install': (params) => hostsService.install(params),
 
   'repositories.list': () => repositoriesService.list(),
   'repositories.get': (params) => repositoriesService.get(params),

@@ -155,3 +155,20 @@ test('the Agent Access page is a location, locally and on a host', () => {
 test('a stale link deeper than the agent page still lands on it', () => {
   assert.deepEqual(parseRoute('#/agent/anything'), { name: 'agent' })
 })
+
+test('the Hosts screen is a location, and never one on another install', () => {
+  assert.deepEqual(parseRoute('#/hosts'), { name: 'hosts' })
+  assert.equal(hrefFor({ name: 'hosts' }), '#/hosts')
+  assert.deepEqual(parseRoute(hrefFor({ name: 'hosts' })), { name: 'hosts' })
+
+  // A host list belongs to the install a person is driving: `hosts.*` is
+  // answered locally and never forwarded, so `#/h/<id>/hosts` names a screen
+  // that cannot exist. Rather than falling through to that machine's
+  // repositories - where an unrecognised path lands - the segment is honoured
+  // and the host is dropped, because there is one host list and this is it.
+  assert.deepEqual(parseRoute(`#/h/${HOST}/hosts`), { name: 'hosts' })
+})
+
+test('a stale link deeper than the hosts page still lands on it', () => {
+  assert.deepEqual(parseRoute('#/hosts/4'), { name: 'hosts' })
+})

@@ -56,6 +56,25 @@ export interface HostScoped {
 export type Route =
   | ({ name: 'repositories' } & HostScoped)
   | ({ name: 'agent' } & HostScoped)
+  /**
+   * The list of other machines. Deliberately *not* `HostScoped`.
+   *
+   * Every other location here can be on another install, because a repository,
+   * a review and an agent prompt all belong to a machine. A host list does not:
+   * it is the property of the install a person is driving, `hosts.*` is
+   * answered locally and never forwarded, and `isLocalOnly` in
+   * `core/hosts/ssh.ts` enforces that at the carrier. `#/h/<id>/hosts` would be
+   * a URL for a screen that cannot exist, so the type says it cannot be
+   * written.
+   *
+   * `host?: undefined` rather than leaving the property off: everything that
+   * handles a `Route` generically - the deep-link guard, the loopback
+   * translation - asks whether it is on this install, and a member with no such
+   * property at all would make that question a type error at four call sites
+   * that are all perfectly happy with the answer "no host". Declaring it as
+   * always-undefined says the same thing to a reader and to the compiler.
+   */
+  | { name: 'hosts'; host?: undefined }
   | ({ name: 'repository'; repositoryId: number } & HostScoped)
   | ({ name: 'review'; reviewId: number; tab: ReviewTab; focus?: DiffFocus } & HostScoped)
 
@@ -79,6 +98,9 @@ const HOST_SEGMENT = 'h'
  */
 const AGENT_SEGMENT = 'agent'
 
+/** The Hosts screen. Never preceded by a host segment - see `Route`. */
+const HOSTS_SEGMENT = 'hosts'
+
 /**
  * `#/h/<instance>`, or nothing at all for a local route.
  *
@@ -97,6 +119,9 @@ export function hrefFor(route: Route): string {
       return `#/${prefix}`
     case 'agent':
       return `#/${prefix}${AGENT_SEGMENT}`
+    // No prefix, and not because one was forgotten: see `Route`.
+    case 'hosts':
+      return `#/${HOSTS_SEGMENT}`
     case 'repository':
       return `#/${prefix}repositories/${route.repositoryId}`
     case 'review': {
@@ -161,6 +186,12 @@ export function parseRoute(hash: string): Route {
   if (segments.length === 0) return host === undefined ? HOME : { name: 'repositories', host }
 
   if (segments[0] === AGENT_SEGMENT) return { name: 'agent', ...scope }
+
+  // Read *before* the host is honoured rather than after, so that a link
+  // someone assembled by hand as `#/h/<id>/hosts` lands on this machine's host
+  // list instead of silently falling through to another machine's repositories.
+  // There is one host list and it is this one; the segment says so either way.
+  if (segments[0] === HOSTS_SEGMENT) return { name: 'hosts' }
 
   if (segments[0] === 'repositories' && segments[1]) {
     const repositoryId = Number(segments[1])
