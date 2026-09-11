@@ -3952,6 +3952,89 @@ that have to precede it; the lesson is the M6.2 one again, one layer down - a
 protocol change is a protocol change even when both ends came from the same
 checkout.
 
+**M6 is complete, with one part of the verify line left for a person.** From the
+Mac, a machine on the tailnet is *found* rather than typed in; it is reached
+over a socket rather than a process started on it; a comment an agent writes
+over there appears here in a quarter of a second; switching it off greys it in
+about the same, with nothing open on it and nothing having asked it anything;
+and a review on it has a URL that opens in a browser on any device the owner is
+signed in on.
+
+The verify line, run end to end on 11 September:
+
+| | |
+| --- | --- |
+| PC appears on the Mac with no configuration | `hosts.discover` found `pc-wsl.tail688c0c.ts.net` with an empty host list and nothing typed; adding the proposal worked on the first probe. |
+| An agent comment shows on the Mac within a second | **261 ms**, four hops, tagged `4e0b0adb…`, and on the open review with nobody touching the window. |
+| Turn the PC off: greyed within seconds, no stale data | **173 ms**, from the pool noticing its own socket rather than from a failed request. The host list said *The connection to pc-wsl.tail688c0c.ts.net:41427 was lost.* |
+| Phone on the tailnet opens a `webUrl`, leaves a comment, the agent reads it | The PC's own agent emits `webUrl: http://pc-wsl.tail688c0c.ts.net:41427/#/reviews/2/conversation`, and that URL serves the web build and its bundle to a *different device* with no token. **Opening it in a phone's browser is the one step nothing here could drive**, and is recorded as unverified rather than claimed. |
+
+**What M6 did not change, and that is most of the point.** The fifteen-second
+poll, `onErrorRetry`, `revalidateOnFocus`, M4.5's banner and
+`renderer/lib/host-reachability.ts` are all exactly as M5 left them. Delete
+`core/events.ts` and this application is M5: slower, never wrong. That is what
+"additive" had to mean, and it is checked rather than asserted - `mutate` on a
+key with no subscriber does nothing at all, so an event about a review nobody
+has open costs one map lookup.
+
+**Three carriers now, and the contract held.** `core/hosts/carrier.ts` was
+extracted in M5 with the guess that a third implementation would be a *user* of
+it rather than a parallel one, and that turned out to be true in the place it
+mattered least and the place it mattered most: the pool gained a `case`, and
+`createStdioClient` - written for a pipe, reused for `wsl.exe` - was reused
+again for something that is not a pipe at all. The one thing the new carrier
+could not inherit was `diagnostics()`'s *source*, there being no stderr; it has
+an HTTP status and a close code instead, which are better, and which arrive
+after the failure in exactly the way M4.1 discovered an exit status does.
+
+**Four things are worth keeping separately from the slices.**
+
+*The two questions that must not be collapsed stayed uncollapsed, and the code
+says which is which.* `core/web/token.ts` asks about *intent* on a machine where
+every process is already the user; `isTailnetOwner` asks about *principal* on a
+network where intent cannot be checked. A request satisfies one or the other,
+a token on the tailnet authority is ignored rather than honoured, and an
+identity header on loopback grants nothing. `token.ts` is untouched, so M4.5's
+finding about per-launch minting still stands exactly as written.
+
+*Two of the four things that bit were already written down in this repository.*
+The WebSocket carrier refused the very request that caused it to exist -
+`web/carrier.ts` names that as the first of the three things a socket has that
+an IPC channel does not, and has since M3. And `isAllowedOrigin` accepted either
+authority's origin on either authority, while the comment directly above it said
+"what neither may be is *the other one*". Both were found by running the thing.
+The lesson is not "read more carefully"; it is that a prose invariant and a
+predicate drift apart silently, and only an execution notices.
+
+*Version skew is a mechanism problem now rather than a design one.* M4.1–M4.4
+each needed a reinstall and each knew it. M6 needs one too - it adds four
+methods, an endpoint and an event - but `hosts.install` compares *version
+strings*, and a pre-release that changes its protocol without changing its
+version answers `already-current` and does nothing. `force` is the way out and
+was needed twice. Recorded in the gap table rather than fixed here, because the
+fix is a question about what identifies a build and that is a decision rather
+than a patch.
+
+*One estimate in this document was wrong and is left visible.* The discovery
+section predicted that a peer with nothing on the port would refuse "in
+single-digit milliseconds"; measured on the real tailnet it takes about 800 ms,
+because refusing means being reached first. Nothing about the design changed -
+it was already parallel, bounded and screen-triggered - but the *shape* of the
+cost did, from "many cheap refusals" to "one probe timeout, once, however many
+peers there are". Wrong in a way that would be invisible on a LAN and is the
+first thing anyone notices on a tailnet, which is the argument for verifying
+against the real one in a sentence.
+
+**And the thing that is still owed, again.** `ci.yml` runs ubuntu only. M5
+recorded that every Windows-shaped failure in this repository had been found by
+a person sitting at a Windows machine; M6 adds a Linux-shaped one to the pile -
+`tailscale serve` needs `--operator` there and succeeds silently as the user on
+macOS, so the switch works on the machine most likely to be *developed* on and
+fails on the machine most likely to be a *host*. A CI job that runs on more than
+one platform is the honest fix, it is a change to how this project is tested
+rather than to what it does, and it is still deliberately not part of a
+milestone.
+
 ## Agent setup
 
 One sentence instead of a snippet per harness. Agents know their own
