@@ -2447,6 +2447,95 @@ M4; large for Windows users who keep code in WSL.
 - **Guard.** Adding a `\\wsl.localhost` path as a *local* repository is
   refused with a pointer to "add as WSL host".
 
+#### How it is being built, and where it has got to
+
+Four changes, each mergeable on its own, in the order that keeps every one of
+them verifiable against the real Ubuntu distro on this PC rather than against a
+mock. Before them, one repair that is not M5 and is listed because it had to
+happen first:
+
+0. **The test suite on Windows.** `npm test` cannot run here at all, for a
+   reason that has nothing to do with hosts. *(planned.)*
+1. **The WSL carrier.** `wsl.exe` as a way of starting a daemon and talking to
+   it, the `kind` column widened, and the pool taught which carrier to open.
+   *(planned.)*
+2. **The distro list and the installer.** `hosts.distros`, the add form
+   becoming a picker rather than a text field, and the same linux tarball
+   streamed down the same pipe. *(planned.)*
+3. **Editors, reveal and agent access.** `wsl+<distro>`, Explorer reveal
+   through `\\wsl.localhost`, and the Agent Access page for a distro.
+   *(planned.)*
+4. **The guard.** A `\\wsl.localhost` path refused as a *local* repository,
+   with a pointer to the thing the person meant. *(planned.)*
+
+**What was settled before any of it was written.**
+
+*A WSL host's target is the distro name, and nothing else.* An `ssh` target
+carries the Unix user because spike S1 found that a bare MagicDNS name asks for
+the *client's* username; that negotiation does not exist here. `wsl.exe -d
+Ubuntu` runs as the distro's own default user — `whoami` answers `xfor`,
+decided by `/etc/wsl.conf` over there and not by anything this app could say.
+`wsl.exe` does have a `-u`, and it is deliberately not offered: the daemon
+installs into `$HOME/.gitwarren` and keeps its database there, so a second user
+is a second home, a second database and a second set of reviews. That is not
+another way of reaching one host, it is another host, and a form field most
+people would get wrong is exactly what the schema comment warns against.
+
+*One machine is one row, even when two carriers reach it.* This distro is
+already reachable both ways: it is `xfor@pc-wsl` over ssh from the Mac and will
+be `Ubuntu` over `wsl.exe` from here. Those are two installs and do not interact.
+Within *this* install, adding the same distro over both carriers is refused, and
+M4.1's collision report is what refuses it — but the reason is stronger than
+tidiness. `#/h/<instance>/…` routes by instance id, and `requireInstance` reads
+one row for it; two rows bearing one instance id would make every remote route
+ambiguous, with a repository list that depended on which row won. So the answer
+is not "allow one machine two carriers", it is "pick the carrier you want" — and
+the report already says which other row it collided with.
+
+*The bytes go over the pipe, and the `\\wsl.localhost` route is rejected.*
+Spike S2 measured 56 MB/s through this exact pipe on this exact machine, so the
+46 MB tarball is under a second of it; M4.2's `ssh` pipe did the same file in
+3.4 seconds and nobody minded. The file-path route loses on moving parts rather
+than on speed: it would still need a shell inside the distro to unpack the
+archive and to run `service install`, so it replaces `tar xzf -` reading stdin
+with a file copy *plus* that same shell invocation. It also puts the bytes
+through SMB, and this milestone found out what SMB does to a Linux working tree
+(see the guard). `core/hosts/install.ts` is expressed entirely in terms of "run
+this command on that host, with this on its stdin", so the installer's whole
+delta is which function that is.
+
+*The distro list is a method, not a shell capability.* The tempting comparison
+is `system.editors`, which is a shell channel because launching an editor is
+something only a shell can do. Listing distros is not an act, it is a fact about
+the machine that will spawn `wsl.exe` — which is the machine the *core* runs on,
+not the one the window is drawn on. M4.2's Hosts screen works in a browser tab,
+where it manages the list belonging to the install that served the tab, so the
+tab has to be able to ask this question too; a shell capability would have left
+it unable to. It is `hosts.distros`, which also makes it unforwardable for free:
+`isLocalOnly` refuses the whole `hosts.` prefix, and what distros exist on a
+machine is that machine's own business in exactly the way its host list is. The
+screen offers a WSL host when the answer is non-empty, so a Mac never offers one
+without any code asking what platform it is on.
+
+The list is unfiltered, including the two `docker-desktop` distros this PC has.
+A blocklist of names is a list that goes stale — `rancher-desktop` and
+`podman-machine` are the same shape — and it is M4.3's argument about hidden
+folders one screen along: a listing that silently dropped rows is one you cannot
+trust when what you wanted is not in it. Picking one that cannot host a daemon
+fails during an install someone is watching, in the distro's own words, which is
+the failure M4.2 built for.
+
+*Ten idle minutes stays, and the comment that explains it stops being a lie.*
+`IDLE_TIMEOUT_MS` matches `ControlPersist=10m` "kept in step deliberately", and
+`wsl.exe` has no ControlPersist to keep step with. Measured here: a connection
+to a running distro costs 80 ms, and one that has to start it 1.7 seconds — so
+being wrong about the timeout is a tenth of a second, not a key exchange. The
+number is kept for both carriers because the interesting reason turns out to run
+the other way. A held-open pipe keeps a `serve --stdio` process alive inside the
+distro, and a distro with a process in it is a distro WSL will not idle down. On
+ssh, hanging up lets a multiplexing master expire; on WSL, hanging up is what
+lets the whole virtual machine go to sleep. It matters more here, not less.
+
 **Verify:** Windows app, repo in Ubuntu, Claude Code running inside WSL. Native
 Windows repos unaffected.
 
