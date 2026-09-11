@@ -2985,6 +2985,79 @@ still holding. Pressing Add in the form left the dialog open with *Add "Ubuntu"
 as a WSL host and add this repository there.* under the field, and the local
 repository list afterwards held only `C:\Users\micha\gitwarren-app`.
 
+**M5 is complete.** From the Windows app, a distribution is added by picking it
+from a list, has GitWarren installed into it over the pipe, and is then a machine
+whose repositories, reviews, diffs, comments and editor links all work from here;
+the agent inside WSL reads the same reviews over its own local MCP and writes
+back into the same database; a `\\wsl.localhost` path typed into the local form
+is refused with a pointer at the thing the person meant; and native Windows
+repositories are unaffected, including one that turns out to be a clone of the
+distribution's.
+
+The verify line, end to end on this PC: the Windows app with `Ubuntu` as a WSL
+host, its two repositories listed with their WSL paths, review 2 open at
+`#/h/4e0b0adb…/reviews/2/files`, and an MCP session inside the distribution -
+started with the exact command `app.mcp` prints - reading that review from
+`/home/xfor/.gitwarren` and adding a comment that the Windows window then read
+back over the carrier. `C:\Users\micha\gitwarren-app` added as an ordinary local
+repository throughout, reading its git state on NTFS and sharing root commit
+`59843fd3f8ab` with the distribution's checkout of the same project.
+
+**Two things about this milestone are worth keeping separately from the slices.**
+
+*Version skew had nothing to say, for only the second time.* M4.1 through M4.4
+each needed the host reinstalled before their screens worked, because each added
+a method that had to travel. M5 adds exactly one method, `hosts.distros`, and it
+is one that never leaves the machine - so the daemon M4 left in the distribution
+answered M5 unchanged. M4.5 was the first slice with this property and said so;
+it is worth noticing that the reason is the same both times, which is that the
+new thing was about the asking side rather than the answering one.
+
+*`wsl --terminate` is not the equivalent of pulling a cable, and that took
+finding out.* Killing the `ssh` under an open review is a durable outage: the
+machine stays unreachable until something changes. Terminating a distribution
+kills the pipe the pool is holding, and then the pool's next attempt spawns a
+fresh `wsl.exe` - **which starts the distribution again**. So the in-flight
+request fails (3 ms, with the invented sentence M5.1 had to write because
+`wsl.exe` says nothing) and the one after it succeeds, transparently, in about
+1.8 seconds. There is no banner, and there should not be: nothing is wrong any
+more. A distribution being stopped is not a machine being off, and the carrier
+that can start one is the reason.
+
+So M4.5's banner was proved against the durable failure instead - the launcher
+moved aside inside the distribution and the running daemon killed, which is
+exactly what M4.5 did on `pc-wsl`. It rose with **no code written for this
+carrier at all**: *Ubuntu stopped answering*, *GitWarren is not installed on
+Ubuntu: ~/.gitwarren/bin/gitwarren was not found*, *Showing what was loaded at
+9:09 AM. GitWarren keeps trying.*, and a Try again - with the review underneath
+intact, and the banner clearing by itself once the launcher was put back. That is
+the whole of what "learned from request outcomes, never from the pool" was for.
+
+**What Windows turned out to own rather than GitWarren.** Four of these, and
+none is a bug in this application:
+
+- `wsl.exe` speaks UTF-16LE while the guest speaks UTF-8, and writes its own
+  errors to **stdout**, which is the protocol's stream. `WSL_UTF8=1` fixes the
+  first; nothing fixes the second, so `diagnostics()` reads around it.
+- `wsl.exe -d X -- …` hands the words to the login shell for *expansion without
+  parsing*, which makes `$` in a script the outer shell's pid. `-e sh -c` is
+  the spelling that means what it looks like.
+- NTFS has no POSIX mode, so a daemon tarball built on Windows has no executable
+  bit on anything in it, and `chmodSync` is a no-op rather than an error.
+- `python` on this machine's PATH is the Microsoft Store stub, which exits
+  without printing a version - so node-gyp reports "THIS VERSION OF PYTHON IS
+  NOT SUPPORTED" for a Python that is not installed, while trying to compile a
+  `better-sqlite3` whose `win32-x64` prebuild is already in the package.
+
+**And one thing this repository owns.** Three Windows-only breakages were found
+in a day - the symlink in `fs.test.ts`, `du -h` in
+`scripts/build-daemon-tarball.mjs`, and before this milestone the `npx.cmd`
+spawn and the drive-letter path - and every one of them was found by a person at
+a Windows machine rather than by the suite, because `ci.yml` runs ubuntu only.
+A Windows job is the honest fix and is deliberately not part of M5: it is a
+change to how this project is tested rather than to what it does, and folding it
+in here would have made the milestone's diff about something else.
+
 ### M6 — Tailnet and live updates
 
 *Ships: hosts appear by themselves; comments arrive live; reviews on the
@@ -3119,7 +3192,7 @@ least one alternative.
 | Which GUI a link opens | M2, M6 | Loopback resolves on the clicker's machine; tailnet URL for the phone. |
 | Attachments across hosts | M3, M4 | Ingest on the host; HTTP for the web view, the carrier for the app. |
 | Version skew between hosts | M4 | The GUI installs the daemon version it wants; protocol version in the handshake; unknown fields ignored. |
-| Daemon process on headless hosts | M2, M3, M4 | Bundle in M2, `gitwarren service install` in M3.3, spawned on demand over SSH in M4. |
+| Daemon process on headless hosts | M2, M3, M4, M5 | Bundle in M2, `gitwarren service install` in M3.3, spawned on demand over SSH in M4 and through `wsl.exe` in M5 — the same installer either way, since it was written against "a machine with a shell and a `tar`". |
 | Users who will not run Electron | M3 | The same renderer served by the local daemon; the `gitwarren-cli` formula, `npx gitwarren` and the tarball, all from M3.3. |
 | A screen the size of a phone | M3.5, M6 | Files list and diff as separate screens below `lg`, composer above the keyboard, paths that wrap at their separators; the route to the device itself is M6's tailnet. |
 | MCP setup per harness and on remote hosts | M2, M3, M4 | Stable launcher path plus a one-sentence prompt the agent applies to its own config. |
