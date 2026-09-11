@@ -18,7 +18,7 @@
  * check that matters; a second one here would be a second place to keep in step
  * and a second opinion about what a valid review is.
  */
-import { deserializeAppError, type SerializedAppError } from './errors.js'
+import { AppError, deserializeAppError, type SerializedAppError } from './errors.js'
 import type { FileContent, FileImage, RepositoryRefs, ReviewCommits, ReviewDiff } from './git.js'
 import type {
   AddHostInput,
@@ -396,6 +396,35 @@ export interface Carrier {
 }
 
 /**
+ * A carrier that answers with an outcome instead of throwing.
+ *
+ * The shape `window.gitwarren` exposes, and the reason is one property of
+ * Electron's `contextBridge`: a promise rejected on the preload side is rebuilt
+ * in the renderer as a plain `Error` with a `message` and nothing else. Custom
+ * properties do not survive - so an `AppError` unwrapped in the preload arrived
+ * in React with `code` and `fieldErrors` gone, which is every inline form error
+ * in the app and the reason a duplicate path was reported in a banner rather
+ * than under the input it was about.
+ *
+ * So the bridge carries a *value*, which survives intact, and `lib/api.ts`
+ * calls `resultOf` in the renderer's own world where a thrown `AppError` is
+ * still an `AppError`. That is the same rule the byte-stream carriers already
+ * follow - a boundary that cannot carry an exception returns an outcome - and
+ * it is why `resultOf` was written to be shared in the first place.
+ *
+ * A browser tab has no such boundary and could throw perfectly well; it hands
+ * back outcomes anyway, because one shape means the renderer has one way of
+ * asking rather than two.
+ */
+export interface BridgeCarrier {
+  request<M extends RpcMethod>(
+    method: M,
+    params: RpcParams<M>,
+    host?: string
+  ): Promise<RpcOutcome<RpcResult<M>>>
+}
+
+/**
  * Unwrap an outcome, or throw the error it carries.
  *
  * Shared so that every carrier fails the same way: a `NOT_FOUND` from a daemon
@@ -406,4 +435,24 @@ export interface Carrier {
 export function resultOf<T>(outcome: RpcOutcome<T>): T {
   if ('error' in outcome) throw deserializeAppError(outcome.error)
   return outcome.result
+}
+
+/**
+ * The other direction: run something, and report how it went as a value.
+ *
+ * The inverse of `resultOf`, and it exists for the same reason `handleRequest`
+ * in the dispatcher never throws - some boundaries cannot carry an exception,
+ * so an outcome has to be the return value rather than the happy path.
+ *
+ * A byte stream is the obvious such boundary. Electron's `contextBridge` is the
+ * surprising one: it rebuilds a rejection as a bare `Error` carrying `message`
+ * and nothing else, so an `AppError` thrown on the preload side arrives in the
+ * renderer with no `code` and no `fieldErrors`. See `BridgeCarrier`.
+ */
+export async function outcomeOf<T>(work: () => Promise<T>): Promise<RpcOutcome<T>> {
+  try {
+    return { result: await work() }
+  } catch (error) {
+    return { error: AppError.from(error).toSerialized() }
+  }
 }

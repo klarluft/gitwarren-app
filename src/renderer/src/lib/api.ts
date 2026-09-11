@@ -26,7 +26,18 @@
  * The shell half is not bound to anything and never will be. Revealing a path,
  * opening a picker, launching an editor: those happen on the machine with the
  * screen on it, whatever the screen is showing. See `ShellCapabilities`.
+ *
+ * ## Where a failure becomes a thrown `AppError`
+ *
+ * Here, in `ask` below, and that is a fix rather than a detail. The bridge hands
+ * back an `RpcOutcome` because `contextBridge` cannot carry an exception with
+ * anything on it - see `BridgeCarrier` in `shared/rpc.ts` - so the unwrapping
+ * has to happen on this side of it, in the renderer's own world, where a thrown
+ * `AppError` is still an `AppError` with its `code` and its `fieldErrors`. That
+ * is what `errorCode` and `firstFieldError` read, and it is why a duplicate
+ * repository path can appear under the path input again.
  */
+import { resultOf, type RpcMethod, type RpcParams, type RpcResult } from '@shared/rpc'
 import type { GitWarrenApi, GitWarrenBridge } from '@shared/api'
 import type { DiffChanges } from '@shared/git'
 
@@ -38,6 +49,23 @@ if (typeof window.gitwarren === 'undefined') {
 
 const bridge: GitWarrenBridge = window.gitwarren
 const { carrier, shell } = bridge
+
+/**
+ * One carrier call, unwrapped.
+ *
+ * Every method below goes through this rather than calling `carrier.request`
+ * directly, so there is exactly one place where an outcome becomes a value or a
+ * throw. `resultOf` is the shared unwrapper every carrier uses, which is what
+ * makes a `NOT_FOUND` from a daemon over `ssh` reach a component as the same
+ * `AppError` a local call would have thrown.
+ */
+function ask<M extends RpcMethod>(
+  method: M,
+  params: RpcParams<M>,
+  host?: string
+): Promise<RpcResult<M>> {
+  return carrier.request(method, params, host).then(resultOf)
+}
 
 /**
  * Ask once, for the life of the window.
@@ -95,38 +123,38 @@ function buildApi(host: string | undefined): GitWarrenApi {
     // business, and the carrier refuses to send one; passing `host` would build
     // a request that could only ever be refused. See `isLocalOnly`.
     hosts: {
-      list: () => carrier.request('hosts.list', undefined),
-      get: (input) => carrier.request('hosts.get', input),
-      add: (input) => carrier.request('hosts.add', input),
-      update: (input) => carrier.request('hosts.update', input),
-      remove: (input) => carrier.request('hosts.remove', input),
-      probe: (input) => carrier.request('hosts.probe', input),
-      install: (input) => carrier.request('hosts.install', input)
+      list: () => ask('hosts.list', undefined),
+      get: (input) => ask('hosts.get', input),
+      add: (input) => ask('hosts.add', input),
+      update: (input) => ask('hosts.update', input),
+      remove: (input) => ask('hosts.remove', input),
+      probe: (input) => ask('hosts.probe', input),
+      install: (input) => ask('hosts.install', input)
     },
     fs: {
-      list: (input) => carrier.request('fs.list', input, host)
+      list: (input) => ask('fs.list', input, host)
     },
     repositories: {
-      list: () => carrier.request('repositories.list', undefined, host),
-      get: (input) => carrier.request('repositories.get', input, host),
-      add: (input) => carrier.request('repositories.add', input, host),
-      update: (input) => carrier.request('repositories.update', input, host),
-      remove: (input) => carrier.request('repositories.remove', input, host),
-      refs: (input) => carrier.request('repositories.refs', input, host)
+      list: () => ask('repositories.list', undefined, host),
+      get: (input) => ask('repositories.get', input, host),
+      add: (input) => ask('repositories.add', input, host),
+      update: (input) => ask('repositories.update', input, host),
+      remove: (input) => ask('repositories.remove', input, host),
+      refs: (input) => ask('repositories.refs', input, host)
     },
     reviews: {
-      list: (input) => carrier.request('reviews.list', input, host),
-      open: (input) => carrier.request('reviews.open', input, host),
-      get: (input) => carrier.request('reviews.get', input, host),
-      create: (input) => carrier.request('reviews.create', input, host),
-      update: (input) => carrier.request('reviews.update', input, host),
-      remove: (input) => carrier.request('reviews.remove', input, host),
-      commits: (input) => carrier.request('reviews.commits', input, host),
-      diff: (input) => carrier.request('reviews.diff', input, host),
-      file: (input) => carrier.request('reviews.file', input, host),
-      image: (input) => carrier.request('reviews.image', input, host),
-      reviewedFiles: (input) => carrier.request('reviews.reviewedFiles', input, host),
-      setFileReviewed: (input) => carrier.request('reviews.setFileReviewed', input, host),
+      list: (input) => ask('reviews.list', input, host),
+      open: (input) => ask('reviews.open', input, host),
+      get: (input) => ask('reviews.get', input, host),
+      create: (input) => ask('reviews.create', input, host),
+      update: (input) => ask('reviews.update', input, host),
+      remove: (input) => ask('reviews.remove', input, host),
+      commits: (input) => ask('reviews.commits', input, host),
+      diff: (input) => ask('reviews.diff', input, host),
+      file: (input) => ask('reviews.file', input, host),
+      image: (input) => ask('reviews.image', input, host),
+      reviewedFiles: (input) => ask('reviews.reviewedFiles', input, host),
+      setFileReviewed: (input) => ask('reviews.setFileReviewed', input, host),
       // Where the file is comes from whoever owns the review; opening it is the
       // shell's job. The two halves are joined in the main process - which is
       // why this one is still local-only, and why the screens hide it on a
@@ -135,15 +163,15 @@ function buildApi(host: string | undefined): GitWarrenApi {
       openInEditor: (input) => shell.openInEditor(input)
     },
     comments: {
-      list: (input) => carrier.request('comments.list', input, host),
-      createThread: (input) => carrier.request('comments.createThread', input, host),
-      reply: (input) => carrier.request('comments.reply', input, host),
-      update: (input) => carrier.request('comments.update', input, host),
-      remove: (input) => carrier.request('comments.remove', input, host),
-      setResolved: (input) => carrier.request('comments.setResolved', input, host)
+      list: (input) => ask('comments.list', input, host),
+      createThread: (input) => ask('comments.createThread', input, host),
+      reply: (input) => ask('comments.reply', input, host),
+      update: (input) => ask('comments.update', input, host),
+      remove: (input) => ask('comments.remove', input, host),
+      setResolved: (input) => ask('comments.setResolved', input, host)
     },
     attachments: {
-      ingest: (input) => carrier.request('attachments.ingest', input, host),
+      ingest: (input) => ask('attachments.ingest', input, host),
       pick: () => shell.pickAttachment(),
       src: (url) => shell.attachmentSrc(url)
     },

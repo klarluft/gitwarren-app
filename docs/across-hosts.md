@@ -1957,7 +1957,7 @@ back — while review 2 *here* was a different review entirely, which is the
 clearest possible demonstration of why the segment had to exist. No console
 errors, and no horizontal scroll at 390 px.
 
-**What M4.3 found and left alone.** Electron's `contextBridge` strips everything
+**What M4.3 found next door.** Electron's `contextBridge` strips everything
 but `message` off a rejected promise, so `AppError.code` and `fieldErrors` do
 not survive the preload: in the packaged window `errorCode(error)` is always
 null and `firstFieldError` always undefined. This predates the milestone —
@@ -1965,13 +1965,25 @@ adding an already-tracked repository has been showing its duplicate-path message
 in the form's general slot rather than under the field since M1 — and it is not
 specific to hosts; the shell channels lose their codes the same way. A browser
 tab is unaffected, because its carrier throws in the same world it is caught in.
-The fix is to stop throwing across the bridge: the preload's carrier should hand
-back the `RpcOutcome` it already has and let the renderer call `resultOf`, which
-is what `shared/rpc.ts` says that function is for. It is its own change, with
-its own reasoning about where the M1 boundary sits, so it was not folded into
-this one — the cost meanwhile is that the "this host is not answering" state
-renders in a tab and not in the window, where the same sentence arrives under a
-more generic heading.
+The fix is to stop throwing across the bridge, and it landed immediately
+afterwards as a change of its own rather than being folded in here, because it
+is about where M1's boundary sits and not about hosts. `window.gitwarren` now
+exposes a `BridgeCarrier` that answers with an `RpcOutcome`; `outcomeOf` in
+`shared/rpc.ts` is the counterpart to `resultOf` that builds one, and
+`lib/api.ts` unwraps in the renderer's own world, where a thrown `AppError` is
+still an `AppError`. It is the rule every other carrier already followed,
+arriving at the one boundary nobody had thought of as a wire. The shell channels
+still throw and still lose their codes, deliberately: nothing branches on a
+shell error's code, so converting twenty signatures would be churn.
+
+Two things that had been silently broken came back with it — a duplicate
+repository path is reported under the path input again rather than in the
+dialog's banner, and M4.3's "this host is not answering" state renders in the
+window and not only in a tab. The second was proved by moving
+`~/.gitwarren/bin/gitwarren` aside on `pc-wsl` mid-session and killing the
+daemon that was already running: the screen showed *GitWarren is not installed
+on xfor@pc-wsl: ~/.gitwarren/bin/gitwarren was not found*, with a Try again, and
+came back on its own once the launcher was put back.
 
 **Not done in M4.3, and why.** Attachments, editors and per-host agent access
 are M4.4, and the three controls above are switched off rather than half-built

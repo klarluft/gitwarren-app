@@ -8,9 +8,31 @@
  * The carrier is one function over one channel. It is deliberately not a method
  * per object any more - the list of methods lives in `shared/rpc.ts`, and a
  * preload that had to be edited every time one was added would be a third place
- * to keep the same list. What this file still does is unwrap the outcome, so a
- * failure in the main process surfaces in React as a thrown `AppError` with its
- * code intact, which is what lets the forms show field-level messages.
+ * to keep the same list.
+ *
+ * ## What it deliberately does not do any more: throw
+ *
+ * The carrier used to unwrap the outcome here, so that a failure arrived in
+ * React as a thrown `AppError`. It does not, and the reason is a property of
+ * `contextBridge` that is easy to miss because nothing about it looks broken: a
+ * promise rejected on this side is rebuilt in the renderer as a plain `Error`
+ * carrying `message` and nothing else. `code` and `fieldErrors` were being
+ * dropped on the way across, silently, which meant `errorCode(error)` was
+ * always null in the packaged window and every inline form message fell back to
+ * the banner - a duplicate repository path was reported at the top of the
+ * dialog rather than under the input it was about.
+ *
+ * So the carrier hands back the `RpcOutcome` as a *value*, which crosses
+ * intact, and `lib/api.ts` calls `resultOf` in the renderer's own world. It is
+ * the same rule the stdio and WebSocket carriers already follow, arriving at
+ * the one boundary nobody had thought of as a wire.
+ *
+ * The shell channels below still throw across the bridge, and that is a
+ * deliberate limit rather than the fix being half-applied: nothing branches on
+ * a *shell* error's code - revealing a path, launching an editor and picking a
+ * file are all rendered as their message - so converting twenty signatures
+ * would be churn with nothing behind it. The day one of them needs a code, it
+ * takes `outcomeOf` the same way.
  *
  * It also coalesces reads. Two identical reads in flight at the same moment are
  * the same read, and answering both from one round trip is free here and worth
@@ -28,7 +50,7 @@ import {
 import {
   isReadMethod,
   resultOf,
-  type Carrier,
+  type BridgeCarrier,
   type RpcMethod,
   type RpcOutcome,
   type RpcParams,
@@ -36,10 +58,19 @@ import {
 } from '../shared/rpc.js'
 import type { Attachment, OpenReviewFileInput } from '../shared/schemas.js'
 
+/**
+ * A shell channel. Unwrapped here, so these keep throwing - see the note above
+ * on why that is left as it is.
+ */
 async function invoke<T>(channel: string, payload?: unknown): Promise<T> {
   // `invoke` is typed as `any`; the envelope shape is guaranteed by `handle()`
   // in the main process, which is the only thing that answers these channels.
   return resultOf((await ipcRenderer.invoke(channel, payload)) as RpcOutcome<T>)
+}
+
+/** The carrier's channel. The outcome is the return value, not a throw. */
+async function invokeOutcome<T>(channel: string, payload?: unknown): Promise<RpcOutcome<T>> {
+  return (await ipcRenderer.invoke(channel, payload)) as RpcOutcome<T>
 }
 
 /**
@@ -49,14 +80,14 @@ async function invoke<T>(channel: string, payload?: unknown): Promise<T> {
  */
 const inFlight = new Map<string, Promise<unknown>>()
 
-const carrier: Carrier = {
+const carrier: BridgeCarrier = {
   request<M extends RpcMethod>(
     method: M,
     params: RpcParams<M>,
     host?: string
-  ): Promise<RpcResult<M>> {
-    const send = (): Promise<RpcResult<M>> =>
-      invoke<RpcResult<M>>(IPC_CHANNELS.rpcRequest, { method, params, host })
+  ): Promise<RpcOutcome<RpcResult<M>>> {
+    const send = (): Promise<RpcOutcome<RpcResult<M>>> =>
+      invokeOutcome<RpcResult<M>>(IPC_CHANNELS.rpcRequest, { method, params, host })
 
     if (!isReadMethod(method)) return send()
 
@@ -65,7 +96,7 @@ const carrier: Carrier = {
     // same question asked twice, and the second component to ask would be
     // handed the first one's answer.
     const key = `${host ?? ''}:${method}:${JSON.stringify(params ?? null)}`
-    const existing = inFlight.get(key) as Promise<RpcResult<M>> | undefined
+    const existing = inFlight.get(key) as Promise<RpcOutcome<RpcResult<M>>> | undefined
     if (existing) return existing
 
     const pending = send().finally(() => inFlight.delete(key))
