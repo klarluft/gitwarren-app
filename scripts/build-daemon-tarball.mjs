@@ -51,7 +51,6 @@ import {
   mkdirSync,
   readFileSync,
   rmSync,
-  statSync,
   writeFileSync
 } from 'node:fs'
 import { pipeline } from 'node:stream/promises'
@@ -230,5 +229,6 @@ execFileSync('tar', ['czf', out, '-C', work, 'gitwarren-daemon'])
 // size, which is the most annoying possible place to fail. Same family as the
 // `npx.cmd` spawn in `run-tests.mjs` - ci.yml runs ubuntu only, so nothing said
 // so until somebody built a tarball on a PC.
-const size = statSync(out).size
-console.log(`${out} (${(size / 1024 / 1024).toFixed(1)} MB)`)
+// TEMPORARY: the M5 bug, put back on purpose to prove this job can fail on
+// Windows and only on Windows. Reverted in the next commit.
+execFileSync('du', ['-h', out], { stdio: 'inherit' })
