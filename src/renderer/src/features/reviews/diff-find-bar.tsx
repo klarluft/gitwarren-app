@@ -17,7 +17,8 @@ import {
   useMemo,
   useRef,
   useState,
-  type KeyboardEvent as ReactKeyboardEvent
+  type KeyboardEvent as ReactKeyboardEvent,
+  type Ref
 } from 'react'
 import { ChevronDown, ChevronUp, Search, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -180,7 +181,14 @@ export function useDiffFind(files: readonly FileDiff[]): DiffFind {
   }
 }
 
-export function DiffFindBar({ find }: { find: DiffFind }) {
+export function DiffFindBar({
+  find,
+  ref
+}: {
+  find: DiffFind
+  /** So the tab can measure how much room the bar takes at the top of the scroller. */
+  ref?: Ref<HTMLDivElement>
+}) {
   const { matches, index, query, term, truncated, fileCount, bindInput } = find
   const searching = term !== ''
   const none = searching && matches.length === 0
@@ -206,7 +214,10 @@ export function DiffFindBar({ find }: { find: DiffFind }) {
   return (
     // Sticky, so the count and the arrows stay reachable while the diff scrolls
     // past underneath them - which is the whole time a search is being used.
-    <div className="sticky top-0 z-20 flex items-center gap-2 rounded-lg border border-border bg-card/95 px-2 py-1.5 shadow-sm backdrop-blur">
+    <div
+      ref={ref}
+      className="sticky top-0 z-20 flex items-center gap-2 rounded-lg border border-border bg-card/95 px-2 py-1.5 shadow-sm backdrop-blur"
+    >
       <Search className="ml-1 size-4 shrink-0 text-muted-foreground" />
 
       <Input

@@ -65,7 +65,9 @@ export function ImageDiff({
   return (
     <div
       className={cn(
-        'grid gap-3 border-t border-border p-3',
+        // The rule above the panes belongs to whatever puts them there:
+        // in a file card that is the sticky header, which draws its own.
+        'grid gap-3 p-3',
         // One pane spans the width; two share it, and only once there is room
         // for both to stay legible - a narrow window stacks them instead.
         both && 'md:grid-cols-2'
