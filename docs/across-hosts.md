@@ -4035,6 +4035,78 @@ one platform is the honest fix, it is a change to how this project is tested
 rather than to what it does, and it is still deliberately not part of a
 milestone.
 
+**M6 on Windows, done from the Mac against `pc-win`, 11 September.** M6 was
+built and verified entirely from the Mac, against a Linux daemon inside WSL. The
+Windows *app* had never run a line of it, and M5.0's lesson is that "probably
+fine on Windows" was wrong four times in a day. So it was run.
+
+It needed no code changes, which is the headline. What it did find was a
+dependency that had been missing for three milestones, and a security property
+that had been asserted in a comment without ever being measured.
+
+**Everything platform-specific in `core/tailnet.ts` behaves identically.**
+`tailscale.exe` is at the first entry of `KNOWN_PATHS.win32`
+(`C:\Program Files\Tailscale\tailscale.exe`); `status --json` carries every
+field `readTailnetIdentity` reads, trailing dot included; and `serve status
+--json` has the same `TCP`/`Web`/`Handlers`/`Proxy` shape the parser expects.
+
+**`tailscale serve` needs no elevation on Windows**, which makes M6.4's finding
+narrower than it was written. Linux is the odd platform, not Windows: macOS and
+Windows both apply a serve config as the ordinary user, and only Linux requires
+`tailscale set --operator=$USER` first. The error-surfacing added in M6.4 is
+therefore carrying its weight on exactly one of the three, which is still the
+right call - it is the platform most likely to *be* a host.
+
+**Verified end to end through the Windows app's own socket.** Typecheck and
+build clean; **576 tests, 571 pass, 0 fail, 5 skipped** - one more skip than the
+Mac, which is M5.0's symlink test skipping itself. Then, against the running
+Electron app on a scratch data directory: `hosts.tailnet` reported
+`pc-win.tail688c0c.ts.net` and the owner login; the switch turned exposure on
+and answered `http://pc-win.tail688c0c.ts.net:41427/app/` - the *app* mount
+rather than the daemon's `/`, which is the distinction `configureExposure`
+exists for; discovery from Windows found `pc-wsl` and did not propose itself;
+and the Windows app opened a WebSocket carrier to `pc-wsl` and read its two
+repositories over it. From the Mac, that Windows app then answered `/app/` with
+200 and the discovery probe with its instance id.
+
+So all three machines now reach each other, and the carrier has been driven from
+two of them.
+
+**The thing that was actually broken had nothing to do with M6.** The Windows
+checkout could not build at all: `ws` was absent from `node_modules` - 478
+packages present, that one missing - so `tsc` failed on `core/rpc/websocket.ts`
+as well as on M6's files. `ws` has been a dependency since **M3**. That checkout
+has therefore been unable to build anything from M3 onward, and nothing noticed,
+because the only machine that builds this project is the one the developer is
+sitting at and it had not been sitting at that one. `npm install` added two
+packages and everything went green.
+
+`package-lock.json` was unchanged between the Windows checkout's HEAD and
+`main`, which is what made the missing package invisible to the obvious check -
+"dependencies have not changed" is true and "node_modules is complete" does not
+follow from it. That is the fifth platform-shaped failure in this repository
+found by a person rather than by the suite, and the first that was not a bug in
+the code at all but in an environment nobody could see.
+
+**And one property was proved that the code had only been asserting.**
+`core/web/origin.ts` said "`tailscaled` sets the header" and built M6's entire
+authorisation on it, without anything ever having established that `tailscaled`
+*overwrites* a header a client supplies. If it merely added one where none
+existed, any peer on the tailnet could have claimed to be the owner - which
+matters for the case a single-user tailnet does not exercise, a node shared from
+somebody else's account.
+
+Measured: a request from `pc-wsl` to the Mac carrying
+`Tailscale-User-Login: attacker@evil.example` arrived with
+`michal-wrzosek@github`. The client's value is discarded, not merged or
+appended. The header is now documented as measured rather than assumed, in the
+function that depends on it.
+
+It is worth noticing how close this came to being missed. The first observation
+was a `200` where a refusal was expected, from a deliberately forged header sent
+through the proxy - which looks exactly like a hole and is in fact the mechanism
+working. The difference between those two readings is one experiment.
+
 ## Agent setup
 
 One sentence instead of a snippet per harness. Agents know their own
