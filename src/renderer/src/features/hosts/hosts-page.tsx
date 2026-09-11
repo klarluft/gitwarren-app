@@ -20,6 +20,23 @@
  * them. The install runs wherever the core runs; that it might be a different
  * machine from the browser is exactly the point of the milestone.
  *
+ * ## Both directions of "another machine"
+ *
+ * The list is outbound: machines this install reaches over ssh. The tailnet
+ * switch above it is inbound: whether this install can be reached. They were on
+ * different screens, which split one relationship in half.
+ *
+ * This screen is where they belong because the subject was already the same.
+ * The Hosts route is `{ name: 'hosts'; host?: undefined }` in
+ * `shared/routes.ts` - never host-scoped, because `hosts.*` is the property of
+ * the install a person is driving - so "this machine, and the machines around
+ * it" is the whole topic here and nowhere else.
+ *
+ * The two headings are a pair or they are nothing. A machine with no Tailscale
+ * has no switch (rule 3: never a dependency), and labelling a lone list "Other
+ * machines" would be answering a question the screen no longer asks - so both
+ * headings are absent in that case and the screen reads exactly as it did.
+ *
  * ## One thing at a time
  *
  * `busy` holds a single host id rather than a set. Two installs at once would
@@ -43,13 +60,18 @@ import { HostCard } from './host-card'
 import { HostFormDialog } from './host-form-dialog'
 import { InstallResultDialog, type InstallOutcome } from './install-result-dialog'
 import { RemoveHostDialog } from './remove-host-dialog'
+import { TailnetPanel } from './tailnet-panel'
 import { useHostMutations, useHosts } from './use-hosts'
+import { useTailnet } from './use-tailnet'
 import type { HostWithState } from '@shared/schemas'
 
 export function HostsPage() {
   const { hosts, error, isLoading, isRefreshing, refresh } = useHosts()
   const { probeHost, installOnHost } = useHostMutations()
   const { data: info } = useSWR(CACHE_KEYS.appInfo, () => api.system.appInfo())
+  // Only to decide whether there are sections. The panel reads the same key.
+  const { data: tailnet } = useTailnet()
+  const sectioned = tailnet?.available === true
 
   const [formOpen, setFormOpen] = useState(false)
   const [editing, setEditing] = useState<HostWithState | undefined>(undefined)
@@ -166,6 +188,11 @@ export function HostsPage() {
         </div>
       </div>
 
+      {sectioned && <SectionHeading>This machine</SectionHeading>}
+      <TailnetPanel />
+
+      {sectioned && <SectionHeading>Other machines</SectionHeading>}
+
       {/* Above the list rather than below it: a machine you have not added yet
           is the thing you came here to do something about, and a proposal
           under twelve rows is a proposal nobody sees. It draws nothing at all
@@ -207,6 +234,25 @@ export function HostsPage() {
       />
       <InstallResultDialog outcome={outcome} onClose={() => setOutcome(null)} />
     </section>
+  )
+}
+
+/**
+ * The label over each half of the screen.
+ *
+ * A `<h2>` rather than a styled `<p>`, because it is the thing a screen reader
+ * uses to skip between the switch and the list, which is exactly the navigation
+ * the headings were added to provide for everybody else.
+ *
+ * `-mb-1` against the section's `gap-4`: a heading should sit nearer the thing
+ * it names than the thing above it, and the grid gap alone puts it exactly
+ * halfway between.
+ */
+function SectionHeading({ children }: { children: React.ReactNode }) {
+  return (
+    <h2 className="-mb-1 mt-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+      {children}
+    </h2>
   )
 }
 

@@ -51,12 +51,12 @@
  * its version, its link port) is left out rather than repeated under another
  * machine's heading.
  */
-import { useRef, useState, type RefObject } from 'react'
+import { useRef, useState } from 'react'
 import useSWR from 'swr'
-import { AlertTriangle, ArrowLeft, Check, ChevronDown, Copy, Plug } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, ChevronDown, Plug } from 'lucide-react'
 import { Breakable } from '@/components/breakable'
+import { CopyButton } from '@/components/copy-button'
 import { Button } from '@/components/ui/button'
-import { Tooltip } from '@/components/ui/tooltip'
 import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsPanel, TabsTab } from '@/components/ui/tabs'
@@ -71,84 +71,6 @@ import {
 } from '@shared/agent-setup'
 import { cn } from '@/lib/utils'
 import type { AppInfo, McpLaunchInfo } from '@shared/api'
-
-/**
- * A copy button that says it worked, and says so when it did not.
- *
- * Four of them on this page now - the prompt and one per format - which is
- * exactly when a local `copied` flag stops being adequate: one component per
- * button, each with its own.
- *
- * The refusal path is not theoretical and is why `source` is here. A clipboard
- * write needs a focused document and a permission the browser may simply not
- * give; when it is refused, `writeText` rejects and a button that only ever
- * sets `copied` on success leaves the user pressing it again at a page that
- * does nothing. So a failure selects the text instead - the same thing the
- * person was about to do by hand, done for them, with the keystroke named.
- */
-function CopyButton({
-  label,
-  text,
-  source,
-  className,
-  children
-}: {
-  label: string
-  text: string
-  /** The element holding `text`, selected when the clipboard says no. */
-  source: RefObject<HTMLElement | null>
-  className?: string
-  children?: React.ReactNode
-}) {
-  const [state, setState] = useState<'idle' | 'copied' | 'select'>('idle')
-
-  async function copy(): Promise<void> {
-    try {
-      await navigator.clipboard.writeText(text)
-      setState('copied')
-      setTimeout(() => setState('idle'), 1800)
-    } catch {
-      const element = source.current
-      if (element) {
-        const range = document.createRange()
-        range.selectNodeContents(element)
-        window.getSelection()?.removeAllRanges()
-        window.getSelection()?.addRange(range)
-      }
-      // Left standing rather than timed out: it is an instruction now, and it
-      // stays true until the next press.
-      setState('select')
-    }
-  }
-
-  const icon = state === 'copied' ? <Check className="text-success" /> : <Copy />
-  const said = state === 'copied' ? 'Copied' : state === 'select' ? 'Selected — press copy' : null
-
-  // Two shapes, one behaviour: the prompt's is a labelled button because it is
-  // the action the page exists for, and a snippet's is the icon in the corner.
-  if (children !== undefined) {
-    return (
-      <Button onClick={() => void copy()} className={className}>
-        {icon}
-        {said ?? children}
-      </Button>
-    )
-  }
-
-  return (
-    <Tooltip label={said ?? label}>
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={() => void copy()}
-        aria-label={label}
-        className={cn('absolute right-1.5 top-1.5', className)}
-      >
-        {icon}
-      </Button>
-    </Tooltip>
-  )
-}
 
 /**
  * One format, its own `<pre>` and its own copy button.
@@ -178,6 +100,7 @@ function SnippetPanel({ snippet }: { snippet: AgentConfigSnippet }) {
           label={`Copy the ${snippet.label} configuration`}
           text={snippet.text}
           source={textRef}
+          className="absolute right-1.5 top-1.5"
         />
       </div>
     </TabsPanel>

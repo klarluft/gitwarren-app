@@ -28,8 +28,9 @@
  * does not open, handed to an agent to hand to a person, with nothing anywhere
  * having warned.
  *
- * So `serveTailnet` asks for HTTPS, falls back to plain HTTP, and **reports
- * which one it got**. It is the rule `core/mcp-launcher.ts` follows for the
+ * So `serveTailnet` asks the machine whether a certificate is even possible,
+ * attempts HTTPS only when it is, falls back to plain HTTP, and **reports which
+ * one it got**. It is the rule `core/mcp-launcher.ts` follows for the
  * launcher path: a fact from the machine that knows it beats a string that is
  * usually right. A tailnet that turns HTTPS on later gets it on the next toggle
  * with no code change, because nothing here decided in advance.
@@ -61,9 +62,13 @@ const run = promisify(execFile)
  * `status` and `serve status` talk to a local daemon over a socket and answer
  * in milliseconds. `serve` itself may have to provision a certificate, which is
  * a network round trip to Let's Encrypt - and on a tailnet without HTTPS
- * enabled it simply never returns, which is exactly what M6.0 found. So the
- * timeout is not a safety net here, it is the mechanism by which "HTTPS is not
- * available" is discovered.
+ * enabled it simply never returns, which is exactly what M6.0 found.
+ *
+ * That "never returns" used to be how `serveTailnet` *learned* HTTPS was off,
+ * which meant every toggle on such a tailnet cost the full twenty seconds
+ * before anything visibly happened. It asks `status` first now, so this is
+ * back to being what a timeout should be: a backstop for a certificate
+ * provision that is genuinely slow, not the happy path.
  */
 const STATUS_TIMEOUT_MS = 5_000
 const SERVE_TIMEOUT_MS = 20_000
@@ -208,6 +213,15 @@ export interface TailnetIdentity {
   login: string
   /** Every other node with the same owner. Unfiltered by OS - see `peers()`. */
   peers: TailnetPeer[]
+  /**
+   * Whether this tailnet can issue a TLS certificate for this node.
+   *
+   * HTTPS is a tailnet-wide switch rather than a property of the machine, and
+   * `status` reports it as `CertDomains`: a list when certificates are on,
+   * null when they are not. It is the M6.0 condition, named in advance instead
+   * of discovered by waiting - see `serveTailnet`.
+   */
+  httpsAvailable: boolean
 }
 
 interface StatusNode {
@@ -243,6 +257,7 @@ export async function readTailnetIdentity(): Promise<TailnetIdentity | null> {
   }
   const status = parsed as {
     BackendState?: string
+    CertDomains?: string[] | null
     Self?: StatusNode
     Peer?: Record<string, StatusNode>
     User?: Record<string, { LoginName?: string }>
@@ -276,7 +291,12 @@ export async function readTailnetIdentity(): Promise<TailnetIdentity | null> {
     })
   }
 
-  return { dnsName: trimDot(self.DNSName), login, peers }
+  return {
+    dnsName: trimDot(self.DNSName),
+    login,
+    peers,
+    httpsAvailable: (status.CertDomains?.length ?? 0) > 0
+  }
 }
 
 /** MagicDNS names are fully qualified and end in a dot. URLs do not. */
@@ -327,11 +347,15 @@ export async function tailnetServeOrigin(port: number): Promise<string | null> {
 /**
  * Put the loopback port on the tailnet, and say where it landed.
  *
- * HTTPS first and HTTP as the fallback, in that order, because the outcome is
- * not knowable in advance - see the header. The HTTPS attempt is bounded by a
- * timeout rather than by an error, since a tailnet without certificates
- * enabled leaves `tailscale serve --https` waiting rather than refusing, which
- * M6.0 found the hard way.
+ * HTTPS first and HTTP as the fallback, in that order, because which one a
+ * given tailnet ends up on is not knowable from this side - see the header.
+ *
+ * What *is* knowable, in milliseconds, is whether HTTPS is possible at all, and
+ * asking is the difference between a toggle that answers at once and one that
+ * appears to do nothing for twenty seconds. A tailnet with certificates off
+ * leaves `tailscale serve --https` waiting rather than refusing (M6.0), so the
+ * attempt is skipped entirely on the tailnets where it can only ever time out.
+ * The timeout stays, for a certificate provision that is real but slow.
  *
  * Answers the origin actually being served, or null if neither worked. Never
  * throws: a settings toggle that failed should say so on the panel, not take a
@@ -340,12 +364,19 @@ export async function tailnetServeOrigin(port: number): Promise<string | null> {
 export async function serveTailnet(port: number): Promise<ServeResult> {
   const target = `http://${LINK_SERVER_HOST}:${port}`
 
-  // `--bg` or the command holds the terminal forever. It is background state on
-  // the machine either way, which is why `tailnetServeOrigin` reads it back
-  // instead of this function remembering what it did.
-  await runTailscale(['serve', '--bg', '--https', String(port), target], SERVE_TIMEOUT_MS)
-  const secure = await tailnetServeOrigin(port)
-  if (secure !== null) return { origin: secure, failure: '' }
+  // `!== false` rather than `=== true`: a null identity means `status` itself
+  // did not answer, and that is not evidence about certificates. Skipping is
+  // for the case the machine positively reported - anything else keeps the old
+  // behaviour, timeout and all.
+  const identity = await readTailnetIdentity()
+  if (identity?.httpsAvailable !== false) {
+    // `--bg` or the command holds the terminal forever. It is background state
+    // on the machine either way, which is why `tailnetServeOrigin` reads it
+    // back instead of this function remembering what it did.
+    await runTailscale(['serve', '--bg', '--https', String(port), target], SERVE_TIMEOUT_MS)
+    const secure = await tailnetServeOrigin(port)
+    if (secure !== null) return { origin: secure, failure: '' }
+  }
 
   const plain = await runTailscale(
     ['serve', '--bg', '--http', String(port), target],
