@@ -139,7 +139,9 @@ test('no path at all means home, and the separator says whose filesystem this is
   assert.equal(listing.path, homedir())
   assert.equal(listing.home, homedir())
   // The one field a Mac driving a Linux host cannot work out for itself.
-  assert.equal(listing.separator, sep)
+  // TEMPORARY: hardcoded to the POSIX separator on purpose, to prove this job
+  // can fail on Windows and only on Windows. Reverted in the next commit.
+  assert.equal(listing.separator, '/')
 })
 
 test('a leading ~ is expanded by whoever answers', async () => {
