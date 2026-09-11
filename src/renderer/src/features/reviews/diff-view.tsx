@@ -324,9 +324,33 @@ export function FileDiffCard({
   /**
    * A drag ends wherever the pointer is released, which is often outside the
    * button - or outside the card - so the listener goes on the window.
+   *
+   * The *move* is on the window for a different and less obvious reason. Rows
+   * also report `onPointerEnter`, and with a mouse that is enough: the pointer
+   * really does travel across each row and each row really is told. A finger
+   * does not work that way. Touch sets *implicit pointer capture* on whatever
+   * the gesture started on - the `+` button - so for the rest of the drag every
+   * pointer event is delivered to that button and no row is ever entered. The
+   * range simply never grew, which is why dragging out several lines worked on
+   * a desktop and did nothing at all on a phone.
+   *
+   * So the pointer is followed rather than waited for: one listener, hit-test
+   * where it actually is, read the row's own `data-diff-*` off the result. That
+   * is correct for a mouse too - `onPointerEnter` stays because it costs
+   * nothing and keeps the desktop path working if a hit-test ever lands on
+   * something unexpected - and it is the same set of coordinates either way.
    */
   useEffect(() => {
     if (!dragging) return
+
+    const move = (event: PointerEvent): void => {
+      const under = document.elementFromPoint(event.clientX, event.clientY)
+      const row = under?.closest('[data-diff-line]')
+      if (!row) return
+      const side = row.getAttribute('data-diff-side')
+      const line = Number(row.getAttribute('data-diff-line'))
+      if ((side === 'base' || side === 'head') && Number.isInteger(line)) dragOver(side, line)
+    }
 
     const finish = (): void => {
       const startLine = Math.min(dragging.startLine, dragging.line)
@@ -341,13 +365,15 @@ export function FileDiffCard({
       )
     }
 
+    window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', finish)
     window.addEventListener('pointercancel', finish)
     return () => {
+      window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', finish)
       window.removeEventListener('pointercancel', finish)
     }
-  }, [dragging])
+  }, [dragging, dragOver])
 
   // A shared constant rather than a fresh `[]`, so a file with no comments
   // does not hand the memo below a new array identity on every render.
@@ -1077,6 +1103,12 @@ function LineRow({
     <>
       <div
         id={number === null ? undefined : lineDomId(filePath, side, number)}
+        // Read by the drag listener in `DiffFileCard`, which hit-tests the
+        // pointer rather than waiting to be entered - see the note there. On
+        // the row rather than on the gutter cell because a finger dragging down
+        // the left edge wanders across all three columns.
+        data-diff-side={number === null ? undefined : side}
+        data-diff-line={number === null ? undefined : number}
         className={cn(
           'group grid grid-cols-[3rem_3rem_1fr]',
           // Backgrounds are mutually exclusive rather than layered: two
@@ -1127,9 +1159,47 @@ function LineRow({
               title={`Comment on ${side === 'head' ? 'line' : 'removed line'} ${number} — drag or shift-click for several`}
               aria-label={`Comment on line ${number} of ${filePath}`}
               className={cn(
-                'absolute left-0.5 top-1/2 hidden -translate-y-1/2 items-center justify-center rounded bg-primary p-0.5 text-primary-foreground shadow-sm',
-                'group-hover:flex focus-visible:flex',
-                (composing || selected) && 'flex'
+                'absolute left-0.5 top-1/2 flex -translate-y-1/2 items-center justify-center rounded bg-primary p-0.5 text-primary-foreground shadow-sm',
+                // `touch-none` is what lets a finger drag the range out at all:
+                // whether a touch scrolls the page or becomes a pointer drag is
+                // decided by `touch-action` and by nothing else -
+                // `preventDefault` on pointerdown does not reach that decision.
+                'touch-none',
+                'focus-visible:flex',
+                // Visible by default, and hidden again only where hovering is a
+                // thing that can happen.
+                //
+                // It used to be the other way round - `hidden`, revealed by
+                // `group-hover` - which on a phone is a button that does not
+                // exist, because there is no hover to wait for and no other way
+                // in. Commenting on a line was unreachable rather than merely
+                // awkward. `(hover: hover)` is the only honest test for that: it
+                // asks about the pointer the person actually has, rather than
+                // about a screen width or a user agent string, so a tablet with
+                // a mouse gets the desktop behaviour and a touchscreen laptop
+                // gets both.
+                //
+                // Written as one either/or rather than as a pile of classes
+                // that override each other. A hidden and a shown variant of the
+                // same media query are the same specificity inside it, so which
+                // one won would come down to the order Tailwind happened to
+                // emit them in; only one of them is ever in the string.
+                //
+                // (The other reason not to write the losing class in a comment
+                // here: Tailwind scans this file for candidates and does not
+                // know a comment from code, so naming one would compile a dead
+                // rule into the stylesheet.)
+                composing || selected
+                  ? null
+                  : [
+                      '[@media(hover:hover)]:hidden [@media(hover:hover)]:group-hover:flex',
+                      // Standing at every line where it cannot hide, it has to
+                      // stop being the loudest thing in the gutter. It sits left
+                      // of the right-aligned line number rather than over it, so
+                      // this is weight rather than occlusion - and it is back to
+                      // full strength on the range it is actually holding.
+                      '[@media(hover:none)]:opacity-70'
+                    ]
               )}
             >
               <Plus className="size-3" />

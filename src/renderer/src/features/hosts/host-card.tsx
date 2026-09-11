@@ -65,7 +65,11 @@ export function HostCard({
               {host.label}
             </h3>
             <ReachabilityBadge host={host} />
-            <DaemonVersionBadge host={host} appVersion={appVersion} />
+            <DaemonVersionBadge
+              host={host}
+              appVersion={appVersion}
+              checking={busy === 'probe'}
+            />
           </div>
           {/* Wraps rather than truncates, for the reason the repository card
               gives about paths: the tail of `xfor@100.78.0.23` is the half that

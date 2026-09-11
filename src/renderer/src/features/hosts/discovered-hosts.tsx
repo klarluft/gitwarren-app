@@ -39,9 +39,14 @@ import { Breakable } from '@/components/breakable'
 import { api, CACHE_KEYS } from '@/lib/api'
 import { errorMessage } from '@/lib/errors'
 import { useHostMutations } from './use-hosts'
-import type { DiscoveredPeer } from '@shared/schemas'
+import type { DiscoveredPeer, HostWithState } from '@shared/schemas'
 
-export function DiscoveredHosts() {
+export function DiscoveredHosts({
+  onAdded
+}: {
+  /** The host that was just created, so the screen can reach it once. */
+  onAdded?: (host: HostWithState) => void
+}) {
   const {
     data: peers,
     isLoading,
@@ -72,8 +77,16 @@ export function DiscoveredHosts() {
       // under. Nothing is guessed about the scheme or the port, which is M6.0's
       // finding applied: whether a tailnet can do HTTPS is a property of the
       // tailnet, so it is a fact to carry rather than a default to apply.
-      await addHost({ target: peer.origin, kind: 'websocket', label: peer.dnsName.split('.')[0] })
+      const created = await addHost({
+        target: peer.origin,
+        kind: 'websocket',
+        label: peer.dnsName.split('.')[0]
+      })
       await mutate()
+      // This peer answered a probe seconds ago, so the row that has just landed
+      // is about a machine known to be up and running GitWarren - and it would
+      // still draw "Not checked yet" until somebody asked. The screen asks.
+      onAdded?.(created)
     } catch (error) {
       setFailure(errorMessage(error))
     } finally {

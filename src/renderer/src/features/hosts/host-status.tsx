@@ -14,8 +14,25 @@
  * that as "unreachable" would mean every host anyone adds is red before it has
  * been given a chance, which teaches people to ignore the colour. It gets its
  * own, quieter word and no colour at all.
+ *
+ * ## The same distinction, for what is installed
+ *
+ * `daemon_version` is null in two situations that are not the same situation:
+ * the machine was asked and had no GitWarren on it, and the machine has never
+ * been asked anything at all. Until now both drew "GitWarren not installed",
+ * which made every freshly added host accuse a machine of missing software
+ * before a single packet had been sent to it - and the accusation was often
+ * wrong, as pressing refresh immediately proved.
+ *
+ * Which one it is cannot be read off `daemonVersion` alone; it is read off the
+ * reachability beside it. A host that has never been tried knows nothing about
+ * its own contents either, so `reachabilityOf(...) === 'unknown'` is exactly
+ * the condition under which the install badge has to keep quiet. Anything that
+ * has actually been reached - or has actually failed, which for ssh is where
+ * "GitWarren is not installed on xfor@pc-wsl" comes from - has been asked, and
+ * the badge speaks.
  */
-import { CircleCheck, CircleDashed, CircleX, Download } from 'lucide-react'
+import { CircleCheck, CircleDashed, CircleX, Download, Loader2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import type { HostWithState } from '@shared/schemas'
 
@@ -86,12 +103,27 @@ export function ReachabilityBadge({
  */
 export function DaemonVersionBadge({
   host,
-  appVersion
+  appVersion,
+  checking = false
 }: {
   host: HostWithState
   appVersion: string | undefined
+  /** True while a probe for this host is in flight. */
+  checking?: boolean
 }) {
   if (host.daemonVersion === null) {
+    // Asked nothing, so claim nothing. See the header.
+    if (reachabilityOf(host) === 'unknown') {
+      return checking ? (
+        <Badge variant="outline">
+          <Loader2 className="animate-spin" />
+          Checking…
+        </Badge>
+      ) : (
+        <Badge variant="outline">Not checked yet</Badge>
+      )
+    }
+
     return (
       <Badge variant="outline">
         <Download />
@@ -115,7 +147,17 @@ export function DaemonVersionBadge({
   )
 }
 
-/** Whether the install button should be the loud one. */
+/**
+ * Whether the install button should be the loud one.
+ *
+ * Never for a host nobody has asked yet. A filled, primary-coloured "Install
+ * GitWarren" is this screen telling somebody what to do next, and it has no
+ * business doing that on a guess - the machine may well already have it, which
+ * is the whole point of the badge above keeping quiet. The button is still
+ * there and still works; it just stops shouting until there is something to
+ * shout about.
+ */
 export function needsInstall(host: HostWithState, appVersion: string | undefined): boolean {
-  return host.daemonVersion === null || (appVersion !== undefined && host.daemonVersion !== appVersion)
+  if (host.daemonVersion === null) return reachabilityOf(host) !== 'unknown'
+  return appVersion !== undefined && host.daemonVersion !== appVersion
 }
