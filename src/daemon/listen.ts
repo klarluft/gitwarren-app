@@ -25,23 +25,24 @@
  * the opposite reason - see `shared/web.ts`.
  */
 import { createServer } from 'node:http'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { closeDatabase, getDatabase } from '../core/db/client.js'
 import {
   clearDaemonRuntime,
   readLiveDaemonRuntime,
-  writeDaemonRuntime
+  writeDaemonRuntime,
+  type DaemonRuntime
 } from '../core/daemon-runtime.js'
 import { getInstanceId } from '../core/instance.js'
 import { describeMcpLaunch } from '../core/mcp-launcher.js'
 import { getDatabasePath, getDataDirectory } from '../core/paths.js'
 import { createWebHandler } from '../core/web/handler.js'
 import { configureExposure, refreshExposure, tailnetGate } from '../core/web/exposure.js'
-import { clearWebToken, mintWebToken, publishWebToken } from '../core/web/token.js'
+import { clearWebToken, getWebTokenPath, mintWebToken, publishWebToken } from '../core/web/token.js'
 import { LINK_SERVER_HOST, LINK_SERVER_PORT } from '../shared/link-port.js'
-import { TOKEN_PARAM } from '../shared/web.js'
+import { TOKEN_PARAM, WEB_APP_MOUNT } from '../shared/web.js'
 import type { AppInfo } from '../shared/api.js'
 
 /** Stamped by `vite.daemon.config.ts`. Nothing reads a package.json out of a bundle. */
@@ -129,6 +130,51 @@ function describeInstall(linkPort: number | null): AppInfo {
 }
 
 /**
+ * How to reach the GitWarren that already owns this data directory, as the tail
+ * of the sentence that refuses to start a second one.
+ *
+ * The refusal used to end at "use the one that is running", which names no way
+ * to actually do it. The token is minted per launch and published to a 0600
+ * file, so somebody who has closed the terminal that printed it - or who never
+ * had one, because the owner is a login item or the app - has nothing to type.
+ * Reading that file is precisely what `gitwarren open` does, and doing it here
+ * costs one `readFileSync` on a path that is already this process's own.
+ *
+ * The two failures answer as themselves rather than as a URL that would not
+ * open. `linkPort: null` is an owner that is up but could not bind, which
+ * `core/daemon-runtime.ts` records deliberately; an unreadable token file is an
+ * owner older than its web view, or one that could not write it. Neither is
+ * improved by guessing.
+ *
+ * The mount is the *owner's*, which is why this cannot simply repeat the URL
+ * the success path below prints. An app serves the web build under `/app/` and
+ * keeps `/` for the "Open in GitWarren" page; a `serve --listen` has no such
+ * page to protect and serves it at `/`. `shared/web.ts` holds that rule and
+ * `runtime.owner` says which of the two is up.
+ */
+function whereTheOwnerIs(owner: DaemonRuntime): string {
+  if (owner.linkPort === null) {
+    return ', which could not bind its loopback port, so it has no page to open.'
+  }
+
+  let token: string
+  try {
+    token = readFileSync(getWebTokenPath(), 'utf8').trim()
+  } catch {
+    return (
+      `. Its token could not be read from ${getWebTokenPath()}, so there is no URL to ` +
+      `print here; restarting that process mints a new one.`
+    )
+  }
+
+  const mount = owner.owner === 'gui' ? `${WEB_APP_MOUNT}/` : '/'
+  const url =
+    `http://${LINK_SERVER_HOST}:${owner.linkPort}${mount}` +
+    `?${TOKEN_PARAM}=${encodeURIComponent(token)}`
+  return `:\n\n    ${url}\n`
+}
+
+/**
  * Bind, publish, and print the one URL that works.
  *
  * Returns false when it could not start, so the CLI entry can exit with something
@@ -142,7 +188,8 @@ export function runListen(): boolean {
     console.error(
       `[gitwarren-serve] this machine's GitWarren is already being served by ` +
         `${owner.owner === 'gui' ? 'the app' : 'another gitwarren serve'} (pid ${owner.pid}). ` +
-        `A data directory has one owner. Quit that first, or use the one that is running.`
+        `A data directory has one owner. Quit that first, or use the one that is running` +
+        whereTheOwnerIs(owner)
     )
     process.exitCode = 1
     return false
