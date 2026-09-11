@@ -5,7 +5,7 @@
  * the same schemas the service re-parses on the other side - so nothing can be
  * accepted here that the service would reject.
  *
- * ## Two carriers, and only one of them has anything to type
+ * ## Three carriers, and each has a different relationship with typing
  *
  * M5 gave this form a choice, and the two halves of it are deliberately not
  * symmetrical. An `ssh` target is free text, because every `~/.ssh/config` alias
@@ -16,12 +16,21 @@
  * machine, caught only later by the instance id. Offering the machine's own
  * spelling removes the question.
  *
+ * M6 adds a third, and it is the one a person should usually not have to reach
+ * for at all: a machine that is *listening* on the tailnet is found by
+ * discovery and proposed on the Hosts screen with an Add button, so the form is
+ * the fallback for a machine discovery could not see - one that is asleep right
+ * now, or reachable by an address rather than by a MagicDNS name. Its field is
+ * free text like the ssh one, for the same reason: what somebody already has in
+ * their head is a machine name, and no validator here knows which names resolve.
+ *
  * The choice appears only when there is something to choose. `hosts.distros`
- * answers empty on a Mac, on Linux, and on a Windows box with no WSL, and an
- * empty answer means this is the SSH form with no tabs on it - which is what it
- * was before M5, for everyone it was already right for. Nothing here asks what
- * platform it is on: the question is about the machine the *core* runs on, and
- * asking it is the only way a browser tab gets the right answer.
+ * answers empty on a Mac, on Linux, and on a Windows box with no WSL, and
+ * `hosts.tailnet` answers `available: false` on a machine with no Tailscale -
+ * so a machine with neither gets the SSH form with no tabs on it, which is what
+ * it was before M5 for everyone it was already right for. Nothing here asks what
+ * platform it is on: both questions are about the machine the *core* runs on,
+ * and asking them is the only way a browser tab gets the right answer.
  *
  * ## There is no "test connection" button
  *
@@ -32,6 +41,7 @@
  * it.
  */
 import { useState, type FormEvent } from 'react'
+import useSWR from 'swr'
 import { Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -49,7 +59,8 @@ import { cn } from '@/lib/utils'
 import { useHostMutations, useWslDistros } from './use-hosts'
 import { addHostInputSchema, updateHostInputSchema } from '@shared/schemas'
 import { parseWithSchema } from '@shared/validation'
-import type { Host, WslDistro } from '@shared/schemas'
+import { api, CACHE_KEYS } from '@/lib/api'
+import type { Host, HostKind, WslDistro } from '@shared/schemas'
 
 interface HostFormDialogProps {
   open: boolean
@@ -78,8 +89,15 @@ function HostForm({ host, onDone }: { host: Host | undefined; onDone: () => void
   // Only asked while adding. Editing cannot change a carrier, so the list would
   // be a request nobody reads.
   const { distros, isLoading: loadingDistros } = useWslDistros(!isEditing)
+  // Only to decide whether to offer the choice. Whether *this* machine is on a
+  // tailnet is a good proxy for whether its owner has others on one, and it is
+  // the same read the settings switch makes - so the answer is usually already
+  // in the cache by the time this dialog opens.
+  const { data: tailnet } = useSWR(isEditing ? null : CACHE_KEYS.tailnet, () =>
+    api.hosts.tailnet()
+  )
 
-  const [kind, setKind] = useState<'ssh' | 'wsl'>(host?.kind ?? 'ssh')
+  const [kind, setKind] = useState<HostKind>(host?.kind ?? 'ssh')
   const [target, setTarget] = useState(host?.target ?? '')
   const [label, setLabel] = useState(host?.label ?? '')
   const [editorTarget, setEditorTarget] = useState(host?.editorTarget ?? '')
@@ -87,8 +105,10 @@ function HostForm({ host, onDone }: { host: Host | undefined; onDone: () => void
   const [error, setError] = useState<unknown>(null)
 
   const canAddWsl = !isEditing && distros !== undefined && distros.length > 0
+  const canAddTailnet = !isEditing && tailnet?.available === true
+  const showCarrierChoice = canAddWsl || canAddTailnet
 
-  function chooseKind(next: 'ssh' | 'wsl'): void {
+  function chooseKind(next: HostKind): void {
     if (next === kind) return
     setKind(next)
     // The two targets are different kinds of string and share no spelling, so
@@ -141,6 +161,7 @@ function HostForm({ host, onDone }: { host: Host | undefined; onDone: () => void
   const generalError = error && !targetError && !labelError ? errorMessage(error) : null
 
   const isWsl = kind === 'wsl'
+  const isTailnet = kind === 'websocket'
   // A WSL host is identified by its distribution, so the target is not something
   // an edit may change - the service refuses it, and a field that could produce
   // only an error is not a field worth drawing.
@@ -161,27 +182,36 @@ function HostForm({ host, onDone }: { host: Host | undefined; onDone: () => void
             : isWsl
               ? 'A Linux distribution running on this PC. GitWarren talks to it through ' +
                 'wsl.exe — nothing to configure, and nothing listening on a port.'
-              : 'Anything your own ssh can reach: a config alias, a tailnet name, user@address. ' +
-                'GitWarren never asks for a password — your SSH agent and config do the ' +
-                'authenticating.'}
+              : isTailnet
+                ? 'A machine on your tailnet with "Reachable on your tailnet" turned on in its ' +
+                  'own GitWarren. Nothing is installed onto it from here — it is already ' +
+                  'running, and Tailscale is what says you are its owner.'
+                : 'Anything your own ssh can reach: a config alias, a tailnet name, ' +
+                  'user@address. GitWarren never asks for a password — your SSH agent and ' +
+                  'config do the authenticating.'}
         </DialogDescription>
       </DialogHeader>
 
       <div className="flex flex-col gap-4">
-        {canAddWsl && (
+        {showCarrierChoice && (
           <Field>
             <FieldLabel>Connect by</FieldLabel>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <CarrierChoice
                 selected={kind === 'ssh'}
                 label="SSH"
                 onSelect={() => chooseKind('ssh')}
               />
-              <CarrierChoice
-                selected={isWsl}
-                label="WSL"
-                onSelect={() => chooseKind('wsl')}
-              />
+              {canAddTailnet && (
+                <CarrierChoice
+                  selected={isTailnet}
+                  label="Tailnet"
+                  onSelect={() => chooseKind('websocket')}
+                />
+              )}
+              {canAddWsl && (
+                <CarrierChoice selected={isWsl} label="WSL" onSelect={() => chooseKind('wsl')} />
+              )}
             </div>
           </Field>
         )}
@@ -205,12 +235,12 @@ function HostForm({ host, onDone }: { host: Host | undefined; onDone: () => void
             </Field>
           ) : (
             <Field>
-              <FieldLabel htmlFor="host-target">SSH host</FieldLabel>
+              <FieldLabel htmlFor="host-target">{isTailnet ? 'Machine' : 'SSH host'}</FieldLabel>
               <Input
                 id="host-target"
                 value={target}
                 onChange={(event) => setTarget(event.target.value)}
-                placeholder="user@machine"
+                placeholder={isTailnet ? 'pc-wsl' : 'user@machine'}
                 className="font-mono text-xs"
                 data-invalid={targetError ? '' : undefined}
                 autoComplete="off"
@@ -219,7 +249,14 @@ function HostForm({ host, onDone }: { host: Host | undefined; onDone: () => void
               <FieldError>{targetError}</FieldError>
               {!targetError && (
                 <FieldDescription>
-                  Include the user name: a bare tailnet name asks for your local one.
+                  {isTailnet
+                    ? // No user name, and that is the whole difference from the
+                      // field above. Spike S1 found that a bare MagicDNS name over
+                      // ssh asks for the *client's* Unix user; there is no such
+                      // negotiation here, because the machine authorises the
+                      // person rather than a Unix account.
+                      'Its name on your tailnet. No user name — Tailscale already knows who you are.'
+                    : 'Include the user name: a bare tailnet name asks for your local one.'}
                 </FieldDescription>
               )}
             </Field>

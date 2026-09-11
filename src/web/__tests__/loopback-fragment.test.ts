@@ -52,11 +52,27 @@ test('a file path with slashes in it survives the round trip', () => {
 })
 
 test("a link for another install does not open this one's review of that number", () => {
-  // The failure this rule exists to prevent: review ids are per host, so
-  // honouring the number would show the wrong review with no sign of it.
+  // The failure this rule exists to prevent, and it is still prevented: review
+  // ids are per host, so honouring the number *as ours* would show the wrong
+  // review with no sign of it.
+  //
+  // What changed at M6 is the remedy. Until then there was no way to reach
+  // another machine from a link, so the honest answer was the home screen; now
+  // the route keeps its host segment and opens that machine's review 2 - which
+  // is a stronger version of the same guarantee, because the wrong review stops
+  // being avoided and starts being unrepresentable.
   const route = routeForLoopbackFragment(`#h=${THEIRS}/review/2/files`, OURS)
 
-  assert.deepEqual(route, { name: 'repositories' })
+  assert.deepEqual(route, { name: 'review', reviewId: 2, tab: 'files', host: THEIRS })
+})
+
+test('and what it produces is a host-scoped location, never a bare one', () => {
+  const route = routeForLoopbackFragment(`#h=${THEIRS}/review/2/files`, OURS)
+
+  assert.equal(hrefFor(route!), `#/h/${THEIRS}/reviews/2/files`)
+  // The assertion that matters: nothing in that string could be read as a local
+  // review 2 by any screen that sees it.
+  assert.notEqual(hrefFor(route!), '#/reviews/2/files')
 })
 
 test('a fragment addressed to us but malformed inside lands somewhere harmless', () => {

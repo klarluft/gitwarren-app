@@ -2,7 +2,7 @@
   "name": "gitwarren",
   "productName": "GitWarren",
   "version": "0.1.7-beta.1",
-  "description": "Desktop app for doing local-only code reviews",
+  "description": "Code review for your own machines and your own agents",
   "author": {
     "name": "Klarluft B.V.",
     "email": "contact@klarluft.com",

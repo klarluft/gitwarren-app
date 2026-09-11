@@ -38,6 +38,7 @@ import { getInstanceId } from '../core/instance.js'
 import { describeMcpLaunch } from '../core/mcp-launcher.js'
 import { getDatabasePath, getDataDirectory } from '../core/paths.js'
 import { createWebHandler } from '../core/web/handler.js'
+import { configureExposure, refreshExposure, tailnetGate } from '../core/web/exposure.js'
 import { clearWebToken, mintWebToken, publishWebToken } from '../core/web/token.js'
 import { LINK_SERVER_HOST, LINK_SERVER_PORT } from '../shared/link-port.js'
 import { TOKEN_PARAM } from '../shared/web.js'
@@ -165,11 +166,15 @@ export function runListen(): boolean {
   publishWebToken(token)
 
   let linkPort: number | null = null
+  configureExposure({ mount: '/', port: LINK_SERVER_PORT })
+  void refreshExposure()
+
   const handler = createWebHandler({
     mount: '/',
     staticRoot: webRoot,
     token,
-    appInfo: () => describeInstall(linkPort)
+    appInfo: () => describeInstall(linkPort),
+    tailnet: tailnetGate
   })
 
   const server = createServer((request, response) => {

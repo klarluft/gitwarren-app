@@ -3097,6 +3097,944 @@ server" to "your machines, your agents, no one else's server". Update Known
 limitations as each milestone retires one ("nothing is pushed to the UI" goes
 at M6).
 
+#### How it is being built, and where it has got to
+
+Seven changes. M6 is the only milestone with five bullets in its own
+description, and the reason it needs more slices than M4's five or M5's four is
+that three of the five are only testable with a second machine awake and one of
+them only with a phone — so the cut has to put each of those where the thing it
+needs is already true.
+
+Before them, one spike that had to happen first, because it decides whether the
+`webUrl` in M6's fifth bullet is spelled `https` or `http`:
+
+0. **`tailscale serve` in front of the loopback port.** S1 proved Tailscale SSH.
+   What was unproven is the proxy, the identity header, and whether a WebSocket
+   survives the hop. *(done — see below.)*
+1. **The event channel, and what an event is allowed to carry.** `core/events.ts`,
+   a write emitting on it, both shells carrying it to a renderer, and a renderer
+   that treats what arrives as a reason to re-ask. One machine; no tailnet. *(done — see below.)*
+2. **The poke from the MCP process.** An agent's write reaching the owner of the
+   data directory over the loopback port it already publishes. *(done — see below.)*
+3. **Tailnet exposure, identity, and `webUrl`.** `tailscale serve` behind a
+   settings toggle, the gate learning a second way to be satisfied, and the URL
+   that goes into an MCP result once a host listens. The phone works at the end
+   of this one. *(done — see below.)*
+4. **The listening carrier.** The third `HostConnection`: a WebSocket client in
+   the app, reaching a machine that listens rather than one it spawns. *(done — see below.)*
+5. **Events across a host, and `host.state`.** `RpcEvent` on a wire in the one
+   direction nothing has exercised, and the pool's `onStateChange` finally
+   rendered — which is what greys a machine nobody is looking at. *(done — see below.)*
+6. **Discovery.** Peers from `tailscale status --json`, proposed rather than
+   added. *(done — see below.)*
+7. **Links across installs, and the words.** What a `gitwarren://<other-id>/…`
+   link does now that there is somewhere for it to go, and the README, the
+   tagline and Known limitations catching up with the thing that shipped. *(done — see below.)*
+
+**What was settled before any of it was written.**
+
+*An event is a refetch hint, and that is the same rule as "a lost request is
+never retried".* The doc already said the first and `core/rpc/stdio-client.ts`
+already said the second, and it is worth writing them as one idea rather than
+two rules, because a person who holds the idea will get the next case right on
+their own.
+
+The idea is that **a message may never stand in for the asking side's own
+knowledge.** A retry decides, on the caller's behalf, what a missing answer
+meant — and it cannot know, so for `comments.reply` it guesses wrong by posting
+a second comment. An event carrying data decides, on the screen's behalf, that
+the push and the database agree — and it cannot know that either, because the
+push crossed a network that reorders, drops and duplicates, while the database
+is the thing that is actually true. Both replace evidence with inference, and
+both are the sort of wrong that is invisible until it matters.
+
+So an event carries a *name and a scope* and nothing else: "something about
+review 4 on this machine changed". What it produces is the read the poll would
+have done anyway, only sooner. Two consequences fall straight out and both are
+load-bearing. A lost event costs latency and never correctness, which is what
+makes the fifteen-second poll a genuine fallback rather than a story told about
+one. And an event that arrives out of order, twice, or about something that has
+since changed again is harmless, because the answer comes from re-asking rather
+than from the message.
+
+*An event for a host nobody is looking at is dropped, and dropping it is the
+point rather than a gap.* This is the case the channel was supposed to exist
+for, so it deserves the sentence. If an event is a refetch hint, then an event
+about a review with no screen on it has nothing to invalidate: SWR has no
+subscriber for that key, `mutate` finds nothing, and the cost is one map lookup.
+When somebody does open that review the read happens then and is current. There
+is no backlog to replay and no queue to bound, which is what a channel carrying
+data would have needed.
+
+`host.state` is the exception, and it is worth being precise that **the banner
+is not what it is for**, because that is the thing M4.5 was careful about and
+the thing it would be easy to undo here. M4.5's banner is raised by request
+*outcomes* and stays that way: a request that failed is evidence about the
+screen in front of someone, and it is carrier-agnostic — M5 proved that against
+`wsl.exe` with no new code. `renderer/lib/host-reachability.ts` is not replaced
+and does not read events.
+
+What `host.state` adds is the machine with no screen on it at all, and the
+mechanism is narrower than it first looks. The pool only learns anything by
+*connecting*, so for most of M4 a host nobody was asking about was a host
+nothing could have said anything about. What changes here is that a listening
+carrier holds an open socket with a heartbeat on it (`WEBSOCKET_HEARTBEAT_MS`,
+30 seconds, written at M3 with the sentence "over the tailnet in M6 it is
+Tuesday"). A machine that is switched off kills that socket, the pool notices,
+and the Hosts screen greys a row *without anybody having asked it anything*.
+That is the whole of what M6 adds to disconnection, and it is why the verify
+line says "turn the PC off" rather than "open a review and turn the PC off".
+
+*One channel, two sources, and that is the cheap answer to M4.5's objection.*
+`host.state` is about a machine and is known only to this install's pool;
+`reviews.changed` is about data and is known only to the machine that owns it.
+They look like two channels and they are not, because what they do at the far
+end is identical: invalidate a key family. So `core/events.ts` is one bus with
+two sources — the pool emits straight onto it, and an `RpcEvent` arriving from
+a host is re-emitted onto it tagged with the host it came from — and one
+subscription in the renderer drains it. M4.5 refused "two half-built event
+channels for one banner"; what it was objecting to was the *cost*, and one bus
+carrying names is most of that cost removed.
+
+*Identity and the token are two different questions, and a request satisfies
+exactly one of them.* This is the thing that must not be collapsed, so here is
+the difference stated in the form the code checks.
+
+`core/web/token.ts` answers **"did the user point something at GitWarren, or
+does this merely know the port?"** — a question about *intent*, asked on
+loopback, where the principal is uninteresting because every process the user
+runs is already the user. The tailnet header answers **"is the person at the
+other end the owner?"** — a question about *principal*, asked over a network,
+where intent cannot be checked at all and the principal is the whole of it.
+
+So a request is admitted when it is loopback-with-token **or**
+tailnet-with-owner-login, and never by one standing in for the other. In
+particular a token presented on a tailnet request is *ignored rather than
+honoured*: a token minted on the PC is not evidence about the person holding a
+phone, and accepting it would be precisely the collapse. This also keeps
+`token.ts`'s three properties untouched — M4.5 found the consequence of
+per-launch minting from the tab's side and deliberately did not change it, and
+nothing here changes it either.
+
+The honest boundary, written down because the alternative is pretending the
+header is unforgeable: `Tailscale-User-Login` is set by `tailscaled` on this
+machine, which also proxies to loopback, so a *local process* could send the
+header itself with a `Host` naming the tailnet authority and get in without the
+token. That grants it nothing, because a local process running as the user can
+already read the 0600 token file and open the SQLite database directly — it is
+the same principal `token.ts` says loopback has. The door that stays shut is the
+one that matters: a web page cannot set `Host` or `Tailscale-User-Login`, both
+being forbidden header names, so the DNS-rebinding attack `origin.ts` was built
+against is closed exactly as it was.
+
+*The MCP process pokes the owner over the port the owner already publishes, and
+a host with no owner has no push.* The doc offered a counter in
+`daemon-runtime.json` or a local socket. A counter in a file is a poll with
+extra steps — the GUI would have to watch the file, and `fs.watch` is per
+platform, unreliable on network filesystems and a timer underneath on several
+of them. So: a socket, and the one already there. `daemon-runtime.json` names
+the owner's pid and its `linkPort`, the owner is serving a gated HTTP server on
+it, and the token sitting in a 0600 file next door is readable by exactly the
+principal that may poke — the user. One `POST` under `WEB_PREFIX`, token
+required, `Origin` required and ours, and the MCP process is a client of a
+server that already existed.
+
+The consequence is worth stating plainly rather than discovering: **a daemon
+spawned over `ssh` or `wsl.exe` owns nothing.** It binds no port and writes no
+runtime file, deliberately, since M2 — a data directory has one owner and a
+stdio daemon is not competing to be it. So an agent writing on a host reached
+that way pokes nobody, and the fifteen-second poll is what notices. The remedy
+is not a new mechanism; it is the toggle in slice 3, which gives that host an
+owner. Turning on "Reachable on your tailnet" is what buys live updates, and
+saying so is better than building a second channel for the case where it is off.
+
+*Discovery runs when somebody opens the Hosts screen, and never on its own.*
+"With no configuration" is about what the *user* types, not about what the app
+does while nobody is watching. Probing every peer on a schedule is a connection
+to every machine on the list, which is what `core/hosts/pool.ts` exists to avoid
+and what M4.3 refused to do to render a home screen — and it would be worse
+here, because the list includes machines that are not this user's problem.
+
+So it is a screen-triggered read with a bounded cost. The candidate set is
+peers from `tailscale status --json` that are `Online` and carry the same
+`UserID` as `Self` — an ownership check from the same file the identity check
+reads, not a guess. Each candidate gets one HTTP `GET` with a one-second
+timeout, all of them in parallel. A phone is not filtered out by its `OS`
+field, because a blocklist of operating systems is the same shape as M5.2's
+blocklist of distribution names and goes stale the same way; it is filtered out
+by *answering nothing*.
+
+*(This paragraph originally said that answering nothing "costs a refused TCP
+connect in single-digit milliseconds", and M6.6 measured otherwise: on a real
+tailnet a peer with nothing on the port takes about 800 ms to refuse, because
+reaching it means NAT traversal or a relay first. The bill is therefore not
+"nine cheap refusals" but **one probe timeout, once, however many peers there
+are** — measured at 1046 ms for this four-node tailnet. The estimate was wrong
+in a way that does not change the design and does change what the number means,
+which is exactly the sort of thing worth leaving visible rather than quietly
+editing.)*
+
+*Discovery proposes; it never adds.* `isLocalOnly` refuses the whole `hosts.`
+prefix so that a hub cannot be talked into becoming a mesh, and a discovery that
+inserted rows would walk around that from the other side. Found peers appear as
+a proposal with an Add button. A peer whose instance id already names a row is
+shown as already added, naming the row it collided with — which is M4.1's
+collision report doing its job one step earlier, before the insert rather than
+after it. M5.2 fired that report for real and drew the conclusion this relies
+on: one machine is one row even when two carriers reach it, because
+`#/h/<instance>/…` routes by instance id and two rows bearing one id make every
+remote route ambiguous. `pc-wsl` is already an `ssh` row on this Mac, so it is
+the case discovery meets first rather than a hypothetical.
+
+**M6.0, done on the Mac against the real tailnet, 11 September.** Three
+questions, and the third one had a surprise in it.
+
+*The identity header arrives, and it survives a WebSocket upgrade.* `tailscale
+serve --bg --http=8080 http://127.0.0.1:43111` in front of a header-echoing
+server produced `tailscale-user-login: michal-wrzosek@github` on an ordinary
+`GET` — from the Mac itself, and from `pc-wsl` over the tailnet — and on the
+upgrade request of a `ws://` connection that then carried frames both ways. The
+upgrade is the half that could have failed silently, because a proxy that
+forwards headers on requests and drops them on upgrades would have left the
+gate working for the phone and refusing every carrier.
+
+*The proxy connects from loopback, which is what makes this a change to the
+gate rather than an addition beside it.* `req.socket.remoteAddress` is
+`127.0.0.1` for a request that came from another machine, and `Host` is
+`mac.tail688c0c.ts.net:8080`. So the existing `isAllowedHost` refuses it — not
+because the request is suspect, but because "the authority this server was
+reached at" now has two legitimate values instead of one. `x-forwarded-for`
+carries the peer's tailnet IP, which is how the two are told apart from the
+inside.
+
+*`--https` is not available on this tailnet, and the milestone has to be
+honest about it rather than assume.* `tailscale serve --bg --https 8443` hangs
+with no output; `tailscale cert` says why — *your Tailscale account does not
+support getting TLS certs*, which is HTTPS certificates being off for the
+tailnet rather than anything about this machine. `--http` applies instantly and
+needs no certificate.
+
+The consequence for the fifth bullet is that a `webUrl` spelled
+`https://<host>.<tailnet>.ts.net/review/4/…` by *convention* would be a URL
+that does not open, on a tailnet where nothing warned anybody. So `webUrl` is
+**derived from what this install actually did** — the scheme and port it asked
+`tailscale serve` for, and the `DNSName` from `tailscale status --json` →
+`Self` — rather than assembled from a template. It is the same rule
+`core/mcp-launcher.ts` follows for the launcher path: a fact reported by the
+machine that knows it beats a string that is usually right.
+
+Plain HTTP over a tailnet is not plaintext on a network: WireGuard is doing the
+encryption a layer down, between the two machines, and `tailscale serve`
+refuses to leave the tailnet at all — that is what `funnel` is for and it is a
+non-goal here. Enabling HTTPS in the admin console is a one-click improvement
+and the code takes it automatically when a certificate is obtainable, because
+it reads what happened rather than deciding in advance.
+
+The port is `LINK_SERVER_PORT`, the same 41427 on the tailnet as on loopback.
+S6 chose that number so a link written on one machine on Tuesday opens on
+another on Thursday; a tailnet URL that used a different one would be a second
+number to defend for no benefit, and the port is not what makes the two
+authorities different.
+
+**M6.1, done on the Mac, 11 September.** The claim in `shared/rpc.ts` turned out
+to be true, and checking it first was worth most of a slice. `RpcEvent` and
+`isRpcEvent` have been sitting there since M1 with nothing emitting on them, and
+`core/rpc/stdio-client.ts` was written in M4 against that shape — it reads a
+frame, asks `isRpcEvent`, and hands anything that is one to `onEvent` rather
+than looking for a request to answer. The comment said the shape was there so
+"the message simply arrives", and it does: **the stdio carrier needed no change
+at all**, which is the difference between M6 having five carriers to teach and
+three.
+
+What did need teaching was the browser's carrier, and it is the same lesson from
+the other side. `web/carrier.ts` dropped anything without a numeric id —
+`if (!response || typeof response.id !== 'number') return` — which is a
+perfectly good guard against a malformed frame and also, silently, against every
+event that would ever be pushed to a tab. It now asks `isRpcEvent` first, using
+the shared discriminator rather than "has no id", because the two ends of that
+socket have to agree about what a frame is and one of them is a Node process.
+
+    core/events.ts          one bus, two sources, names only
+    core/rpc/dispatcher.ts  a write that succeeded announces itself
+    main/events.ts          the window's half, four lines
+    web/carrier.ts          the tab's half, and the guard that hid it
+    renderer/lib/events.ts  a hint becomes a `mutate`
+    renderer/lib/event-scope.ts  which keys, on which machine
+
+**The emit is in the dispatcher because that is where the human surface already
+was.** M1 put `HUMAN_AUTHOR` there and wrote down why: agents do not come
+through the dispatcher at all — the MCP server imports `core/services` directly
+— so the boundary *is* the enforcement. The same boundary answers "who
+announces a write", and it answers it the same way: a person's writes announce
+themselves here, and the agent's process announces its own (M6.2). Putting the
+emit in the services would have covered both in one place and thrown that
+distinction away, and it is the distinction the next three slices are built on.
+
+`EVENT_FOR_METHOD` is a table someone maintains rather than a guess from the
+method name, for the reason `READ_METHODS` is: being wrong is silent in both
+directions. A missing entry is a screen that waits fifteen seconds; an extra one
+is a refetch nobody needed; neither is a type error.
+
+**The event names a family, not a row, and that is what makes it the same
+behaviour as a local write rather than a second one.** `comments.reply` names a
+thread and `comments.remove` names a comment, so deriving "review 4" would mean
+a database lookup in the one place that must not fail after a write has already
+committed. It does not need to, because the renderer's own writes already
+invalidate by family — `mutate(key => key.startsWith('reviews:'))` — so an event
+doing exactly that is one code path rather than two. If a local write refreshes
+the right screens, a remote one now does too, by the same lines.
+
+**The scoping is a suffix, and it is the only part with a test.** `scoped()` in
+`lib/api.ts` puts `@<instance>` on the *end* of every key a host owns, so
+"everything about that machine" is `endsWith` — the same trick
+`use-reconnect.ts` uses from the other direction. An event from `pc-wsl`
+refreshes `pc-wsl`'s keys and leaves this Mac's alone. Getting that wrong would
+have been invisible: every screen still correct, and six machines' worth of
+SQLite re-read whenever an agent typed anything. So the rule moved into
+`renderer/lib/event-scope.ts`, which has **no imports at all** — the same shape
+`host-reachability.ts` chose and for the same reason. `lib/events.ts` cannot be
+a node program, because it reads `CACHE_PREFIXES` from `lib/api.ts` and that
+module throws at import without `window.gitwarren`, deliberately; the rule can
+be, and the rule is the part worth pinning down.
+
+**Verified on one machine with two shells, which is the arrangement that already
+existed.** The Electron window reaches the core over IPC and a browser tab
+reaches the same process over the loopback socket, so a write arriving on one
+and being noticed on the other has crossed the whole channel. `scripts/verify/
+m6-1.mjs` plays the tab with `ws`, the session cookie and the real `Origin`, so
+what it exercises is the same upgrade, the same gate and the same
+`serveWebSocket` a browser gets.
+
+A comment written on the socket reached the window's carrier in **2 ms**,
+carrying `{event: "comments.changed", data: null}` and no host — correctly, since
+this core *is* the window's own install. A reply typed in the window reached the
+socket. Three reads — `reviews.open`, `reviews.diff`, `repositories.list` —
+produced no events at either end, which is the check that matters most, because
+an event per read is a refetch storm that looks exactly like working software.
+
+And the part a person actually sees: with the conversation tab open on review 1,
+a comment written over the socket **appeared in the window with nothing
+touching it** — no focus, no navigation, no fifteen-second wait. That is the one
+step that would still have been missing if the scoping were wrong, and nothing
+earlier in the script would have noticed.
+
+**What is still a poll, deliberately.** Everything. The fifteen seconds,
+`onErrorRetry`, `revalidateOnFocus` and M4.5's banner are untouched, and the
+application with `core/events.ts` deleted is M5 exactly — slower, never wrong.
+That is the property "additive" has to mean, and it is worth checking rather
+than asserting: `mutate` on a key with no subscriber does nothing at all, so an
+event for a review nobody has open costs one map lookup and produces no read.
+
+**M6.2, done on the Mac, 11 September.** The channel from M6.1 is per process,
+and the agent is in a different one. `core/daemon-runtime.ts` argued years of
+this repository's thinking into one paragraph — the MCP server opens SQLite
+directly and never routes reads through a running GUI, so quitting GitWarren
+does not stop an agent working — and the cost of that, which nothing had had to
+pay before, is that `emitEvent` in the MCP process reaches nobody.
+
+**The poke is a `POST` to the owner, and the argument for it is that nothing had
+to be invented.** `daemon-runtime.json` already names the owning pid and its
+`linkPort`; the owner is already serving `core/web/handler.ts` there;
+`core/web/token.ts` already writes the session token beside it at mode 0600,
+readable by exactly the principal that may poke. So the whole delta is one path,
+one header and a client that never throws.
+
+The plan's other candidate was a counter in `daemon-runtime.json`, and it is
+worse for a reason worth stating: something would have to *watch* the file.
+`fs.watch` is a different mechanism on each platform, unreliable on network
+filesystems, and a poll underneath on several of them — so a counter is a poll
+with extra steps, dressed as a push. The file stays what it has always been, a
+published fact read fresh on every use.
+
+**It breaks a property `handler.ts` had held since M3, so the exception is
+written into that file's header rather than left to be found.** Everything
+behind that gate was a read; this is the one write. Three independent locks, and
+the interesting part is that each answers a different question: the token asks
+whether the caller was *pointed at* GitWarren; `Host` and `Origin` ask whether
+it is a web page, which is the attacker `origin.ts` was built against; and a
+closed vocabulary decides what may go on the bus here rather than letting a
+caller's string decide. `host.state` is refused by name — it is minted by this
+install's own pool from a connection it is holding, and nothing outside the
+process has any evidence about it.
+
+The honest bound is in the module: a local process running as the user can
+already open the database, so the worst this endpoint grants is making a window
+re-read something it could have caused by writing a row. The token is not
+authentication of a person and `token.ts` never claimed it was.
+
+**A host with no owner has no push, and that is the design.** A daemon spawned
+over `ssh` or `wsl.exe` binds nothing and writes no runtime file — deliberately,
+since M2 — so an agent on a machine reached that way finds no owner, pokes
+nobody, and the GUI notices on its next poll. The remedy is not a second
+mechanism; it is M6.3's toggle, which gives that machine an owner and a socket
+to push down. Saying so is better than building a channel for the case where it
+is off.
+
+**Verified against a real MCP session, `scripts/verify/m6-2.mjs`.** Not the
+services called directly: the poke lives in `runWrite`, after the service call
+and inside the agent boundary, so a harness that skipped the tool call would
+have proved nothing. An agent's `add_review_comment` reached the window's
+carrier in **12 ms** as `{event: "comments.changed", data: null}`, and with the
+conversation tab open the comment appeared with nobody touching the window. Two
+agent *reads* produced no events, which is the check that matters most.
+
+And the property the whole arrangement exists to protect, checked rather than
+assumed: an MCP server started against a data directory nothing owns answers its
+tools normally. No owner is the common case, not an error.
+
+**Two things bit, and one of them was a real bug.**
+
+*A refusal nobody receives is not a refusal.* The body cap destroyed the request
+socket the moment it was passed, which took the connection down *before* the
+`413` could be written — so the caller saw `other side closed` where it should
+have seen a status it could read. Found by the test rather than by reading, and
+the fix is an ordering: stop accumulating (which is what bounds the memory),
+settle immediately rather than waiting for an `end` an endless body will never
+send, answer, and only then hang up. It is the same shape as M4.1's
+`diagnostics()` lesson from the other direction — the useful thing and the
+teardown are in a race, and the teardown must lose.
+
+*A protocol change is a protocol change even when both ends are on this
+machine.* The first run failed with `405 Allow: GET, HEAD` from an app that was
+perfectly healthy: it was running the build from before the notify path existed.
+M4.5 and M5 were the only slices with nothing to say about version skew, and
+this is the cheapest possible version of it — two processes from the same
+checkout, one of them stale. Every slice from here needs the app rebuilt and
+restarted before it is asked anything, and a host reinstalled before it is.
+
+**M6.3, done on the Mac against the real tailnet, 11 September.** The biggest
+slice, and the one where the plan's own wording turned out to need checking
+against the machine.
+
+    core/tailnet.ts        what Tailscale knows, asked rather than assumed
+    core/web/exposure.ts   one answer, for three layers that need the same one
+    core/web/origin.ts     a second authority, and a different question on it
+    core/web/handler.ts    the gate, satisfied two ways and never one for the other
+    mcp/gui-link.ts        `webUrl`, when there is one
+    features/settings/tailnet-panel.tsx   the switch
+
+**A second authority, not a second server.** `tailscale serve` proxies from the
+tailnet *to loopback*, so a request from a phone arrives on 127.0.0.1 with
+`Host: mac.tail688c0c.ts.net:41427`. There is no socket to tell the two apart
+by; the header is the whole difference. That makes this a change to
+`isAllowedHost` rather than a listener beside it, and everything `origin.ts`
+already said stays true - a browser cannot change `Host`, so requiring it to be
+one of the two we hand out forecloses rebinding on both.
+
+**The token and the identity header answer different questions, and a request
+satisfies one or the other.** Written into `isTailnetOwner` rather than only
+into this document, because it is the thing most likely to be undone by somebody
+being helpful. `token.ts` asks *did the user point something at GitWarren, or
+does this merely know the port* - about intent, on a machine where every process
+is already the user. The header asks *is the person at the other end the owner* -
+about principal, on a network where intent cannot be checked at all. So a token
+presented on the tailnet authority is **ignored rather than honoured**: a token
+minted on the Mac is not evidence about the person holding a phone. `token.ts`
+is untouched, and M4.5's finding about per-launch minting still stands exactly
+as it did.
+
+The honest bound is in the module rather than implied: a *local* process can set
+the header itself with a tailnet `Host` and get in without the token. It gains
+nothing - it can already read the 0600 token file and open the database - and it
+is the same principal `token.ts` says loopback has. The door that matters stays
+shut, because a web page can set neither `Host` nor `Tailscale-User-Login`,
+both being forbidden header names.
+
+**`webUrl` is derived from what happened, not from the plan's spelling.** The
+plan writes it `https://<host>.<tailnet>.ts.net/review/4/…`. M6.0 found that
+this tailnet has no HTTPS at all, so a URL assembled by convention would have
+been handed to an agent, handed to a person, and refused to open, with nothing
+anywhere having warned. `serveTailnet` asks for HTTPS, falls back to HTTP, and
+reports which it got; the panel and the MCP result both show what the machine
+said. A tailnet that enables certificates later gets `https` on the next toggle
+with no code change.
+
+It also carries the *mount*, which is not cosmetic: the app serves the web build
+at `/app/` and the daemon at `/`, so a URL naming only the origin would land a
+phone on the Electron link page rather than in the app.
+
+**The route in a `webUrl` is an ordinary app hash, and that is M2's two
+notations finally paying off.** A loopback link's fragment is `h=<id>/review/4`
+- a *deep link waiting to be assembled*, handed by the page to a local
+GitWarren which then decides whose review it is. A tailnet URL is not waiting
+for anything: the server answering it is the machine that owns the review, so
+the fragment is `#/reviews/4/conversation` with no host segment, because there
+is no other machine in the story. `deep-link.ts` predicted in M2 that those two
+"stop being the same machine in M4"; this is where they stop.
+
+**The switch is `hosts.setTailnetExposure`, and the prefix is the point.**
+Turning exposure on is genuinely an *act* on a machine, which is the thing the
+dispatcher may never let travel - and it does not, because `isLocalOnly` refuses
+the whole `hosts.` prefix. So a browser tab can expose the install that served
+it, which is exactly what the person running `gitwarren serve` on a headless box
+needs, and a GUI on the Mac cannot reach across and start `tailscale serve` on
+the PC. M5.2 made the same argument for `hosts.distros` and this is the harder
+case it was rehearsing for.
+
+**Verified two ways, and the second one is the one that mattered.**
+`scripts/verify/m6-3.mjs` forges headers against the running app and checks the
+refusals: exposure off is `403` on the tailnet authority; the owner is `200`
+with no token; another login is `401`; no header is `401`; a token on the
+tailnet authority mints no session; an identity header on *loopback* grants
+nothing; the poke endpoint is `404` there; and turning the switch off takes the
+authority and the published `webRoot` away again.
+
+Then the same thing from a machine whose header was stamped by a real
+`tailscaled` rather than by the test: from `pc-wsl`, `GET
+http://mac.tail688c0c.ts.net:41427/app/` answered **200**, and
+`/gitwarren/app-info` came back with the Mac's instance id - a second computer,
+through the proxy, through the gate, with no configuration on either side beyond
+the switch. And the half that could have failed silently: the same request with
+upgrade headers answered **101 Switching Protocols**, which is M6.4's carrier
+proved before a line of it was written.
+
+**One thing bit, and a test found it rather than a machine.** `isAllowedOrigin`
+accepted *either* authority's origin on *either* authority, so a page on
+loopback could act on the tailnet authority. Nothing escalated - both pages are
+ours, and both had already got through the gate - but the shape was wrong, and
+what makes it worth recording is that the comment above the function already
+said the right thing ("what neither may be is *the other one*") while the code
+did not. A page acts on the server that served it; the origin check now takes
+which authority the request arrived at and accepts exactly one value. The next
+authority added would have been wrong the same way.
+
+**M6.4, done on the Mac against the real tailnet, 11 September.** The third
+`HostConnection`, and the first that does not start a process. `ssh.ts` and
+`wsl.ts` both spawn `gitwarren serve --stdio` and own its lifetime; here the
+daemon was running before this app opened and will still be running after it
+quits.
+
+M5's extraction earned its keep: `core/hosts/carrier.ts` is used rather than
+paralleled, `createStdioClient` is reused for something that is not a pipe at
+all, and `core/hosts/pool.ts` gained a `case` and nothing else. Everything about
+*when* to connect - the idle timeout, the backoff ladder, the once-per-
+generation failure count - applied unchanged to a carrier it was written years
+of milestones before.
+
+**What a socket has instead of stderr and an exit.** The other two carriers
+explain a failure from the last few lines the far end printed, and wait for an
+exit to get them. There is no such stream here, and the substitutes are
+better: the HTTP status of a refused handshake, and the close code of a
+connection that stopped. Both arrive *after* the event that made anyone ask,
+which is the M4.1 lesson in a new shape, so `diagnostics()` waits the same
+`EXIT_GRACE_MS` for the same reason.
+
+The statuses need translating, and that is the part worth having written. A
+`401` over the tailnet is never about a token - the token is not consulted on
+that authority at all - so the sentence is *"pc-wsl does not recognise you as
+its owner. Both machines have to be signed in to the same Tailscale account."*
+A `403` means the switch is off over there, and says so.
+
+**And a heartbeat, for a reason the server's does not cover.**
+`core/rpc/websocket.ts` has pinged since M3 with a comment predicting that
+half-open connections would be "Tuesday" over the tailnet. That one protects the
+*server* from tabs that went away. This end needs its own, because the thing
+M6.5 is about is a machine switched off with nobody looking at it - and a
+carrier that only learns from requests would learn nothing, there being no
+requests. Ten seconds between pings, thirty seconds of silence before the
+connection is given up on.
+
+**Installing onto a listening host is refused, and it is not a gap.** `ssh` and
+`wsl.exe` reach a machine by starting a process on it, which is what makes an
+installer possible; a WebSocket reaches a daemon, and everything a daemon can be
+asked is a method on the dispatcher - which may never start a process. A
+listening host is one that already has GitWarren on it *by construction*: if it
+did not, there would be nothing to connect to. The message says to update it at
+that machine, or to add it as an SSH host.
+
+**The target is stored as an origin, not as typed.** `pc-wsl` and
+`http://pc-wsl:41427` are the same machine, and letting both into the table
+would be two rows the unique index cannot see are one - caught later by M4.1's
+collision report, far later than it needs to be. So `normaliseTarget` runs on
+add, the stored value is what the carrier uses, and a host that worked yesterday
+is not re-guessed today. That last point is M6.0's finding again: whether a
+tailnet can do HTTPS is a property of the *tailnet*, so the scheme is a fact to
+be remembered rather than a default to be applied.
+
+**Verified over a genuine tailnet hop.** `scripts/verify/m6-4.mjs`, with this
+install added as a websocket host under its own MagicDNS name: the request
+leaves the app, goes out to `tailscaled`, comes back through `tailscale serve`
+to loopback with an identity header, through the gate, and is answered. **48
+ms.** The instance id and the daemon version were learned and written back, the
+install attempt was refused with `FORBIDDEN`, `hosts.list` was answered locally
+rather than forwarded, and a name that does not resolve failed with *"could not
+be found. It may be off the tailnet."*
+
+Both ends being this machine makes it a smaller test than the milestone's verify
+line and not a fake one: every part between them - the proxy, the header, the
+gate, the socket - is the real thing, and none of it knows the two ends are
+related.
+
+**Two things bit, and the first is the more embarrassing.**
+
+*A carrier that refuses the request that caused it to exist is not a carrier.*
+The pool opens a connection *because* something asked a question, so the first
+request is always in flight before the handshake finishes - and every one of
+them failed in five milliseconds with "the connection is not open". This is
+written down in `web/carrier.ts`, in as many words, as the first of the three
+things a socket has that an IPC channel does not; it was written at M3 and had
+to be learned again here by watching it fail. Frames are queued until `open` and
+flushed, and the queue is dropped rather than drained if the socket dies, because
+retrying is the carrier deciding what a missing answer meant.
+
+The fix improved the diagnosis for free, which is the tell that it was the right
+one: a name that does not resolve used to report "not open" - true, useless, the
+exact failure mode M4.1's `diagnostics()` exists to prevent - and now reports
+what DNS said, because the request waits long enough to be told.
+
+*`tailscale serve` needs root on Linux, and the app was silent about it.* On
+this Mac the command succeeds as the user. On `pc-wsl` it refuses with *Access
+denied: serve config denied* and names the remedy - `sudo tailscale set
+--operator=$USER`, once. `core/tailnet.ts` was swallowing every failure equally,
+which is right for a *read* (not installed, not logged in and daemon-down are
+one answer: no tailnet here) and wrong for a *write*: the switch sprang back
+with no explanation, the user had done nothing wrong, and the fix was one
+command the tool had already printed. Writes now keep their failure text and
+`setExposed` throws it, so the panel says it.
+
+Worth noticing that this is invisible on the machine most likely to be
+*developed* on and waiting on the machine most likely to be a *host*. It is the
+same shape as M5.0's `ci.yml` finding one layer up.
+
+**M6.5, done on the Mac against `pc-wsl`, 11 September.** The milestone's verify
+line, minus the phone, and the slice where everything built so far turns out to
+be one thing.
+
+**The stdio server sends its first unsolicited frame, and it cost one line.**
+`subscribeToEvents(write)` in `core/rpc/stdio.ts`, and the reason it is one line
+is a decision made at M1: an `RpcEvent` has no `id`, and the reader on the other
+end has been asking `isRpcEvent` about every frame since M4 without one ever
+being true. The comment there promised that "the message simply arrives". It
+does. This is the direction nothing had exercised, and the protocol was already
+shaped for it.
+
+**The pool is the only layer that can say which machine an event is about, and
+that is why the tagging lives there.** A daemon announcing `comments.changed`
+means "on me" - it cannot know what instance id this install files it under,
+because it may be reached by two GitWarrens at once, each with its own row. The
+association is the *connection the message came down*, and connections are what
+the pool holds. So `routeFor` carries the instance id now, and the pool stamps
+it on the way through. An untagged event would reach the renderer meaning "this
+install" and refresh the wrong machine's screens while looking entirely healthy,
+which is the failure `renderer/lib/event-scope.ts` has a test for from the other
+end.
+
+**`onStateChange` is rendered at last, and the four-milestone delay is the point
+rather than an oversight.** It was written at M4.1 for a banner; M4.5 declined
+to use it and wrote down why; M5 proved the banner carrier-agnostic without it.
+None of that is undone here. M4.5's banner is still raised by request
+*outcomes*, in `renderer/lib/host-reachability.ts`, and this event does not
+touch it.
+
+What is new is the case none of them could reach. For most of M4 the pool only
+learned anything by *connecting*, so a machine nobody was asking about was a
+machine nothing could say anything about - the hook had nothing to report, not
+just nowhere to report it. `core/hosts/websocket.ts` is what changes that: a
+listening host holds an open socket, so a machine that goes away is an event on
+this side with no request outstanding and no screen open on it.
+
+The bound is recorded rather than hidden. The pool still hangs up after
+`IDLE_TIMEOUT_MS`, so `host.state` can only speak for a host something has asked
+about in the last ten minutes. An always-open socket to every host would be a
+connection to every machine on the list, which is exactly what
+`core/hosts/pool.ts` exists to avoid and what M4.3 refused to do for a home
+screen.
+
+**Verified end to end, four hops, all of them real.** The agent's MCP process on
+`pc-wsl` pokes that machine's own daemon over its loopback port; the daemon
+emits on its own bus; `serveWebSocket` writes an `RpcEvent` down the socket the
+Mac is holding; the Mac's pool stamps it with `4e0b0adb…` and puts it on the
+Mac's bus, where the window is listening.
+
+A comment written by an agent on the PC reached the Mac's carrier in **395 ms**,
+tagged with the PC's instance id, carrying `data: null`. With the review open at
+`#/h/4e0b0adb…/reviews/2/conversation`, the next one **appeared on the Mac with
+nobody touching the window**.
+
+Then the other half. Back on the home screen, with nothing asking that machine
+anything, the daemon on `pc-wsl` was stopped: `host.state` arrived on the Mac
+**216 ms later**, and the host list said *The connection to
+pc-wsl.tail688c0c.ts.net:41427 was lost.* Nothing failed, because nothing had
+asked - which is the whole of what this slice adds, and is why the verify line
+says "turn the PC off" rather than "open a review and turn the PC off".
+
+Worth separating the two shapes of going away, because the number above is only
+one of them. Stopping a process closes its socket, and TCP says so immediately -
+hence 216 ms. A machine that is unplugged or frozen says nothing at all, and is
+noticed by `LIVENESS_TIMEOUT_MS` instead: up to thirty seconds. Both are
+"within seconds"; only the first is within a quarter of one, and a reader
+deserves to know which they are looking at.
+
+**And one thing about the harness rather than the app.** The first attempt drove
+the PC's MCP server by piping a `printf` through `ssh`, and it silently wrote
+nothing. The JSON is full of quotes and braces, and every layer between the two
+machines wanted its own say about them - a template literal, Node's argv, the
+local shell, `ssh`'s own concatenation of its arguments, and the remote *zsh*
+that M4.2 found is the login shell on that box. A script file crosses once and
+is read by `sh`. It is the same lesson M5.1 learned about `wsl.exe --`, in a
+place where it cost a confusing half hour rather than a bug.
+
+**M6.6, done on the Mac against the real tailnet, 11 September.** "The PC
+appears on the Mac with no configuration", and the design work was all in the
+second half of that sentence rather than the first.
+
+**What "no configuration" constrains is what the *user* types, not what the app
+does while nobody is watching.** So discovery runs when somebody opens the Hosts
+screen, or presses "Look again", and at no other time - no timer, no startup
+scan, no revalidation on focus. Probing every peer on a schedule would be a
+connection to every machine you own, which is what `core/hosts/pool.ts` exists
+to avoid and what M4.3 refused to do to render a home screen.
+
+The SWR options on `CACHE_KEYS.discovered` say so explicitly rather than by
+omission - `revalidateOnFocus: false`, `revalidateIfStale: false`,
+`refreshInterval: 0` - because this is the one read in the application that
+costs a connection attempt per peer, and a default that is right everywhere else
+is wrong here.
+
+**The probe is a `GET`, not `app.instance` over a carrier.** A method needs the
+socket, the socket needs an upgrade, and that is a lot of ceremony to ask of
+peers that will not answer - but the better reason is what it *means*: a probe
+is asked of machines this install has no relationship with, and opening a
+carrier to one is a stronger act than asking whether anybody is home. It is
+`WEB_PATHS.discover`, behind the same gate as everything else, so on the tailnet
+authority it requires the owner's login and only the owner's own devices can
+learn that a machine runs GitWarren. What it answers is `HostIdentity` - the
+same shape `app.instance` returns, shared rather than rebuilt, because it is the
+same question asked before there is a connection rather than after.
+
+**It proposes; it never adds.** `isLocalOnly` refuses the whole `hosts.` prefix
+so a hub cannot be talked into becoming a mesh, and a discovery that inserted
+rows would have walked around that from the other side.
+
+**And a machine you already have is shown rather than hidden, naming the row.**
+This is the case the brief asked to be checked and it is not hypothetical:
+`pc-wsl` is already an `ssh` row on this Mac from M4 and it is the same box.
+Dropping it from the list would be M5.2's rejected blocklist all over again - a
+listing that silently omits rows is one you cannot trust when what you wanted is
+missing. So it appears with *Already added as pc-wsl* where the button would be.
+M4.1's collision report says the same thing on connect, after an insert; here
+the instance id arrived with the probe, so it can be said before anybody presses
+anything.
+
+**Verified with an empty host list.** `scripts/verify/m6-6.mjs`: nothing
+configured, `hosts.discover` found `pc-wsl.tail688c0c.ts.net` running
+0.1.7-beta.1 and reporting `4e0b0adb…`; this Mac was not proposed to itself;
+adding the proposal produced a working host on the first probe with the instance
+id discovery already knew; a second scan reported it as *Already added as
+pc-wsl*; and with the row replaced by an `ssh` row for the same machine, it was
+still reported as already added rather than offered as new.
+
+**The estimate in the plan was wrong, and it is left visible.** That paragraph
+said a peer with nothing on the port costs "a refused TCP connect in single-digit
+milliseconds", so the bill would be "nine cheap refusals". Measured: the phone
+on this tailnet takes **768 ms** to refuse, and a full scan of four nodes takes
+**1046 ms**. Refusing means being *reached* first, and on a tailnet that is NAT
+traversal or a relay before there is anything to refuse with.
+
+So the honest description of the cost is the opposite shape: not many small
+things, but **one probe timeout, once, however many peers there are**, because
+they run in parallel. Nothing about the design changes - it was already
+parallel, already bounded, already screen-triggered - but what
+`PROBE_TIMEOUT_MS` is choosing turns out to be the duration of the whole scan
+rather than a safety net on a fast case, and the comment on it now says that.
+The guess was wrong in a way that would have been invisible on a LAN and is the
+first thing anybody notices on a tailnet, which is the argument for measuring
+against the real one in one sentence.
+
+**M6.7, done on the Mac against `pc-wsl`, 11 September.** Two things that had
+been waiting for the rest of the milestone to exist, and the words.
+
+**A link naming another install finally opens something.** `main/deep-link.ts`
+has been sending those to the home screen since M2, with a log line saying
+*"reviews on other hosts arrive in M4"* - which they did, three milestones ago,
+while that line went on discarding them. M4.3, M4.4 and M5.3 each noticed it and
+each deferred, reasonably: nothing before the tailnet produced a link that named
+another machine, because a link is minted by the install that owns the review
+and there was no ordinary way for one to travel.
+
+The change is to hand the route over *with* its host segment rather than
+stripping it, in both shells - `main/deep-link.ts` for the window,
+`web/loopback-fragment.ts` for a tab. What is worth noticing is that this
+*strengthens* the rule the old behaviour existed for rather than relaxing it.
+The thing that must never happen is opening our own review 4 because the link
+said 4: ids are per host, so that shows the wrong review with no sign of it.
+Landing on the home screen avoided that; keeping the segment makes it
+unrepresentable, because the route says whose review it is and
+`core/hosts/router.ts` either sends the reads to that machine or fails naming
+it. The test that has guarded this since M2 now asserts the stronger thing, and
+a second one asserts that what comes out is `#/h/<id>/reviews/2/files` and could
+not be read as `#/reviews/2/files` by anything.
+
+No check that the host is *known*, deliberately. `requireInstance` already
+refuses by name when the reads go out, and its sentence names the id - which is
+the only thing a person can compare against their Hosts screen. Guessing earlier
+would replace a specific answer with a shrug, and in the browser shell it would
+also mean an asynchronous question asked before the app has booted.
+
+**`webUrl` reaches an agent, and both links sit side by side.** From the PC's own
+MCP server, `list_reviews` now answers:
+
+    guiUrl: http://127.0.0.1:41427/#h=4e0b0adb…/review/2/conversation
+    webUrl: http://pc-wsl.tail688c0c.ts.net:41427/#/reviews/2/conversation
+
+The two notations M2 separated, doing the two different jobs it separated them
+for. The loopback fragment is a *deep link waiting to be assembled* - the page
+at that address hands it to whichever GitWarren is on the machine that clicked,
+which is why it carries the instance id. The tailnet URL is not waiting for
+anything: the server answering it is the machine that owns the review, so the
+route is an ordinary app hash with no host segment, because there is no other
+machine in the story.
+
+Fetched from the Mac - a different device from the one serving it - that URL
+answers **200** with the web build and its JS bundle, with no token anywhere: the
+tailnet is the credential, and `tailscale serve` supplies the identity the
+loopback token supplies at home.
+
+**The words.** The README's tagline moves from *"Single user, single machine, no
+server, no account"* to *"Your machines, your agents, no one else's server"*,
+with a second paragraph saying the thing that actually changed - reviews live on
+the machine the code is on, reached over SSH, `wsl.exe` or your own tailnet,
+with nothing replicated, relayed or stored anywhere but computers you already
+own. `package.json`'s description follows it.
+
+*"Nothing is pushed to the UI"* is retired from Known limitations, and what
+replaces it is narrower than "live updates now work", because that would not be
+true: a host reached over SSH or `wsl.exe` has no process of its own to push
+from, so there the poll is still how the window finds out. Two *new* limitations
+go in beside it, both found during this milestone: a host is only greyed if
+something has asked it something in the last ten minutes, and `tailscale serve`
+needs `--operator` on Linux.
+
+**The site is a separate repository and is deliberately not in this PR.**
+`gitwarren-site` carries the same claim in at least `public/llms.txt`
+("no account, no server and no telemetry. State lives in one SQLite file on the
+machine"), `src/pages/privacy.astro` and `design/canvas/Blueprint.dc.html`
+("Local only: no server, no account, nothing cached"). Every one of those is
+still true of a single-machine install and is now incomplete rather than wrong,
+which is the kind of copy that needs a person deciding the phrasing rather than
+a mechanical substitution. Naming the files here is the useful half.
+
+**The gap table was re-read rather than glanced at, and four rows changed.**
+*Disconnection* now says what M6 actually contributed, which is only the half
+that has no request to learn from - M4.5's banner is still the mechanism for
+everything a screen can see. *Which GUI a link opens* gained the cross-install
+link above. *Host-scoped routes and IDs* gained M6, because the instance id is
+what decides four separate things here that it decided none of before: routing a
+link, excluding this machine from its own discovery, tagging an event, and
+refusing one box added twice.
+
+The fourth is the one that was not a formality. *Version skew between hosts* was
+`M4` and is now `M4, M6`, for two reasons. An unknown *event name* is ignored by
+a receiver, which is the protocol's standing rule arriving in the one direction
+nothing had exercised. And M6 found a gap in the *mechanism* rather than the
+design: `hosts.install` decides by version *string*, so a host running a
+same-versioned build from before a milestone answers `already-current` and is
+not upgraded. `force` is the existing way out and was needed twice in this
+milestone. A pre-release that changes methods without changing its version is
+the case that is not covered, and it is now written down where somebody will
+find it.
+
+**One thing bit, and an agent would have seen it before a person did.**
+`list_reviews` and `list_review_comments` build their links inline rather than
+through the two wrappers, and the change from `guiUrl: links.review(id)` to
+`...links.review(id)` was applied to the wrappers and missed at those two sites.
+The result was a payload with `guiUrl` nested inside `guiUrl` and `webUrl`
+buried under it - valid JSON, no error anywhere, and a link an agent would have
+handed over as `[object Object]`. Found by reading a real tool result off the
+real machine rather than by a type error, because `WithGuiUrl<T>` is a
+structural type and a nested object satisfies nothing it forbids.
+
+And a smaller one worth its line: the first attempt to check the fix reinstalled
+the daemon from a tarball built without `npm run build:mcp`, so the PC was
+running the *old* MCP bundle inside a new tarball and reported the bug as
+though it were unfixed. The tarball script's own header names the three builds
+that have to precede it; the lesson is the M6.2 one again, one layer down - a
+protocol change is a protocol change even when both ends came from the same
+checkout.
+
+**M6 is complete, with one part of the verify line left for a person.** From the
+Mac, a machine on the tailnet is *found* rather than typed in; it is reached
+over a socket rather than a process started on it; a comment an agent writes
+over there appears here in a quarter of a second; switching it off greys it in
+about the same, with nothing open on it and nothing having asked it anything;
+and a review on it has a URL that opens in a browser on any device the owner is
+signed in on.
+
+The verify line, run end to end on 11 September:
+
+| | |
+| --- | --- |
+| PC appears on the Mac with no configuration | `hosts.discover` found `pc-wsl.tail688c0c.ts.net` with an empty host list and nothing typed; adding the proposal worked on the first probe. |
+| An agent comment shows on the Mac within a second | **261 ms**, four hops, tagged `4e0b0adb…`, and on the open review with nobody touching the window. |
+| Turn the PC off: greyed within seconds, no stale data | **173 ms**, from the pool noticing its own socket rather than from a failed request. The host list said *The connection to pc-wsl.tail688c0c.ts.net:41427 was lost.* |
+| Phone on the tailnet opens a `webUrl`, leaves a comment, the agent reads it | The PC's own agent emits `webUrl: http://pc-wsl.tail688c0c.ts.net:41427/#/reviews/2/conversation`, and that URL serves the web build and its bundle to a *different device* with no token. **Opening it in a phone's browser is the one step nothing here could drive**, and is recorded as unverified rather than claimed. |
+
+**What M6 did not change, and that is most of the point.** The fifteen-second
+poll, `onErrorRetry`, `revalidateOnFocus`, M4.5's banner and
+`renderer/lib/host-reachability.ts` are all exactly as M5 left them. Delete
+`core/events.ts` and this application is M5: slower, never wrong. That is what
+"additive" had to mean, and it is checked rather than asserted - `mutate` on a
+key with no subscriber does nothing at all, so an event about a review nobody
+has open costs one map lookup.
+
+**Three carriers now, and the contract held.** `core/hosts/carrier.ts` was
+extracted in M5 with the guess that a third implementation would be a *user* of
+it rather than a parallel one, and that turned out to be true in the place it
+mattered least and the place it mattered most: the pool gained a `case`, and
+`createStdioClient` - written for a pipe, reused for `wsl.exe` - was reused
+again for something that is not a pipe at all. The one thing the new carrier
+could not inherit was `diagnostics()`'s *source*, there being no stderr; it has
+an HTTP status and a close code instead, which are better, and which arrive
+after the failure in exactly the way M4.1 discovered an exit status does.
+
+**Four things are worth keeping separately from the slices.**
+
+*The two questions that must not be collapsed stayed uncollapsed, and the code
+says which is which.* `core/web/token.ts` asks about *intent* on a machine where
+every process is already the user; `isTailnetOwner` asks about *principal* on a
+network where intent cannot be checked. A request satisfies one or the other,
+a token on the tailnet authority is ignored rather than honoured, and an
+identity header on loopback grants nothing. `token.ts` is untouched, so M4.5's
+finding about per-launch minting still stands exactly as written.
+
+*Two of the four things that bit were already written down in this repository.*
+The WebSocket carrier refused the very request that caused it to exist -
+`web/carrier.ts` names that as the first of the three things a socket has that
+an IPC channel does not, and has since M3. And `isAllowedOrigin` accepted either
+authority's origin on either authority, while the comment directly above it said
+"what neither may be is *the other one*". Both were found by running the thing.
+The lesson is not "read more carefully"; it is that a prose invariant and a
+predicate drift apart silently, and only an execution notices.
+
+*Version skew is a mechanism problem now rather than a design one.* M4.1–M4.4
+each needed a reinstall and each knew it. M6 needs one too - it adds four
+methods, an endpoint and an event - but `hosts.install` compares *version
+strings*, and a pre-release that changes its protocol without changing its
+version answers `already-current` and does nothing. `force` is the way out and
+was needed twice. Recorded in the gap table rather than fixed here, because the
+fix is a question about what identifies a build and that is a decision rather
+than a patch.
+
+*One estimate in this document was wrong and is left visible.* The discovery
+section predicted that a peer with nothing on the port would refuse "in
+single-digit milliseconds"; measured on the real tailnet it takes about 800 ms,
+because refusing means being reached first. Nothing about the design changed -
+it was already parallel, bounded and screen-triggered - but the *shape* of the
+cost did, from "many cheap refusals" to "one probe timeout, once, however many
+peers there are". Wrong in a way that would be invisible on a LAN and is the
+first thing anyone notices on a tailnet, which is the argument for verifying
+against the real one in a sentence.
+
+**And the thing that is still owed, again.** `ci.yml` runs ubuntu only. M5
+recorded that every Windows-shaped failure in this repository had been found by
+a person sitting at a Windows machine; M6 adds a Linux-shaped one to the pile -
+`tailscale serve` needs `--operator` there and succeeds silently as the user on
+macOS, so the switch works on the machine most likely to be *developed* on and
+fails on the machine most likely to be a *host*. A CI job that runs on more than
+one platform is the honest fix, it is a change to how this project is tested
+rather than to what it does, and it is still deliberately not part of a
+milestone.
+
 ## Agent setup
 
 One sentence instead of a snippet per harness. Agents know their own
@@ -3185,14 +4123,14 @@ least one alternative.
 | Gap | Closed in | How |
 | --- | --- | --- |
 | Chattiness over a network | S5, M1, M3 | Measure, then coarse endpoints; a multiplexed WebSocket removes per-request setup. |
-| Disconnection | M4, M6 | Fail-fast errors, stale banner, reconnect with backoff, heartbeats, refetch on reconnect. |
+| Disconnection | M4, M6 | Fail-fast errors, stale banner, reconnect with backoff, refetch on reconnect — all M4.5, all learned from request *outcomes*. M6 adds only the half that has no request to learn from: a listening carrier holds a socket with a heartbeat on it, so a machine nobody is looking at is greyed too (216 ms, measured). Bounded by the pool's ten-minute idle hang-up. |
 | Colleague permissions | — | Non-goal. Object-centric RPC from M1 keeps the door open. |
 | Git argument and path hardening | M0 | Hygiene now; not a security boundary while every caller is the owner. |
-| Host-scoped routes and IDs | M0, M4 | Optional host segment in the route grammar; hosts table; links carry the instance id. |
-| Which GUI a link opens | M2, M6 | Loopback resolves on the clicker's machine; tailnet URL for the phone. |
+| Host-scoped routes and IDs | M0, M4, M6 | Optional host segment in the route grammar; hosts table; links carry the instance id. M6 is where that id finally decides something in every direction: it routes a link across installs, it excludes this machine from its own discovery, it tags an event with the machine it happened on, and it is what refuses one box added twice under two carriers. |
+| Which GUI a link opens | M2, M6 | Loopback resolves on the clicker's machine; `webUrl` for a phone, added only while the host listens and spelled as the machine reported rather than by convention. M6.7 also made a link naming *another* install open that machine's review rather than the home screen — the host segment travels, so this install's review 4 stays unreachable by a link that said 4. |
 | Attachments across hosts | M3, M4 | Ingest on the host; HTTP for the web view, the carrier for the app. |
-| Version skew between hosts | M4 | The GUI installs the daemon version it wants; protocol version in the handshake; unknown fields ignored. |
+| Version skew between hosts | M4, M6 | The GUI installs the daemon version it wants; protocol version in the handshake; unknown fields ignored — and since M6 an unknown *event name* is ignored too, which is the same rule arriving in the one direction nothing had exercised. What M6 found is a gap in the mechanism rather than in the design: `hosts.install` decides by **version string**, so a host running a same-versioned build from before a milestone answers `already-current` and is not upgraded. `force` is the existing way out and was needed twice here. A pre-release that changes methods without changing its version is the case this does not cover. |
 | Daemon process on headless hosts | M2, M3, M4, M5 | Bundle in M2, `gitwarren service install` in M3.3, spawned on demand over SSH in M4 and through `wsl.exe` in M5 — the same installer either way, since it was written against "a machine with a shell and a `tar`". |
 | Users who will not run Electron | M3 | The same renderer served by the local daemon; the `gitwarren-cli` formula, `npx gitwarren` and the tarball, all from M3.3. |
-| A screen the size of a phone | M3.5, M6 | Files list and diff as separate screens below `lg`, composer above the keyboard, paths that wrap at their separators; the route to the device itself is M6's tailnet. |
+| A screen the size of a phone | M3.5, M6 | Files list and diff as separate screens below `lg`, composer above the keyboard, paths that wrap at their separators; the route to the device itself is M6's tailnet, where `tailscale serve` supplies identity so there is no token to get onto a phone. |
 | MCP setup per harness and on remote hosts | M2, M3, M4 | Stable launcher path plus a one-sentence prompt the agent applies to its own config. |

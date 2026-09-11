@@ -51,6 +51,7 @@ import {
   isReadMethod,
   resultOf,
   type BridgeCarrier,
+  type RpcEvent,
   type RpcMethod,
   type RpcOutcome,
   type RpcParams,
@@ -103,6 +104,25 @@ const carrier: BridgeCarrier = {
     const pending = send().finally(() => inFlight.delete(key))
     inFlight.set(key, pending)
     return pending
+  },
+
+  /**
+   * Events from this window's own main process.
+   *
+   * `ipcRenderer.on` hands the listener an `IpcRendererEvent` first, which must
+   * not reach the renderer - it carries a `sender` and a `ports` array, and
+   * passing structured clone's idea of those across `contextBridge` is at best
+   * noise. So the payload is unwrapped here, exactly as the two pushes in
+   * `shell` below do it.
+   *
+   * The event object itself is a plain `{event, data}` built by `core/events.ts`
+   * and crosses the bridge intact, which is the property `BridgeCarrier` exists
+   * to respect for the request half too.
+   */
+  onEvent(listener: (event: RpcEvent) => void): () => void {
+    const handler = (_: unknown, event: RpcEvent): void => listener(event)
+    ipcRenderer.on(IPC_CHANNELS.rpcEvent, handler)
+    return () => ipcRenderer.off(IPC_CHANNELS.rpcEvent, handler)
   }
 }
 

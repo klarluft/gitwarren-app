@@ -20,6 +20,7 @@ import { test } from 'node:test'
 import { createHostPool, BACKOFF_MS, type HostRoute } from '../pool.js'
 import type { HostConnection } from '../carrier.js'
 import { AppError } from '../../../shared/errors.js'
+import type { RpcEvent } from '../../../shared/rpc.js'
 
 const route: HostRoute = { id: 1, kind: 'ssh', target: 'xfor@pc-wsl' }
 
@@ -29,6 +30,8 @@ interface FakeHost {
   /** What the next request should do. */
   answer: () => Promise<unknown>
   closeLast: (error: AppError) => void
+  /** Push an event down the connection, as a real daemon would. */
+  pushEvent: (event: RpcEvent) => void
   open: boolean
 }
 
@@ -42,15 +45,17 @@ function fakePool(host: Partial<FakeHost> = {}): {
     connects: 0,
     answer: () => Promise.resolve([]),
     closeLast: () => {},
+    pushEvent: () => {},
     open: true,
     ...host
   }
 
   const pool = createHostPool({
     now: () => clock,
-    connect: (_route, onClose) => {
+    connect: (_route, { onClose, onEvent }) => {
       fake.connects += 1
       fake.open = true
+      fake.pushEvent = onEvent
       fake.closeLast = (error) => {
         fake.open = false
         onClose(error)
@@ -270,4 +275,100 @@ test('a fresh connection that fails is a new rung, not a repeat of the old one',
   await assert.rejects(pool.request(route, 'repositories.list'))
   assert.equal(pool.state(route.id).failures, 2)
   assert.equal(fake.connects, 2)
+})
+
+/**
+ * Events, and the one thing the pool contributes to them.
+ *
+ * The bus itself is `core/events.ts` and is tested there. What is only true
+ * here is the *tagging*: a daemon says "comments changed" and means "on me",
+ * and the pool is the only layer that knows which row that is, because it holds
+ * the connection the message came down. An untagged event would reach the
+ * renderer meaning "this install", which would refresh the wrong screens while
+ * looking entirely healthy.
+ */
+test('an event from a host is stamped with that host', () => {
+  const seen: RpcEvent[] = []
+  const { pool, fake } = fakePool()
+  const withEvents = createHostPool({
+    connect: (_route, { onEvent }) => {
+      fake.pushEvent = onEvent
+      return {
+        request: () => Promise.resolve([] as never),
+        close: () => {},
+        isOpen: () => true,
+        diagnostics: () => Promise.resolve('')
+      }
+    },
+    onHostEvent: (event) => seen.push(event)
+  })
+  void pool
+
+  const route: HostRoute = {
+    id: 1,
+    kind: 'ssh',
+    target: 'xfor@pc-wsl',
+    instanceId: 'aaaaaaaa-0000-4000-8000-000000000001'
+  }
+  void withEvents.request(route, 'repositories.list')
+  fake.pushEvent({ event: 'comments.changed', data: null })
+
+  assert.equal(seen.length, 1)
+  assert.equal(seen[0]?.host, 'aaaaaaaa-0000-4000-8000-000000000001')
+  assert.equal(seen[0]?.event, 'comments.changed')
+})
+
+test('an event from a machine that has never said who it is goes nowhere', () => {
+  // Unreachable in practice - a host that has not been met has not pushed
+  // anything - and dropped rather than guessed at anyway, because an event that
+  // cannot be scoped would refresh every machine's keys.
+  const seen: RpcEvent[] = []
+  const fake = { pushEvent: (_event: RpcEvent) => {} }
+  const pool = createHostPool({
+    connect: (_route, { onEvent }) => {
+      fake.pushEvent = onEvent
+      return {
+        request: () => Promise.resolve([] as never),
+        close: () => {},
+        isOpen: () => true,
+        diagnostics: () => Promise.resolve('')
+      }
+    },
+    onHostEvent: (event) => seen.push(event)
+  })
+
+  void pool.request({ id: 1, kind: 'ssh', target: 'xfor@pc-wsl', instanceId: null }, 'repositories.list')
+  fake.pushEvent({ event: 'comments.changed', data: null })
+
+  assert.deepEqual(seen, [])
+})
+
+test('a machine going away is announced even though nothing asked', () => {
+  // The whole reason `onStateChange` exists, and the case M4.5 could not cover:
+  // there is no failed request here to learn from, only a connection that
+  // ended. A listening host holds one open with a heartbeat on it, which is
+  // what makes this reachable at all.
+  const changes: { hostId: number; connected: boolean }[] = []
+  let closeIt: (error: AppError) => void = () => {}
+  const pool = createHostPool({
+    connect: (_route, { onClose }) => {
+      closeIt = onClose
+      return {
+        request: () => Promise.resolve([] as never),
+        close: () => {},
+        isOpen: () => true,
+        diagnostics: () => Promise.resolve('The connection to pc-wsl was lost.')
+      }
+    },
+    onStateChange: (hostId, state) => changes.push({ hostId, connected: state.connected })
+  })
+
+  const route: HostRoute = { id: 7, kind: 'websocket', target: 'http://pc-wsl:41427' }
+  return pool.request(route, 'repositories.list').then(() => {
+    const before = changes.length
+    closeIt(new AppError('HOST_OFFLINE', 'The connection to pc-wsl was lost.'))
+    assert.ok(changes.length > before, 'the pool said nothing when the socket died')
+    assert.equal(changes.at(-1)?.hostId, 7)
+    assert.equal(changes.at(-1)?.connected, false)
+  })
 })

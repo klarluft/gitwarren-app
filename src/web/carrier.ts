@@ -34,8 +34,10 @@
 import { AppError } from '@shared/errors'
 import {
   isReadMethod,
+  isRpcEvent,
   resultOf,
   type Carrier,
+  type RpcEvent,
   type RpcMethod,
   type RpcOutcome,
   type RpcParams,
@@ -68,6 +70,17 @@ export interface WebCarrier extends Carrier {
   connected(): boolean
   /** Notified whenever that changes. Returns an unsubscribe function. */
   onConnectionChange(listener: (connected: boolean) => void): () => void
+  /**
+   * Events pushed by the server on the other end. Returns an unsubscribe.
+   *
+   * Nothing is replayed after a reconnect, deliberately: an event is a hint
+   * that something changed, and a hint about a change that happened while this
+   * tab could not ask anything is worth nothing. What covers that gap is the
+   * revalidation SWR does on its own once requests start succeeding again -
+   * evidence rather than a replayed rumour, which is the same choice
+   * `failAllPending` makes above about requests.
+   */
+  onEvent(listener: (event: RpcEvent) => void): () => void
 }
 
 export function createWebCarrier(): WebCarrier {
@@ -78,6 +91,15 @@ export function createWebCarrier(): WebCarrier {
   const pending = new Map<number, Pending>()
   const queued: RpcRequest[] = []
   const listeners = new Set<(connected: boolean) => void>()
+  /**
+   * Kept apart from `listeners` above, because the two are answers to different
+   * questions and joining them would be the mistake M4.5 spent a slice on. A
+   * connection listener hears about *this tab's socket*; an event listener
+   * hears about *the data on the other end of it*. A socket that drops fires
+   * the first and must not fire the second - there is nothing to re-read while
+   * nothing can be asked.
+   */
+  const eventListeners = new Set<(event: RpcEvent) => void>()
 
   const announce = (connected: boolean): void => {
     for (const listener of listeners) listener(connected)
@@ -124,8 +146,24 @@ export function createWebCarrier(): WebCarrier {
         return
       }
 
+      if (typeof decoded !== 'object' || decoded === null) return
+
+      // An event, which is anything on this socket that is not an answer. The
+      // discriminator is shared (`isRpcEvent`) rather than "has no id", because
+      // the two ends of this socket must agree about what a frame is and one of
+      // them is a Node process - see `shared/rpc.ts`.
+      //
+      // No `host` is stamped. The server on the other end is the install that
+      // served this page, which is what "no host" means everywhere else in this
+      // app; a tab looking at a review on `pc-wsl` learns about *that* machine
+      // from the carrier the core holds to it, not from here.
+      if (isRpcEvent(decoded as RpcEvent)) {
+        for (const listener of eventListeners) listener(decoded as RpcEvent)
+        return
+      }
+
       const response = decoded as RpcResponse
-      if (!response || typeof response.id !== 'number') return
+      if (typeof response.id !== 'number') return
 
       const entry = pending.get(response.id)
       // No entry means an answer to a request this page has already given up
@@ -201,6 +239,10 @@ export function createWebCarrier(): WebCarrier {
     onConnectionChange(listener) {
       listeners.add(listener)
       return () => listeners.delete(listener)
+    },
+    onEvent(listener) {
+      eventListeners.add(listener)
+      return () => eventListeners.delete(listener)
     }
   }
 }

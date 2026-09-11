@@ -29,6 +29,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { app } from 'electron'
 import { createWebHandler, type WebHandler } from '../core/web/handler.js'
+import { configureExposure, refreshExposure, tailnetGate } from '../core/web/exposure.js'
 import { clearWebToken, mintWebToken, publishWebToken } from '../core/web/token.js'
 import { LINK_SERVER_HOST, LINK_SERVER_PORT } from '../shared/link-port.js'
 import { TOKEN_PARAM, WEB_APP_MOUNT } from '../shared/web.js'
@@ -77,11 +78,22 @@ export function startWebHandler(): WebHandler | null {
     `http://${LINK_SERVER_HOST}:${LINK_SERVER_PORT}${WEB_APP_MOUNT}/` +
     `?${TOKEN_PARAM}=${token}`
 
+  // Which mount and which port, so `webRoot` in the exposure names a URL that
+  // actually lands in the app rather than on the link page one level up.
+  configureExposure({ mount: `${WEB_APP_MOUNT}/`, port: LINK_SERVER_PORT })
+  // Read once at startup rather than assumed off: `tailscale serve` is machine
+  // state and survives a restart, so an install that was exposed yesterday is
+  // exposed now and its gate has to know before the first request. Not awaited -
+  // nothing is reachable until this server is listening anyway, and the gate
+  // reads a snapshot that is simply "not exposed" until the answer lands.
+  void refreshExposure()
+
   handler = createWebHandler({
     mount: `${WEB_APP_MOUNT}/`,
     staticRoot,
     token,
-    appInfo: describeInstall
+    appInfo: describeInstall,
+    tailnet: tailnetGate
   })
 
   console.log(`[web] the web view is at ${entryUrl}`)

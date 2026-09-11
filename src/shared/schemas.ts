@@ -106,7 +106,8 @@ export type RemoveRepositoryInput = z.input<typeof removeRepositoryInputSchema>
 export const MAX_TARGET_LENGTH = 255
 
 export const hostIdSchema = z.number().int().positive()
-export const hostKindSchema = z.enum(['ssh', 'wsl'])
+export const hostKindSchema = z.enum(['ssh', 'wsl', 'websocket'])
+export type HostKind = z.infer<typeof hostKindSchema>
 
 /**
  * An SSH destination.
@@ -162,9 +163,55 @@ export const wslDistroNameSchema = z
     message: 'That is not a WSL distribution name.'
   })
 
-/** Whichever of the two a host of this kind is addressed by. */
-export function hostTargetSchemaFor(kind: 'ssh' | 'wsl'): z.ZodType<string> {
-  return kind === 'wsl' ? wslDistroNameSchema : sshTargetSchema
+/**
+ * A machine that is listening, addressed as a name or as a whole origin.
+ *
+ * Looser than the two above and deliberately so, because what is on the other
+ * side is different in kind. An `ssh` target and a distribution name both
+ * become *arguments to a program this machine runs*, so the metacharacter
+ * refusals there are about what a string in a form can be talked into doing
+ * locally. This one becomes a URL handed to `new URL`, which parses rather than
+ * executes; there is no shell anywhere on that path.
+ *
+ * So the check is that it parses at all and names a host - and that it is not
+ * loopback, which is the one mistake worth catching in the form. Adding
+ * `localhost` as a host of *this* install would be a machine describing itself,
+ * and what it would produce is an instance-id collision with a row that does
+ * not exist yet: M4.1's report fires on connect, which is late enough to be
+ * confusing when the answer is simply "that is this computer".
+ */
+export const tailnetTargetSchema = z
+  .string()
+  .trim()
+  .min(1, 'Enter the machine, like pc-wsl or pc-wsl.tail0123.ts.net.')
+  .max(MAX_TARGET_LENGTH)
+  .refine((value) => !value.startsWith('-'), {
+    message: 'A machine name cannot start with "-".'
+  })
+  .refine(
+    (value) => {
+      try {
+        const url = new URL(/^https?:\/\//i.test(value) ? value : `http://${value}`)
+        return url.hostname.length > 0
+      } catch {
+        return false
+      }
+    },
+    { message: 'That is not a machine name or an address.' }
+  )
+  .refine(
+    (value) => {
+      const host = value.replace(/^https?:\/\//i, '').split(/[:/]/)[0]?.toLowerCase() ?? ''
+      return host !== 'localhost' && host !== '127.0.0.1' && host !== '::1'
+    },
+    { message: 'That is this computer. A host is another machine.' }
+  )
+
+/** Whichever of the three a host of this kind is addressed by. */
+export function hostTargetSchemaFor(kind: HostKind): z.ZodType<string> {
+  if (kind === 'wsl') return wslDistroNameSchema
+  if (kind === 'websocket') return tailnetTargetSchema
+  return sshTargetSchema
 }
 
 /**
@@ -883,3 +930,89 @@ export const directoryListingSchema = z.object({
 export type ListDirectoryInput = z.input<typeof listDirectoryInputSchema>
 export type DirectoryEntry = z.infer<typeof directoryEntrySchema>
 export type DirectoryListing = z.infer<typeof directoryListingSchema>
+
+/**
+ * Whether this machine is reachable on its tailnet, and where.
+ *
+ * In `shared/` rather than beside the implementation in `core/web/exposure.ts`
+ * because the renderer draws the switch and the renderer may not import
+ * `core/`. It is the same split `HostWithState` has: the shape is everyone's,
+ * and the machinery for producing it is one side's.
+ *
+ * A schema and not just a type, even though nothing validates an *outgoing*
+ * one, so that a screen on the other end of a carrier has the same guarantee
+ * about this answer as it has about every other.
+ */
+export const tailnetExposureSchema = z.object({
+  /**
+   * Whether this machine has a working Tailscale at all: installed, logged in,
+   * daemon running. False covers all three failures because no screen can act
+   * on the difference - the switch is not offered, and rule 3 says Tailscale is
+   * never a dependency.
+   */
+  available: z.boolean(),
+  /** This machine's MagicDNS name, or null. */
+  dnsName: z.string().nullable(),
+  /** The owner's Tailscale login, so a person can see whose tailnet this is. */
+  login: z.string().nullable(),
+  /** Whether the loopback port is being served on the tailnet right now. */
+  exposed: z.boolean(),
+  /**
+   * Where the web view is for a phone, mount included:
+   * `http://pc-wsl.tail688c0c.ts.net:41427/app/`. Null when not exposed.
+   *
+   * The mount is part of it because the two shells serve the app at different
+   * paths - a URL naming only the origin would land a phone on the Electron
+   * link page rather than in the app. The scheme is whatever `tailscale serve`
+   * actually managed, never assumed: see `core/tailnet.ts`.
+   */
+  webRoot: z.string().nullable()
+})
+
+export type TailnetExposure = z.infer<typeof tailnetExposureSchema>
+
+/**
+ * Turning "Reachable on your tailnet" on or off.
+ *
+ * One boolean, and it is a schema rather than a bare argument for the reason
+ * every other input here is: whoever answers re-parses what it was sent, and a
+ * method whose params were a naked value would be the one place that rule did
+ * not hold.
+ */
+export const setTailnetExposureInputSchema = z.object({
+  exposed: z.boolean()
+})
+
+export type SetTailnetExposureInput = z.infer<typeof setTailnetExposureInputSchema>
+
+/**
+ * A machine on the tailnet that answered a probe.
+ *
+ * Not a host row and deliberately shaped so it could never be mistaken for one:
+ * it has no `id`, because nothing has been added. Discovery proposes and a
+ * person decides - see `core/hosts/discover.ts` on why that line matters more
+ * than it looks.
+ */
+export const discoveredPeerSchema = z.object({
+  /** Its MagicDNS name: `pc-wsl.tail688c0c.ts.net`. */
+  dnsName: z.string(),
+  /** Where it answered, which is what becomes `hosts.target` if it is added. */
+  origin: z.string(),
+  /** Who it said it is. The only field that can tell two names for one box apart. */
+  instanceId: z.string(),
+  /** What it is running, for a person to compare against their own. */
+  version: z.string().nullable(),
+  /**
+   * The label of the row this machine is already in the list as, or null.
+   *
+   * A *label* rather than a boolean, because "you have this already" is not
+   * useful without "as what": `pc-wsl` reached over SSH and `pc-wsl` reached
+   * over the tailnet are one machine, and the question a person has is which
+   * row it is. M4.1's collision report says the same thing after an insert and
+   * a connection; this says it before either, because the probe already carried
+   * the instance id.
+   */
+  alreadyAdded: z.string().nullable()
+})
+
+export type DiscoveredPeer = z.infer<typeof discoveredPeerSchema>

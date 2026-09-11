@@ -47,10 +47,18 @@
  * not - they just turned the machine on.
  */
 import { connectOverSsh } from './ssh.js'
+import { connectOverWebSocket } from './websocket.js'
 import { connectOverWsl } from './wsl.js'
 import type { HostConnection } from './carrier.js'
+import { emitEvent } from '../events.js'
 import { AppError } from '../../shared/errors.js'
-import type { RpcMethod, RpcParams, RpcResult } from '../../shared/rpc.js'
+import {
+  RPC_EVENTS,
+  type RpcEvent,
+  type RpcMethod,
+  type RpcParams,
+  type RpcResult
+} from '../../shared/rpc.js'
 
 /**
  * How long a connection may sit unused before it is closed.
@@ -91,9 +99,26 @@ export interface HostRoute {
    * operating systems - what a host runs is discovered by asking it, never
    * declared. See the note on `hosts.kind` in `core/db/schema.ts`.
    */
-  kind: 'ssh' | 'wsl'
-  /** What that carrier is handed: an `ssh` destination, or a distro name. */
+  kind: 'ssh' | 'wsl' | 'websocket'
+  /**
+   * What that carrier is handed: an `ssh` destination, a distro name, or the
+   * origin of a machine that is already listening.
+   */
   target: string
+  /**
+   * The machine's own id, once it has said it. Null until first contact.
+   *
+   * Carried on the route rather than looked up when needed, because the one
+   * thing it is for is stamping events - and an event arrives at a moment when
+   * the only thing in hand is the connection it came down. A daemon says
+   * "comments changed" and means "on me"; it cannot say which row this install
+   * files it under, because it may be reached by two GitWarrens at once. This
+   * is the side that knows.
+   *
+   * Null is not a problem to solve. A host that has never answered has never
+   * pushed anything either, so there is no event to be unable to tag.
+   */
+  instanceId?: string | null
 }
 
 export interface HostState {
@@ -108,26 +133,46 @@ export interface HostState {
 
 export interface HostPoolOptions {
   /** Swappable for tests; the default opens a real `ssh`. */
-  connect?: (route: HostRoute, onClose: (error: AppError) => void) => HostConnection
+  connect?: (
+    route: HostRoute,
+    handlers: { onClose: (error: AppError) => void; onEvent: (event: RpcEvent) => void }
+  ) => HostConnection
   now?: () => number
   /**
-   * Notified whenever a host's reachability changes. Nothing passes it yet.
+   * Notified whenever a host's reachability changes.
    *
-   * It was written for M4.5's banner and M4.5 did not use it, which is worth
-   * recording rather than deleting. A push from here has nowhere to go: the
-   * event channel in `shared/rpc.ts` is reserved for M6 and nothing emits on
-   * it, so reaching a screen would have meant an Electron IPC channel for the
-   * window *and* a WebSocket message for a tab - two half-built event channels
-   * for one banner, which is the thing M4.2 refused to build for a progress
-   * bar. And it was not needed: a screen already asks this machine questions,
-   * so the answers it gets are the disconnection, and
-   * `renderer/lib/host-reachability.ts` reads them there.
+   * Written for M4.5's banner, unused by M4.5, and rendered at last by M6.5 -
+   * and the delay is the interesting part rather than an oversight. M4.5's
+   * banner is raised by request *outcomes*, in `renderer/lib/host-reachability.ts`,
+   * and still is: a request that failed is evidence about the screen in front
+   * of somebody, it is carrier-agnostic, and M5 proved it against `wsl.exe`
+   * with no new code. None of that is replaced here.
    *
-   * What this hook can see that a screen cannot is a host nobody is looking at,
-   * which is why it belongs to M6's `host.state` event - where a machine going
-   * away is news whether or not anything is open on it.
+   * What this hook sees and a screen cannot is a host **nobody is looking at**,
+   * and it is worth being exact about when that is a real event, because for
+   * most of M4 it was not one. This pool only learns anything by *connecting*,
+   * so a machine nobody was asking about was a machine nothing could say
+   * anything about. What changed is `core/hosts/websocket.ts`: a listening host
+   * holds an open socket with a heartbeat on it, so a machine that is switched
+   * off is noticed with no request outstanding and no screen open on it. That
+   * is the whole of what M6 adds to disconnection.
+   *
+   * The bound, recorded rather than hidden: the pool still hangs up after
+   * `IDLE_TIMEOUT_MS`, so this can only speak for a host something has asked
+   * about in the last ten minutes. An always-open socket to every host would be
+   * a connection to every machine on the list, which is what this file exists
+   * to avoid.
    */
   onStateChange?: (hostId: number, state: HostState) => void
+  /**
+   * An event a host pushed, tagged with which host it was.
+   *
+   * The pool is the only layer that can tag it. A daemon announcing
+   * `comments.changed` means "on me" and has no idea what this install calls
+   * it; the connection it came down is the association, and this file is what
+   * holds connections.
+   */
+  onHostEvent?: (event: RpcEvent) => void
 }
 
 interface Entry {
@@ -175,7 +220,8 @@ const OFFLINE = (message: string): AppError => new AppError('HOST_OFFLINE', mess
 export function createHostPool({
   connect = defaultConnect,
   now = Date.now,
-  onStateChange
+  onStateChange,
+  onHostEvent
 }: HostPoolOptions = {}): HostPool {
   const entries = new Map<number, Entry>()
 
@@ -307,14 +353,30 @@ export function createHostPool({
       entry.generation += 1
       const generation = entry.generation
 
-      entry.connection = connect(route, (error) => {
-        // The pipe died. Whether that is a failure depends on whether anything
-        // was expecting it: a connection closed by the idle timer has already
-        // been forgotten here, and must not push the host onto the backoff
-        // ladder as though the machine had gone away.
-        const current = entries.get(route.id)
-        if (!current || current.connection === null) return
-        recordFailure(route.id, current, error.message, generation)
+      entry.connection = connect(route, {
+        onClose: (error) => {
+          // The pipe died. Whether that is a failure depends on whether anything
+          // was expecting it: a connection closed by the idle timer has already
+          // been forgotten here, and must not push the host onto the backoff
+          // ladder as though the machine had gone away.
+          const current = entries.get(route.id)
+          if (!current || current.connection === null) return
+          recordFailure(route.id, current, error.message, generation)
+        },
+        onEvent: (event) => {
+          // Stamped with the instance id from the route, which is what turns
+          // "something changed" into "something changed on that machine" - and
+          // is what lets the renderer invalidate one host's keys rather than
+          // every host's. An untagged event would mean "this install", which
+          // would be precisely wrong.
+          //
+          // A host that has never said who it is cannot have pushed anything,
+          // so the null case is unreachable rather than handled: dropping it is
+          // still the right answer if it ever happens, because an event that
+          // cannot be scoped is an event that would refresh the wrong screens.
+          if (!route.instanceId) return
+          onHostEvent?.({ ...event, host: route.instanceId })
+        }
       })
     }
 
@@ -401,15 +463,19 @@ export function createHostPool({
  * Everything above is about *when* to connect, and none of it changed when M5
  * added a second way of reaching a machine - which is the whole argument for
  * the pool being a separate module from `ssh.ts`. A switch rather than a
- * registry: two carriers, and M6's WebSocket will be a third, is not a number
- * that earns indirection.
+ * registry: three carriers is not a number that earns indirection.
  */
-function defaultConnect(route: HostRoute, onClose: (error: AppError) => void): HostConnection {
+function defaultConnect(
+  route: HostRoute,
+  handlers: { onClose: (error: AppError) => void; onEvent: (event: RpcEvent) => void }
+): HostConnection {
   switch (route.kind) {
     case 'wsl':
-      return connectOverWsl({ distro: route.target, onClose })
+      return connectOverWsl({ distro: route.target, ...handlers })
+    case 'websocket':
+      return connectOverWebSocket({ target: route.target, ...handlers })
     case 'ssh':
-      return connectOverSsh({ target: route.target, onClose })
+      return connectOverSsh({ target: route.target, ...handlers })
   }
 }
 
@@ -421,4 +487,18 @@ function defaultConnect(route: HostRoute, onClose: (error: AppError) => void): H
  * and nothing above it has any reason to want that. Tests build their own with
  * `createHostPool`.
  */
-export const hostPool = createHostPool()
+export const hostPool = createHostPool({
+  // The two sources of `core/events.ts`, joined here because this is the only
+  // layer that can speak for either. `host.state` is minted by this pool from a
+  // connection it is holding; a host's own event arrives down that connection
+  // and is tagged with the machine it came from. One bus, two sources - which
+  // is the cheap answer to M4.5's objection about building two half-channels.
+  //
+  // `host.state` carries no data at all. What a screen does with it is
+  // re-read the host list, which is one local SQLite read plus a look at this
+  // pool - so putting the state on the wire would be shipping an answer the
+  // receiver is about to ask for properly anyway. See `core/events.ts` on why
+  // an event is never data.
+  onStateChange: () => emitEvent({ event: RPC_EVENTS.hostState, data: null }),
+  onHostEvent: (event) => emitEvent(event)
+})

@@ -41,6 +41,8 @@ import { hosts, type HostRow } from '../db/schema.js'
 import { hostPool, type HostRoute } from '../hosts/pool.js'
 import { installOnHost } from '../hosts/install.js'
 import { listDistros } from '../hosts/wsl.js'
+import { normaliseTarget } from '../hosts/websocket.js'
+import { refreshExposure, setExposed } from '../web/exposure.js'
 import { AppError } from '../../shared/errors.js'
 import { parseWithSchema as parse } from '../../shared/validation.js'
 import {
@@ -52,7 +54,9 @@ import {
   type Host,
   type HostWithState,
   type InstallReport,
-  type WslDistro
+  type WslDistro,
+  setTailnetExposureInputSchema,
+  type TailnetExposure
 } from '../../shared/schemas.js'
 
 function toHost(row: HostRow): Host {
@@ -74,7 +78,12 @@ function withState(row: HostRow): HostWithState {
 }
 
 export function routeFor(row: HostRow): HostRoute {
-  return { id: row.id, kind: row.kind, target: row.target }
+  // The instance id rides along since M6.5, for one purpose: an event arriving
+  // from this host has to be tagged with the machine it is about, and the pool
+  // - which is where the event lands - holds connections rather than rows. Null
+  // until the machine has said who it is, which is also exactly the window in
+  // which it cannot have pushed anything.
+  return { id: row.id, kind: row.kind, target: row.target, instanceId: row.instanceId }
 }
 
 /**
@@ -114,6 +123,17 @@ function requireRow(id: number): HostRow {
  * stopped distinguishing anything.
  */
 function defaultLabelFor(target: string): string {
+  // A websocket target is a URL, so the label people recognise is the first
+  // label of its hostname: `http://pc-wsl.tail688c0c.ts.net:41427` is `pc-wsl`.
+  // The full name is still on the row and is what gets connected to; this is
+  // only what a card says.
+  if (/^https?:\/\//i.test(target)) {
+    try {
+      return new URL(target).hostname.split('.')[0] || target
+    } catch {
+      return target
+    }
+  }
   const withoutUser = target.includes('@') ? target.slice(target.indexOf('@') + 1) : target
   return withoutUser || target
 }
@@ -212,7 +232,13 @@ export const hostsService = {
   },
 
   add(input: unknown): HostWithState {
-    const { target, label, kind = 'ssh', editorTarget } = parse(addHostInputSchema, input)
+    const { target: typed, label, kind = 'ssh', editorTarget } = parse(addHostInputSchema, input)
+    // Stored in the form the carrier will use, not in the form somebody typed.
+    // `pc-wsl` and `http://pc-wsl:41427` are the same machine, and letting both
+    // into the table would mean two rows the unique index cannot see are one -
+    // which M4.1's collision report would then catch on connect, far later than
+    // it needs to be caught.
+    const target = kind === 'websocket' ? normaliseTarget(typed) : typed
 
     try {
       const row = getDatabase()
@@ -392,5 +418,38 @@ export const hostsService = {
     }
 
     return { ...report, host: withState(requireRow(id)) }
+  }
+}
+
+/**
+ * This machine's tailnet reachability, as a method rather than a shell channel.
+ *
+ * Appended to `hostsService` rather than given a service of its own because it
+ * is the same question the rest of this file answers - how this install is
+ * reached, and by what - and because the `hosts.` prefix is what makes
+ * `isLocalOnly` refuse to forward it. That refusal is the load-bearing part: a
+ * GUI on the Mac must not be able to start `tailscale serve` on the PC.
+ *
+ * Thin, like every other entry here. The machinery is `core/web/exposure.ts`,
+ * which is also what the gate reads, so the panel and the server cannot
+ * disagree about whether this install is exposed.
+ */
+export const tailnetService = {
+  /** What is true now. Re-read from the machine, not from memory. */
+  read(): Promise<TailnetExposure> {
+    return refreshExposure()
+  },
+  /**
+   * Turn it on or off, and answer with what the machine then says.
+   *
+   * Deliberately not "answer with what was asked for": `tailscale serve
+   * --https` on a tailnet with no certificates never returns, so the request
+   * and the outcome genuinely differ, and a switch that showed the request
+   * would tell somebody they were reachable when they were not. See
+   * `core/tailnet.ts`.
+   */
+  async set(input: unknown): Promise<TailnetExposure> {
+    const { exposed } = setTailnetExposureInputSchema.parse(input)
+    return setExposed(exposed)
   }
 }

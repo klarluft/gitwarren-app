@@ -156,6 +156,6 @@ export interface RunOnHostOptions {
 }
 
 export type RunOnHost = (
-  route: { kind: 'ssh' | 'wsl'; target: string },
+  route: { kind: 'ssh' | 'wsl' | 'websocket'; target: string },
   options: RunOnHostOptions
 ) => Promise<HostRunResult>

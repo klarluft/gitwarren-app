@@ -30,7 +30,10 @@ import type {
   HostWithState,
   InstallOnHostInput,
   InstallReport,
+  DiscoveredPeer,
   RemoveHostInput,
+  SetTailnetExposureInput,
+  TailnetExposure,
   UpdateHostInput,
   WslDistro,
   Comment,
@@ -149,15 +152,69 @@ export type RpcOutcome<T = unknown> = { result: T } | { error: SerializedAppErro
 export type RpcResponse<T = unknown> = RpcOutcome<T> & { id: number }
 
 /**
+ * The three things that are ever announced.
+ *
+ * A closed set, and small on purpose. An event is a *reason to re-ask* and
+ * never the answer (see `core/events.ts`), so the vocabulary only has to be
+ * fine enough to name a family of cache keys - which is the same granularity
+ * the renderer already invalidates at after one of its own writes.
+ *
+ * `host.state` is the odd one and is the reason the channel exists at all. The
+ * other two are about data and are known only to the machine that owns it;
+ * this one is about a *machine* and is minted by the pool of whichever install
+ * is doing the reaching. It therefore never travels a wire - see the note on
+ * `RpcEvent.host`.
+ */
+export const RPC_EVENTS = {
+  /** A review, a repository or a reviewed mark changed on the sender. */
+  reviewsChanged: 'reviews.changed',
+  /** A comment or a thread changed on the sender. */
+  commentsChanged: 'comments.changed',
+  /** A host this install reaches became reachable, or stopped being. */
+  hostState: 'host.state'
+} as const
+
+export type RpcEventName = (typeof RPC_EVENTS)[keyof typeof RPC_EVENTS]
+
+/**
  * A push from whoever owns the data. Carries no id: nobody asked for it.
  *
- * Nothing emits one yet - the renderer polls, and M6 is where events replace
- * that - but the shape belongs next to the other two, because a carrier reading
- * a stream has to be able to tell an event from an answer.
+ * Reserved at M1 with nothing emitting on it, and the comment then said the
+ * shape was here so that "the message simply arrives". That turned out to be
+ * true and to be worth most of a slice: `core/rpc/stdio-client.ts` was written
+ * against this shape in M4 and routes an event to its `onEvent` hook rather
+ * than looking for a request to answer, so the stdio carrier needed no change
+ * at all in M6.
+ *
+ * `data` is `null` today for every name. It is kept in the shape rather than
+ * removed because leaving it out would make adding a scope later a protocol
+ * change, and because a frame with no payload field is the sort of thing a
+ * hand-written peer gets wrong. What it must never become is the *content* that
+ * changed - `core/events.ts` has the argument.
  */
 export interface RpcEvent<T = unknown> {
+  /**
+   * One of `RPC_EVENTS` - but typed as a plain string, deliberately.
+   *
+   * `RpcEventName` is the vocabulary this install *emits*. What it *receives*
+   * comes off a wire from a separately installed peer that may be newer, and
+   * narrowing this would make the receiving side's "ignore what you do not
+   * recognise" look like dead code to the compiler rather than like the
+   * protocol rule it has been since `RPC_PROTOCOL_VERSION` was written.
+   */
   event: string
   data: T
+  /**
+   * Which install this is news about. Added on arrival, never on the wire.
+   *
+   * A daemon announcing `comments.changed` is saying "on me", and it has no
+   * idea what instance id the *listener* files it under - it may be reached by
+   * two GitWarrens at once. So the carrier that received it stamps the host it
+   * had already resolved, which is the only side that knows, and the renderer
+   * then invalidates `…@<host>` rather than every machine's keys at once. The
+   * same asymmetry as `RpcRequest.host`: absent means this install.
+   */
+  host?: string
 }
 
 export type RpcMessage = RpcRequest | RpcResponse | RpcEvent
@@ -274,6 +331,45 @@ export interface RpcMethods {
    * the answer is non-empty and no code anywhere asks what platform it is on.
    */
   'hosts.distros': { params: void; result: WslDistro[] }
+
+  /**
+   * Whether the machine that answers is reachable on its tailnet, and where.
+   *
+   * Under `hosts.` for the same reason `hosts.distros` is, and the reason is
+   * worth restating because this one looks much more like a capability. It is
+   * a fact - and an *act*, in the setter's case - about the machine the core
+   * runs on, which is the machine being exposed. A browser tab must be able to
+   * ask and to set it, because the person who will not install Electron is
+   * exactly the person running `gitwarren serve` on a headless box.
+   *
+   * What the prefix buys is that `isLocalOnly` refuses to forward either of
+   * them without anybody having to remember. That refusal is the important
+   * half: a GUI on the Mac must not be able to reach across and start
+   * `tailscale serve` on the PC. A request that could start a process on
+   * another machine is the thing `core/rpc/dispatcher.ts` says would make this
+   * very different software, and "the method is about the machine holding the
+   * list" is the rule that keeps it out.
+   *
+   * `available: false` on a machine with no Tailscale, rather than an error, so
+   * a settings panel offers the switch when the answer says it can and no code
+   * anywhere asks what is installed. The same shape `hosts.distros` uses to
+   * make a Mac not offer a WSL host.
+   */
+  /**
+   * Machines on this install's tailnet that are running GitWarren.
+   *
+   * Under `hosts.` with the others, and the prefix is doing the same work: what
+   * peers a machine can see is that machine's own business, and a GUI must not
+   * be able to ask a host to go scanning on its behalf.
+   *
+   * A *read* in the sense that matters - it adds nothing and changes nothing -
+   * but not a cheap one, which is why it is in `READ_METHODS` for coalescing
+   * and is asked only when a screen that shows it is opened. See
+   * `core/hosts/discover.ts` for when it runs and what it costs.
+   */
+  'hosts.discover': { params: void; result: DiscoveredPeer[] }
+  'hosts.tailnet': { params: void; result: TailnetExposure }
+  'hosts.setTailnetExposure': { params: SetTailnetExposureInput; result: TailnetExposure }
 
   /**
    * What is inside a folder, on the machine that answers.
@@ -413,6 +509,8 @@ export const READ_METHODS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
   'hosts.list',
   'hosts.get',
   'hosts.distros',
+  'hosts.discover',
+  'hosts.tailnet',
   // `hosts.probe` is deliberately absent. It reads in the sense that it changes
   // no host row a caller can see, but it opens a connection and clears a
   // backoff, and two people pressing "try now" at the same moment should mean
@@ -498,6 +596,21 @@ export interface BridgeCarrier {
     params: RpcParams<M>,
     host?: string
   ): Promise<RpcOutcome<RpcResult<M>>>
+  /**
+   * Events from the core this bridge is attached to. Returns an unsubscribe.
+   *
+   * On the carrier rather than on `ShellApi`, because an event is a message
+   * from the *core* and the carrier is the renderer's door to it - the two
+   * shells differ in how it arrives (an IPC channel, a frame on the socket) in
+   * exactly the way they already differ for a request. It is the same reason
+   * `ShellConnection` is on the shell and this is not: one is a fact about the
+   * transport, the other is news from the far end of it.
+   *
+   * Deliberately not typed per event name. Every subscriber wants all of them -
+   * see `subscribeToEvents` in `core/events.ts` - and a bridge that had to be
+   * edited to add a name would be another list to keep in step.
+   */
+  onEvent(listener: (event: RpcEvent) => void): () => void
 }
 
 /**

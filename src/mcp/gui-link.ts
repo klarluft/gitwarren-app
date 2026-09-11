@@ -34,10 +34,33 @@
  * on.
  */
 import type { CommentLocation } from '../core/services/comments.js'
+import { readLiveDaemonRuntime } from '../core/daemon-runtime.js'
 import { getInstanceId } from '../core/instance.js'
 import { loopbackFragmentFor } from '../shared/deep-link.js'
 import { linkServerOrigin } from '../shared/link-port.js'
-import type { ReviewRoute } from '../shared/routes.js'
+import { hrefFor, type ReviewRoute } from '../shared/routes.js'
+
+/**
+ * The other sentence, appended only when this install is actually listening.
+ *
+ * Conditional rather than always present, and that is the same decision
+ * `guiUrl` made in the opposite direction. A `guiUrl` is always there because
+ * loopback depends on nothing and a dead link costs one refused connection; a
+ * `webUrl` names a machine on a network, and one that is not being served is a
+ * URL that will never work for anybody, not just "not right now".
+ *
+ * The distinction it has to teach an agent is *which machine the person is
+ * at*, because that is the only thing that decides which link is useful and
+ * the MCP server has no way to know it. So the text says what each one is for
+ * rather than ranking them.
+ */
+export const WEB_URL_NOTE =
+  '\n\nWhen this machine is reachable on the user\'s tailnet, results also carry `webUrl`. ' +
+  'The two links are for two situations and neither replaces the other: `guiUrl` opens ' +
+  'GitWarren on the machine the user is sitting at, which is the right one when that is this ' +
+  'machine; `webUrl` opens the same review in a browser from any of their devices - a phone, a ' +
+  'laptop across the room - because it names this machine on their tailnet. Offer `webUrl` when ' +
+  'the user is not at this machine, and both when you do not know.'
 
 /**
  * The sentence appended to every tool that returns one of these.
@@ -59,17 +82,23 @@ export const GUI_URL_NOTE =
   'makes the same link work.'
 
 /** With the link attached. Kept as a type so the tool payloads stay honest. */
-export type WithGuiUrl<T> = T & { guiUrl: string }
+export type WithGuiUrl<T> = T & { guiUrl: string; webUrl?: string }
+
+/** The links for one place, however many of them there are. */
+export interface ReviewLinks {
+  guiUrl: string
+  webUrl?: string
+}
 
 export interface GuiLinker {
   /** The review's conversation, which is where a review as a whole lives. */
-  review(reviewId: number): string
+  review(reviewId: number): ReviewLinks
   /**
    * A thread, at its line of the diff where it has one. A line comment links
    * into the files tab so the user lands on the code being discussed rather
    * than on a list of discussions.
    */
-  comment(location: CommentLocation): string
+  comment(location: CommentLocation): ReviewLinks
 }
 
 /**
@@ -83,20 +112,52 @@ export interface GuiLinker {
  */
 export function guiLinker(): GuiLinker {
   const instanceId = getInstanceId()
+  // Read per linker, which is per tool call. The owner publishes it when the
+  // user flips the switch, and it disappears when the owner quits - which is
+  // correct rather than unfortunate: a `webUrl` for a machine that is not
+  // serving anything is a link that cannot work, and the whole rule is that it
+  // is added *when a host listens*. `guiUrl` is unaffected, because loopback
+  // depends on nothing.
+  const webRoot = readLiveDaemonRuntime()?.webRoot ?? null
 
   const link = (route: ReviewRoute): string =>
     // The route rides in the fragment, which the browser never sends. The
     // server is not told which review this is for and has no use for it.
     `${linkServerOrigin()}/#${loopbackFragmentFor(instanceId, route)}`
 
-  const conversation = (reviewId: number): string =>
-    link({ name: 'review', reviewId, tab: 'conversation' })
+  /**
+   * The same review, as a browser on the tailnet reaches it.
+   *
+   * A plain app route rather than the `h=` loopback fragment, and the
+   * difference is the whole of what those two notations were separated for in
+   * M2. A loopback URL's fragment is a *deep link waiting to be assembled* -
+   * the page at that address hands it to a local GitWarren, which then decides
+   * whose review it is. A tailnet URL is not waiting for anything: the server
+   * answering it is the machine that owns the review, so the fragment is an
+   * ordinary route into the app it is already serving, with no host segment
+   * because there is no other machine in the story.
+   */
+  const webLink = (route: ReviewRoute): string | undefined =>
+    webRoot === null ? undefined : `${webRoot}${hrefFor(route)}`
+
+  const both = (route: ReviewRoute): { guiUrl: string; webUrl?: string } => {
+    const web = webLink(route)
+    return { guiUrl: link(route), ...(web === undefined ? {} : { webUrl: web }) }
+  }
+
+  const conversation = (reviewId: number): ReviewRoute => ({
+    name: 'review',
+    reviewId,
+    tab: 'conversation'
+  })
 
   return {
-    review: conversation,
+    review: (reviewId) => both(conversation(reviewId)),
     comment: ({ reviewId, filePath, side, line }) =>
-      filePath === null || side === null || line === null
-        ? conversation(reviewId)
-        : link({ name: 'review', reviewId, tab: 'files', focus: { filePath, side, line } })
+      both(
+        filePath === null || side === null || line === null
+          ? conversation(reviewId)
+          : { name: 'review', reviewId, tab: 'files', focus: { filePath, side, line } }
+      )
   }
 }

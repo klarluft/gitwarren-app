@@ -25,9 +25,10 @@ const dataDir = mkdtempSync(join(tmpdir(), 'gitwarren-web-'))
 process.env.GITWARREN_DATA_DIR = dataDir
 
 const { createWebHandler } = await import('../handler.js')
-const { SESSION_COOKIE, TOKEN_PARAM, WEB_PATHS, webAttachmentSrc } = await import(
+const { SESSION_COOKIE, TOKEN_HEADER, TOKEN_PARAM, WEB_PATHS, webAttachmentSrc } = await import(
   '../../../shared/web.js'
 )
+const { subscribeToEvents } = await import('../../events.js')
 const { attachmentsService } = await import('../../services/attachments.js')
 const { closeDatabase } = await import('../../db/client.js')
 
@@ -92,9 +93,21 @@ before(async () => {
     staticRoot,
     token: TOKEN,
     appInfo: () => APP_INFO,
-    port
+    port,
+    // Read per request by the handler, exactly as the real one reads
+    // `tailnetGate()`, so a test can turn exposure on and off between cases the
+    // way the settings switch does at runtime.
+    tailnet: () => exposed
   })
 })
+
+/** The tailnet gate, when these tests have turned it on. */
+let exposed: { authority: string; login: string; scheme: 'http' | 'https' } | null = null
+
+const OWNER = 'michal-wrzosek@github'
+function tailnetAuthority(): string {
+  return `pc-wsl.tail688c0c.ts.net:${port}`
+}
 
 after(async () => {
   handler.close()
@@ -118,6 +131,26 @@ async function get(path: string, headers: Record<string, string> = {}): Promise<
 }
 
 /**
+ * A JSON `POST`, which until M6 nothing on this server would answer.
+ *
+ * `fetch` is right for this one where it was wrong for the `Host` check: the
+ * headers under test here - `Origin` and the token header - are ones a caller
+ * is allowed to set, and the whole question is what happens when it does.
+ */
+async function post(
+  path: string,
+  body: unknown,
+  headers: Record<string, string> = {}
+): Promise<Response> {
+  return fetch(`${origin()}${path}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...headers },
+    body: JSON.stringify(body),
+    redirect: 'manual'
+  })
+}
+
+/**
  * A GET with headers exactly as given, `Host` included.
  *
  * `fetch` cannot do this: `Host` is a forbidden header name, so undici silently
@@ -126,6 +159,26 @@ async function get(path: string, headers: Record<string, string> = {}): Promise<
  * that exists because a *browser* is what sends the header - hence the raw
  * client for this case.
  */
+function rawPost(path: string, headers: Record<string, string>): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const request = httpRequest(
+      {
+        host: '127.0.0.1',
+        port,
+        path,
+        method: 'POST',
+        headers: { ...headers, 'content-type': 'application/json', 'content-length': '2' }
+      },
+      (response) => {
+        response.resume()
+        resolve(response.statusCode ?? 0)
+      }
+    )
+    request.on('error', reject)
+    request.end('{}')
+  })
+}
+
 function rawGet(path: string, headers: Record<string, string>): Promise<number> {
   return new Promise((resolve, reject) => {
     const request = httpRequest(
@@ -406,4 +459,241 @@ test('a frame that is not a request is refused under an id it can be read with',
 
   assert.equal(answer.id, 0)
   assert.equal(answer.error?.code, 'INVALID_INPUT')
+})
+
+/**
+ * The one write this server answers: the agent's process poking the owner.
+ *
+ * M6 breaks a property this file's header had held since M3 - that everything
+ * behind the gate is a read - so the exception gets the coverage the rule had.
+ * What each case is really asking is "which of the three locks is doing the
+ * work here", because a poke that got in without one of them would still look
+ * like it was working.
+ */
+test('a poke with the token puts the event on the bus', async () => {
+  const seen: string[] = []
+  const stop = subscribeToEvents((event) => seen.push(event.event))
+
+  const response = await post(WEB_PATHS.notify, { event: 'comments.changed' }, {
+    origin: origin(),
+    [TOKEN_HEADER]: TOKEN
+  })
+
+  stop()
+  assert.equal(response.status, 204)
+  assert.deepEqual(seen, ['comments.changed'])
+})
+
+test('an event from a local poke is not tagged with a host', async () => {
+  // A local process telling the local owner about the local database, which is
+  // what "absent means this install" means everywhere else. Tagging it would
+  // make the renderer look for `…@<id>` keys that do not exist.
+  const seen: { host?: string }[] = []
+  const stop = subscribeToEvents((event) => seen.push(event))
+
+  await post(WEB_PATHS.notify, { event: 'reviews.changed' }, {
+    origin: origin(),
+    [TOKEN_HEADER]: TOKEN
+  })
+
+  stop()
+  assert.equal(seen.length, 1)
+  assert.equal(seen[0]?.host, undefined)
+})
+
+test('the session cookie is not enough: the poke wants the header', async () => {
+  // Deliberate. `SameSite=Strict` already means a cross-site page's request
+  // arrives without the cookie, but a custom header is the lock that does not
+  // depend on a browser's cookie policy being what we think it is - a page
+  // cannot set one without a preflight this server never answers.
+  const seen: string[] = []
+  const stop = subscribeToEvents((event) => seen.push(event.event))
+
+  const response = await post(WEB_PATHS.notify, { event: 'comments.changed' }, withSession({
+    origin: origin()
+  }))
+
+  stop()
+  assert.equal(response.status, 401)
+  assert.deepEqual(seen, [])
+})
+
+test('a poke from another origin is refused before the token is looked at', async () => {
+  const seen: string[] = []
+  const stop = subscribeToEvents((event) => seen.push(event.event))
+
+  const response = await post(WEB_PATHS.notify, { event: 'comments.changed' }, {
+    origin: 'http://evil.example',
+    [TOKEN_HEADER]: TOKEN
+  })
+
+  stop()
+  assert.equal(response.status, 403)
+  assert.deepEqual(seen, [])
+})
+
+test('a poke with no origin at all is refused', async () => {
+  // A write is never a navigation, so an absent origin is not the "somebody
+  // clicked a link" case that reads tolerate - see `origin.ts`.
+  const response = await post(WEB_PATHS.notify, { event: 'comments.changed' }, {
+    [TOKEN_HEADER]: TOKEN
+  })
+  assert.equal(response.status, 403)
+})
+
+test('an event name outside the vocabulary is refused', async () => {
+  const seen: string[] = []
+  const stop = subscribeToEvents((event) => seen.push(event.event))
+
+  for (const event of ['host.state', 'anything.else', '', 42]) {
+    const response = await post(WEB_PATHS.notify, { event }, {
+      origin: origin(),
+      [TOKEN_HEADER]: TOKEN
+    })
+    assert.equal(response.status, 400, String(event))
+  }
+
+  stop()
+  // `host.state` is in the refused set on purpose: it is minted by this
+  // install's own pool from a connection it is holding, and nothing outside
+  // this process has any evidence about it.
+  assert.deepEqual(seen, [])
+})
+
+test('a GET to the notify path is refused, and says what it wanted', async () => {
+  const response = await get(WEB_PATHS.notify, withSession())
+  assert.equal(response.status, 405)
+  assert.equal(response.headers.get('allow'), 'POST')
+})
+
+test('a body with no end does not grow this process', async () => {
+  // The one path that reads a request body at all. The cap is the same
+  // reasoning as `onOverflow` in `core/rpc/ndjson.ts`, on a much smaller scale.
+  const response = await post(WEB_PATHS.notify, { event: 'x'.repeat(4096) }, {
+    origin: origin(),
+    [TOKEN_HEADER]: TOKEN
+  })
+  assert.equal(response.status, 413)
+})
+
+/**
+ * The second authority, and who is allowed through it.
+ *
+ * Every case here is a *refusal*, which is what makes them worth writing down:
+ * the happy path was proved against the real tailnet from a real second machine
+ * (`scripts/verify/m6-3.mjs`), and what a test can do that a demonstration
+ * cannot is show that the ways in which it should say no are all still shut.
+ *
+ * The headers are forged, and that is fine for exactly these questions.
+ * `Tailscale-User-Login` is set by `tailscaled` in life; here it is set by the
+ * test, which is the same position an attacker on this machine is in - and the
+ * module's header says plainly that such an attacker gains nothing, because it
+ * can already read the token file and open the database. What these check is
+ * the boundary that does matter: which authority a claim is believed on.
+ */
+test('a tailnet-shaped request is refused while exposure is off', async () => {
+  exposed = null
+  const status = await rawGet('/app/', {
+    host: tailnetAuthority(),
+    'tailscale-user-login': OWNER
+  })
+  // 403 rather than 401: the authority itself does not exist, so there is no
+  // question of identity to get wrong.
+  assert.equal(status, 403)
+})
+
+test('the owner gets in over the tailnet with no token at all', async () => {
+  exposed = { authority: tailnetAuthority(), login: OWNER, scheme: 'http' }
+  const status = await rawGet('/app/', {
+    host: tailnetAuthority(),
+    'tailscale-user-login': OWNER
+  })
+  assert.equal(status, 200)
+  exposed = null
+})
+
+test('another login on the tailnet is refused', async () => {
+  exposed = { authority: tailnetAuthority(), login: OWNER, scheme: 'http' }
+  assert.equal(
+    await rawGet('/app/', {
+      host: tailnetAuthority(),
+      'tailscale-user-login': 'someone-else@github'
+    }),
+    401
+  )
+  // And no header at all, which is what a request that did not come through
+  // `tailscale serve` looks like.
+  assert.equal(await rawGet('/app/', { host: tailnetAuthority() }), 401)
+  exposed = null
+})
+
+test('a token is not consulted on the tailnet authority', async () => {
+  // The thing this milestone was told not to collapse. A token minted on one
+  // machine is not evidence about a person on another, so the session cookie
+  // that opens loopback opens nothing here.
+  exposed = { authority: tailnetAuthority(), login: OWNER, scheme: 'http' }
+  const status = await rawGet('/app/', {
+    host: tailnetAuthority(),
+    cookie: `${SESSION_COOKIE}=${TOKEN}`
+  })
+  assert.equal(status, 401)
+  exposed = null
+})
+
+test('an identity header on loopback grants nothing', async () => {
+  // The mirror of the case above, and the one that would be easy to get wrong
+  // by checking the header before checking which authority was reached. A local
+  // process may set this header freely; it must only ever be read on the
+  // authority `tailscale serve` is proxying to.
+  exposed = { authority: tailnetAuthority(), login: OWNER, scheme: 'http' }
+  const status = await rawGet('/app/', {
+    host: `127.0.0.1:${port}`,
+    'tailscale-user-login': OWNER
+  })
+  assert.equal(status, 401)
+  exposed = null
+})
+
+test('a page on the tailnet origin may act, and a loopback page may not act on it', async () => {
+  exposed = { authority: tailnetAuthority(), login: OWNER, scheme: 'http' }
+  const socket = await connect({
+    host: tailnetAuthority(),
+    origin: `http://${tailnetAuthority()}`,
+    'tailscale-user-login': OWNER
+  })
+  socket.close()
+
+  // The cross-authority case: our own loopback origin, on the tailnet host. It
+  // is one of the two values this server mints and it is still not the right
+  // one, which is what comparing rather than parsing buys.
+  await assert.rejects(
+    connect({
+      host: tailnetAuthority(),
+      origin: origin(),
+      'tailscale-user-login': OWNER
+    }),
+    /403/
+  )
+  exposed = null
+})
+
+test('the poke endpoint does not exist on the tailnet authority', async () => {
+  // A peer telling this install that its own database changed would be asking
+  // it to believe a claim about something the peer cannot see. 404 rather than
+  // 403, because on that authority there is genuinely no such path.
+  exposed = { authority: tailnetAuthority(), login: OWNER, scheme: 'http' }
+  const seen: string[] = []
+  const stop = subscribeToEvents((event) => seen.push(event.event))
+
+  const status = await rawPost(WEB_PATHS.notify, {
+    host: tailnetAuthority(),
+    origin: `http://${tailnetAuthority()}`,
+    'tailscale-user-login': OWNER,
+    [TOKEN_HEADER]: TOKEN
+  })
+
+  stop()
+  assert.equal(status, 404)
+  assert.deepEqual(seen, [])
+  exposed = null
 })

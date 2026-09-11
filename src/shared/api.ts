@@ -30,7 +30,10 @@ import type {
   InstallOnHostInput,
   InstallReport,
   WslDistro,
+  DiscoveredPeer,
   RemoveHostInput,
+  SetTailnetExposureInput,
+  TailnetExposure,
   UpdateHostInput,
   Comment,
   CommentThread,
@@ -121,7 +124,18 @@ export const IPC_CHANNELS = {
    * Main -> renderer push carrying a hash to move to, sent when a
    * `gitwarren://` deep link arrives while the app is already running.
    */
-  navigationDeepLink: 'navigation:deepLink'
+  navigationDeepLink: 'navigation:deepLink',
+  /**
+   * Main -> renderer push carrying an `RpcEvent`: something changed, go and
+   * re-read it.
+   *
+   * The window's half of what a browser tab gets as a frame on its socket. It
+   * is a *carrier* channel rather than a shell one - see `BridgeCarrier.onEvent`
+   * - which is why it is here next to `rpcRequest` rather than beside the two
+   * pushes above, both of which are about this shell (an update downloading, a
+   * link the OS handed us) rather than about the core's data.
+   */
+  rpcEvent: 'rpc:event'
 } as const
 
 /**
@@ -185,7 +199,8 @@ export const SHELL_CHANNELS = [
 /** Main -> renderer pushes. Nothing handles these; they are sent. */
 export const PUSH_CHANNELS = [
   IPC_CHANNELS.updatesChanged,
-  IPC_CHANNELS.navigationDeepLink
+  IPC_CHANNELS.navigationDeepLink,
+  IPC_CHANNELS.rpcEvent
 ] as const
 
 export interface AppInfo {
@@ -310,6 +325,22 @@ export interface GitWarrenApi {
      * on `hosts.distros` in `shared/rpc.ts`.
      */
     distros(): Promise<WslDistro[]>
+    /**
+     * Whether the machine answering is reachable on its tailnet, and where.
+     *
+     * Here for the same reason `distros` is, and it survives the harder version
+     * of the same test. Turning exposure on is genuinely an *act* on a machine,
+     * which is the thing `shared/rpc.ts` says must never travel - and it does
+     * not: `isLocalOnly` refuses the whole `hosts.` prefix, so what this acts on
+     * is always the machine whose core is answering. A browser tab gets its own
+     * server's switch, which is exactly what a person running `gitwarren serve`
+     * on a headless box needs; a GUI looking at a remote host cannot reach
+     * across and start `tailscale serve` there.
+     */
+    /** Machines on this tailnet running GitWarren. Proposals, never rows. */
+    discover(): Promise<DiscoveredPeer[]>
+    tailnet(): Promise<TailnetExposure>
+    setTailnetExposure(input: SetTailnetExposureInput): Promise<TailnetExposure>
   }
   /**
    * What is inside a folder, on the machine this api is pointed at.

@@ -26,8 +26,9 @@
  *
  * ## The gate, in the order a request meets it
  *
- * 1. `Host` must be the loopback authority, and `Origin` - when there is one -
- *    must be ours. See `origin.ts`; neither check is about tokens.
+ * 1. `Host` must be an authority this install hands out, and `Origin` - when
+ *    there is one - must match it. See `origin.ts`; neither check is about
+ *    tokens.
  * 2. `?token=…` on any path under the mount is exchanged for a session cookie
  *    and redirected away, so the secret does not stay in the address bar, in
  *    the history, or in a `Referer`.
@@ -35,10 +36,27 @@
  *    to get in. Not a 404: pretending the app is not there would be a lie the
  *    user cannot act on, and the port is not a secret anyway - the token is.
  *
- * Everything behind the gate is a read: the web build, `app-info`, and since
- * M3.2 the attachment bytes an `<img>` in a comment body needs. Writes happen
- * over the socket and nowhere else, which is what keeps the whole of this file
- * answering `GET` and `HEAD` and refusing every other method outright.
+ * Since M6 there are *two* authorities, and step 3 is different on each. On
+ * loopback it is the token, unchanged. On the tailnet authority - which exists
+ * only while "Reachable on your tailnet" is on - it is
+ * `Tailscale-User-Login` equal to the owner's, and the token is not consulted
+ * at all. That is not a shortcut: the two are answering different questions,
+ * one about intent and one about principal, and `isTailnetOwner` in `origin.ts`
+ * is where the distinction is argued and must be kept.
+ *
+ * Almost everything behind the gate is a read: the web build, `app-info`, and
+ * since M3.2 the attachment bytes an `<img>` in a comment body needs. Writes to
+ * review data happen over the socket and nowhere else, which is what kept this
+ * file answering `GET` and `HEAD` and refusing every other method outright
+ * through M5.
+ *
+ * M6 adds exactly one exception and it is worth naming here rather than leaving
+ * to be discovered: `WEB_PATHS.notify` takes a `POST` from the *agent's*
+ * process, saying that it changed something so the window does not wait fifteen
+ * seconds to find out. It carries no data, names one event from a closed set,
+ * and requires the token in a header on top of the host and origin checks - a
+ * page cannot set one without a preflight this server never answers. The whole
+ * argument, including why it is not a channel of its own, is in `notify.ts`.
  *
  * The socket is upgraded only after the same three, with `Origin` required
  * rather than optional, because a WebSocket handshake is never a navigation.
@@ -48,12 +66,28 @@ import type { Duplex } from 'node:stream'
 import { WebSocketServer } from 'ws'
 import { serveWebSocket } from '../rpc/websocket.js'
 import { serveAttachment } from './attachments.js'
-import { isAllowedHost, isAllowedOrigin, loopbackAuthority } from './origin.js'
+import { serveNotify } from './notify.js'
+import { describeThisInstance } from '../rpc/dispatcher.js'
+import {
+  isAllowedHost,
+  isAllowedOrigin,
+  isTailnetHost,
+  isTailnetOwner,
+  loopbackAuthority,
+  TAILSCALE_USER_HEADER,
+  type TailnetGate
+} from './origin.js'
 import { LINK_SERVER_PORT } from '../../shared/link-port.js'
 import { serveStatic } from './static.js'
 import { isWebToken } from './token.js'
 import { ATTACHMENT_HOST_PARAM } from '../../shared/attachments.js'
-import { SESSION_COOKIE, TOKEN_PARAM, WEB_PATHS, WEB_PREFIX } from '../../shared/web.js'
+import {
+  SESSION_COOKIE,
+  TOKEN_HEADER,
+  TOKEN_PARAM,
+  WEB_PATHS,
+  WEB_PREFIX
+} from '../../shared/web.js'
 import type { AppInfo } from '../../shared/api.js'
 
 export interface WebHandlerOptions {
@@ -75,6 +109,20 @@ export interface WebHandlerOptions {
    * developer's machine is usually held by their own running GitWarren.
    */
   port?: number
+  /**
+   * How this install is exposed on the tailnet right now, or null when it is
+   * not. Read per request, like `appInfo`.
+   *
+   * A function rather than a value because the answer changes while the process
+   * runs - a settings toggle turns it on, and `tailscale serve` is machine
+   * state a user may also change from a terminal. A handler holding a snapshot
+   * would keep answering for an authority that had been withdrawn, which is the
+   * one staleness that matters here.
+   *
+   * Undefined and null mean the same thing and both mean "M5's gate": a machine
+   * that has never heard of a tailnet has exactly the server it had.
+   */
+  tailnet?: () => TailnetGate | null
 }
 
 export interface WebHandler {
@@ -106,6 +154,19 @@ function readCookie(header: string | undefined, name: string): string | undefine
     return decodeURIComponent(part.slice(separator + 1).trim())
   }
   return undefined
+}
+
+/**
+ * One request header as a string.
+ *
+ * Node lowercases header names and folds a repeated one into an array. An array
+ * here means a caller sent the token twice, which is not something the MCP
+ * process does and not something worth guessing about - so it is refused by
+ * coming back undefined rather than by picking one.
+ */
+function readHeader(request: IncomingMessage, name: string): string | undefined {
+  const value = request.headers[name]
+  return typeof value === 'string' ? value : undefined
 }
 
 /**
@@ -144,7 +205,8 @@ export function createWebHandler({
   staticRoot,
   token,
   appInfo,
-  port = LINK_SERVER_PORT
+  port = LINK_SERVER_PORT,
+  tailnet = () => null
 }: WebHandlerOptions): WebHandler {
   if (!mount.endsWith('/')) throw new Error(`A web mount must end in "/", got ${mount}`)
 
@@ -162,8 +224,27 @@ export function createWebHandler({
     // app's own mount typed without its slash, which is redirected below.
     (mount === '/' && pathname === '')
 
-  const authorised = (request: IncomingMessage): boolean =>
-    isWebToken(token, readCookie(request.headers.cookie, SESSION_COOKIE))
+  /**
+   * Whether this request may be answered at all, and on which of the two
+   * grounds.
+   *
+   * Exactly one applies, decided by the authority the request arrived at - and
+   * the two are answering different questions, which is why neither falls back
+   * to the other. See `isTailnetOwner` for the argument; the short version is
+   * that the token is about *intent* on a machine where every process is
+   * already the user, and the header is about *principal* on a network where
+   * intent cannot be checked.
+   *
+   * So a token on a tailnet request is not consulted. A token minted on the PC
+   * says nothing about the person holding a phone, and honouring it would be
+   * the collapse this milestone was told not to make.
+   */
+  const authorised = (request: IncomingMessage, gate: TailnetGate | null): boolean => {
+    if (isTailnetHost(request.headers.host, gate)) {
+      return isTailnetOwner(request.headers[TAILSCALE_USER_HEADER], gate)
+    }
+    return isWebToken(token, readCookie(request.headers.cookie, SESSION_COOKIE))
+  }
 
   return {
     request(request, response) {
@@ -171,7 +252,12 @@ export function createWebHandler({
       const pathname = decodeURIComponent(url.pathname)
       if (!mine(pathname)) return false
 
-      if (!isAllowedHost(request.headers.host, port)) {
+      // Read once per request rather than per check, so the three questions
+      // below cannot disagree about whether this install is exposed.
+      const gate = tailnet()
+      const overTailnet = isTailnetHost(request.headers.host, gate)
+
+      if (!isAllowedHost(request.headers.host, port, gate)) {
         response.writeHead(403, NO_STORE).end()
         return true
       }
@@ -179,8 +265,44 @@ export function createWebHandler({
       // Reads may arrive as a navigation, which carries no Origin. Anything
       // else is a page acting on its own behalf and must name itself.
       const isRead = request.method === 'GET' || request.method === 'HEAD'
-      if (!isAllowedOrigin(request.headers.origin, { required: !isRead, port })) {
+      if (
+        !isAllowedOrigin(request.headers.origin, {
+          required: !isRead,
+          port,
+          tailnet: gate,
+          overTailnet
+        })
+      ) {
         response.writeHead(403, NO_STORE).end()
+        return true
+      }
+
+      // The one write, and the only reason this file is no longer `GET` and
+      // `HEAD` and nothing else. See `notify.ts` for what it is for and the
+      // three independent reasons a web page cannot reach it. The token comes
+      // in a header rather than the cookie, because the caller is a local Node
+      // process and has no cookie jar - and a custom header is a lock of its
+      // own against a page, which cannot set one without a preflight this
+      // server never answers.
+      if (pathname === WEB_PATHS.notify) {
+        // Loopback only, whatever the gate says. A poke is a statement about
+        // *this machine's* processes; a peer asking this install to re-read
+        // something would be asking it to believe a claim about a database it
+        // cannot see. What a remote install does instead is emit on its own bus
+        // and let it travel as an `RpcEvent` on the carrier already open.
+        if (overTailnet) {
+          response.writeHead(404, NO_STORE).end()
+          return true
+        }
+        if (request.method !== 'POST') {
+          response.writeHead(405, { ...NO_STORE, Allow: 'POST' }).end()
+          return true
+        }
+        if (!isWebToken(token, readHeader(request, TOKEN_HEADER))) {
+          response.writeHead(401, NO_STORE).end()
+          return true
+        }
+        void serveNotify(request, response, NO_STORE)
         return true
       }
 
@@ -193,7 +315,18 @@ export function createWebHandler({
       // URL. `SameSite=Strict` is what makes a cross-site page unable to use
       // the session even when it can guess the port; `HttpOnly` keeps the value
       // out of reach of anything that manages to run script on the page.
-      const presented = url.searchParams.get(TOKEN_PARAM)
+      // A token on the tailnet authority is dropped rather than exchanged: see
+      // `authorised` above. It is taken out of the URL all the same, so that a
+      // loopback link forwarded to a phone lands on the app instead of leaving
+      // a secret in that phone's address bar and history.
+      const presented = overTailnet ? null : url.searchParams.get(TOKEN_PARAM)
+      if (overTailnet && url.searchParams.has(TOKEN_PARAM)) {
+        url.searchParams.delete(TOKEN_PARAM)
+        response
+          .writeHead(302, { ...NO_STORE, Location: `${url.pathname}${url.search}` })
+          .end()
+        return true
+      }
       if (presented !== null) {
         if (!isWebToken(token, presented)) {
           response.writeHead(403, UNAUTHORIZED_HEADERS).end(UNAUTHORIZED_PAGE)
@@ -216,8 +349,24 @@ export function createWebHandler({
         return true
       }
 
-      if (!authorised(request)) {
+      if (!authorised(request, gate)) {
+        // The same page either way, and the sentence it carries is about the
+        // token because that is the only one a person can do anything about. A
+        // tailnet request that is refused was made by somebody who is not the
+        // owner, and telling them how the owner gets in would be the wrong
+        // help.
         response.writeHead(401, UNAUTHORIZED_HEADERS).end(UNAUTHORIZED_PAGE)
+        return true
+      }
+
+      // Who this install is, for a peer deciding whether to propose it. It is
+      // behind the same gate as everything else - on the tailnet that means the
+      // owner's login - so this is not an unauthenticated announcement, it is
+      // one machine of the owner's telling another. See `core/hosts/discover.ts`.
+      if (pathname === WEB_PATHS.discover) {
+        response
+          .writeHead(200, { ...NO_STORE, 'Content-Type': 'application/json; charset=utf-8' })
+          .end(request.method === 'HEAD' ? undefined : JSON.stringify(describeThisInstance()))
         return true
       }
 
@@ -276,6 +425,8 @@ export function createWebHandler({
       const url = new URL(request.url ?? '/', `http://${loopbackAuthority(port)}`)
       if (decodeURIComponent(url.pathname) !== WEB_PATHS.socket) return false
 
+      const gate = tailnet()
+
       // A refusal here is a socket write, not a response object: the connection
       // has already left HTTP behind. Every one of them ends the connection
       // rather than leaving a half-upgraded socket around.
@@ -285,12 +436,22 @@ export function createWebHandler({
         return true
       }
 
-      if (!isAllowedHost(request.headers.host, port)) return refuse('403 Forbidden')
+      if (!isAllowedHost(request.headers.host, port, gate)) return refuse('403 Forbidden')
       // Required, unlike on a read: an upgrade is never a top-level navigation,
       // so a browser always sends it and a missing one is not a browser.
-      if (!isAllowedOrigin(request.headers.origin, { required: true, port }))
+      if (
+        !isAllowedOrigin(request.headers.origin, {
+          required: true,
+          port,
+          tailnet: gate,
+          overTailnet: isTailnetHost(request.headers.host, gate)
+        })
+      )
         return refuse('403 Forbidden')
-      if (!authorised(request)) return refuse('401 Unauthorized')
+      // The identity header survives an upgrade, which is the half of M6.0 that
+      // could have failed silently: a proxy that stamped requests and dropped
+      // upgrades would have left the phone working and every carrier refused.
+      if (!authorised(request, gate)) return refuse('401 Unauthorized')
 
       sockets.handleUpgrade(request, socket, head, (websocket) => {
         serveWebSocket(websocket)

@@ -18,7 +18,16 @@
  * those changes, and that is what the comment tools carry.
  *
  * No authentication: this is a local, single-user app, the transport is a pipe
- * owned by the agent the user launched, and there is no network surface.
+ * owned by the agent the user launched, and nothing listens.
+ *
+ * Since M6 it does *dial* one thing, and the distinction is worth keeping: after
+ * a write, it opens a loopback connection to whichever process owns this data
+ * directory and says that something changed, so a window does not wait fifteen
+ * seconds to find out. It sends a name and no data, it is never awaited, and
+ * every way of failing - no owner, no token, nothing listening - is the same
+ * answer, which is that nothing happened. Rule 6 is untouched: the agent still
+ * never crosses a network, and quitting GitWarren still leaves it working. See
+ * `poke.ts`.
  *
  * There is, however, *attribution*, which is a different thing. Every comment
  * written through this server is marked as machine-written and named after the
@@ -34,6 +43,15 @@
  * before showing it, and the descriptions say what a refused connection means
  * instead. See `gui-link.ts`.
  *
+ * Since M6 a payload may also carry a `webUrl`, and the two are not a fallback
+ * pair. `guiUrl` is loopback and opens GitWarren on the machine the person is
+ * sitting at; `webUrl` names *this* machine on their tailnet and opens the same
+ * review in a browser on any of their devices. Which one is useful depends on
+ * where the person is, and this server has no way to know that - so both are
+ * offered and the tool text explains what each is for rather than ranking them.
+ * `webUrl` is present only while this install is actually being served, which
+ * is why it is conditional where `guiUrl` never is.
+ *
  * One hard rule: stdout belongs to the protocol. Diagnostics go to stderr.
  */
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
@@ -47,7 +65,9 @@ import { repositoriesService } from '../core/services/repositories.js'
 import { reviewsService } from '../core/services/reviews.js'
 import { authorDisplayName, type CommentAuthor } from '../shared/actors.js'
 import { AppError } from '../shared/errors.js'
-import { GUI_URL_NOTE, guiLinker, type WithGuiUrl } from './gui-link.js'
+import { RPC_EVENTS, type RpcEventName } from '../shared/rpc.js'
+import { GUI_URL_NOTE, WEB_URL_NOTE, guiLinker, type WithGuiUrl } from './gui-link.js'
+import { pokeOwner } from './poke.js'
 import { agentAuthor, getSessionId, getSessionLabel, setSessionLabel } from './identity.js'
 import {
   addRepositoryInputSchema,
@@ -123,6 +143,28 @@ async function run<T>(operation: () => Promise<T>): Promise<CallToolResult> {
   }
 }
 
+/**
+ * A tool that changes something, and tells the owner it did.
+ *
+ * The poke is here rather than inside the services for the same reason
+ * `HUMAN_AUTHOR` is in the dispatcher rather than in `commentsService`: the
+ * *boundary* is what knows who is acting, and this file is the agent boundary.
+ * A service that announced its own writes would announce them once per process
+ * and be unable to say which process that was.
+ *
+ * After the operation, never before - an announcement that something changed
+ * must not outrun the thing changing. Not awaited, and `pokeOwner` cannot
+ * reject: the write is already committed, so nothing about telling a window
+ * may turn a successful tool call into a failed one. See `poke.ts`.
+ */
+function runWrite<T>(event: RpcEventName, operation: () => Promise<T>): Promise<CallToolResult> {
+  return run(async () => {
+    const result = await operation()
+    pokeOwner(event)
+    return result
+  })
+}
+
 const server = new McpServer({ name: 'gitwarren', version: VERSION })
 
 /**
@@ -160,14 +202,14 @@ function adoptLabel(input: { agentLabel?: string }): CommentAuthor {
 
 async function linkedReview<T extends { id: number }>(result: Promise<T>): Promise<WithGuiUrl<T>> {
   const review = await result
-  return { ...review, guiUrl: guiLinker().review(review.id) }
+  return { ...review, ...guiLinker().review(review.id) }
 }
 
 async function linkedThread<T extends CommentLocation>(
   result: Promise<T>
 ): Promise<WithGuiUrl<T>> {
   const thread = await result
-  return { ...thread, guiUrl: guiLinker().comment(thread) }
+  return { ...thread, ...guiLinker().comment(thread) }
 }
 
 /**
@@ -180,7 +222,7 @@ async function linkedComment<T extends { id: number }>(
   const comment = await result
   return {
     ...comment,
-    guiUrl: guiLinker().comment(commentsService.locate({ commentId: comment.id }))
+    ...guiLinker().comment(commentsService.locate({ commentId: comment.id }))
   }
 }
 
@@ -221,7 +263,7 @@ server.registerTool(
     inputSchema: addRepositoryInputSchema.shape,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false }
   },
-  (input) => run(() => repositoriesService.add(input))
+  (input) => runWrite(RPC_EVENTS.reviewsChanged, () => repositoriesService.add(input))
 )
 
 server.registerTool(
@@ -235,7 +277,7 @@ server.registerTool(
     inputSchema: updateRepositoryInputSchema.shape,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true }
   },
-  (input) => run(() => repositoriesService.update(input))
+  (input) => runWrite(RPC_EVENTS.reviewsChanged, () => repositoriesService.update(input))
 )
 
 server.registerTool(
@@ -248,7 +290,7 @@ server.registerTool(
     inputSchema: removeRepositoryInputSchema.shape,
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true }
   },
-  (input) => run(() => repositoriesService.remove(input))
+  (input) => runWrite(RPC_EVENTS.reviewsChanged, () => repositoriesService.remove(input))
 )
 
 server.registerTool(
@@ -260,7 +302,7 @@ server.registerTool(
       '("open" or "closed"); omit both to list every review across all tracked repositories. ' +
       'A review records the two refs being compared, not the commits they resolved to - ' +
       'read the repository with git to see the actual changes.' +
-      GUI_URL_NOTE,
+      GUI_URL_NOTE + WEB_URL_NOTE,
     inputSchema: listReviewsInputSchema.shape,
     annotations: { readOnlyHint: true, openWorldHint: false }
   },
@@ -268,7 +310,7 @@ server.registerTool(
     run(async () => {
       const links = guiLinker()
       const reviews = await reviewsService.list(input)
-      return reviews.map((review) => ({ ...review, guiUrl: links.review(review.id) }))
+      return reviews.map((review) => ({ ...review, ...links.review(review.id) }))
     })
 )
 
@@ -279,7 +321,7 @@ server.registerTool(
     description:
       'Fetch one review by id, with the repository it belongs to attached (including the ' +
       'repository path, so the changes can be inspected with git directly).' +
-      GUI_URL_NOTE,
+      GUI_URL_NOTE + WEB_URL_NOTE,
     inputSchema: getReviewInputSchema.shape,
     annotations: { readOnlyHint: true, openWorldHint: false }
   },
@@ -300,11 +342,11 @@ server.registerTool(
       'the same ref as both endpoints is allowed and does exactly that: the review then holds ' +
       'only the uncommitted work on that ref, and its title defaults to "Uncommitted work on ' +
       '<ref>".' +
-      GUI_URL_NOTE,
+      GUI_URL_NOTE + WEB_URL_NOTE,
     inputSchema: createReviewInputSchema.shape,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false }
   },
-  (input) => run(() => linkedReview(reviewsService.create(input)))
+  (input) => runWrite(RPC_EVENTS.reviewsChanged, () => linkedReview(reviewsService.create(input)))
 )
 
 server.registerTool(
@@ -315,11 +357,11 @@ server.registerTool(
       'Change a review\'s title, description or endpoints, or set its `status` to "closed" or ' +
       '"open" again. Provide at least one field. New refs are validated exactly as they are on ' +
       'creation.' +
-      GUI_URL_NOTE,
+      GUI_URL_NOTE + WEB_URL_NOTE,
     inputSchema: updateReviewInputSchema.shape,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true }
   },
-  (input) => run(() => linkedReview(reviewsService.update(input)))
+  (input) => runWrite(RPC_EVENTS.reviewsChanged, () => linkedReview(reviewsService.update(input)))
 )
 
 server.registerTool(
@@ -333,7 +375,7 @@ server.registerTool(
     inputSchema: removeReviewInputSchema.shape,
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true }
   },
-  (input) => run(() => reviewsService.remove(input))
+  (input) => runWrite(RPC_EVENTS.reviewsChanged, () => reviewsService.remove(input))
 )
 
 /* -------------------------------------------------------------------------- */
@@ -385,7 +427,7 @@ server.registerTool(
       'on disk: read it with your own image tools. `alt` is the description whoever attached it ' +
       'wrote, and is worth reading first - it is often enough on its own, and it is all you get ' +
       'if you cannot see images.' +
-      GUI_URL_NOTE,
+      GUI_URL_NOTE + WEB_URL_NOTE,
     inputSchema: listCommentsInputSchema.shape,
     annotations: { readOnlyHint: true, openWorldHint: false }
   },
@@ -393,7 +435,7 @@ server.registerTool(
     run(async () => {
       const links = guiLinker()
       const threads = await commentsService.listAnchored(input)
-      return threads.map((thread) => ({ ...thread, guiUrl: links.comment(thread) }))
+      return threads.map((thread) => ({ ...thread, ...links.comment(thread) }))
     })
 )
 
@@ -412,11 +454,14 @@ server.registerTool(
       'returned thread says whether it could be anchored to a visible line. ' +
       'Comments are attributed automatically from the MCP handshake - see `agent_identity`.\n\n' +
       ATTACHMENT_GUIDANCE +
-      GUI_URL_NOTE,
+      GUI_URL_NOTE + WEB_URL_NOTE,
     inputSchema: withLabel(createThreadInputSchema.shape),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false }
   },
-  (input) => run(() => linkedThread(commentsService.createThread(input, adoptLabel(input))))
+  (input) =>
+    runWrite(RPC_EVENTS.commentsChanged, () =>
+      linkedThread(commentsService.createThread(input, adoptLabel(input)))
+    )
 )
 
 server.registerTool(
@@ -428,11 +473,12 @@ server.registerTool(
       'responding to something someone already raised, so the discussion stays in one place. ' +
       'Thread ids come from `list_review_comments`.\n\n' +
       ATTACHMENT_GUIDANCE +
-      GUI_URL_NOTE,
+      GUI_URL_NOTE + WEB_URL_NOTE,
     inputSchema: withLabel(replyToThreadInputSchema.shape),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false }
   },
-  (input) => run(() => linkedComment(commentsService.reply(input, adoptLabel(input))))
+  (input) =>
+    runWrite(RPC_EVENTS.commentsChanged, () => linkedComment(commentsService.reply(input, adoptLabel(input))))
 )
 
 server.registerTool(
@@ -443,11 +489,14 @@ server.registerTool(
       'Mark a discussion settled, or reopen one. Set `resolved` to true once the point has been ' +
       'addressed, false to bring it back. Resolving records who did it; it never deletes the ' +
       'messages, which stay readable.' +
-      GUI_URL_NOTE,
+      GUI_URL_NOTE + WEB_URL_NOTE,
     inputSchema: setThreadResolvedInputSchema.shape,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true }
   },
-  (input) => run(() => linkedThread(commentsService.setResolved(input, currentAuthor())))
+  (input) =>
+    runWrite(RPC_EVENTS.commentsChanged, () =>
+      linkedThread(commentsService.setResolved(input, currentAuthor()))
+    )
 )
 
 server.registerTool(
@@ -457,11 +506,14 @@ server.registerTool(
     description:
       'Replace the text of one message. An agent can only edit messages written by its own tool - ' +
       'correcting yourself is expected, rewriting someone else\'s review is not.' +
-      GUI_URL_NOTE,
+      GUI_URL_NOTE + WEB_URL_NOTE,
     inputSchema: updateCommentInputSchema.shape,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true }
   },
-  (input) => run(() => linkedComment(commentsService.update(input, currentAuthor())))
+  (input) =>
+    runWrite(RPC_EVENTS.commentsChanged, () =>
+      linkedComment(commentsService.update(input, currentAuthor()))
+    )
 )
 
 server.registerTool(
@@ -474,7 +526,7 @@ server.registerTool(
     inputSchema: removeCommentInputSchema.shape,
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true }
   },
-  (input) => run(() => commentsService.remove(input, currentAuthor()))
+  (input) => runWrite(RPC_EVENTS.commentsChanged, () => commentsService.remove(input, currentAuthor()))
 )
 
 async function main(): Promise<void> {
