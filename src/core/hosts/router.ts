@@ -58,7 +58,7 @@
 import { getInstanceId } from '../instance.js'
 import { hostPool } from './pool.js'
 import { requireInstance, routeFor } from '../services/hosts.js'
-import { isLocalOnly } from './ssh.js'
+import { isLocalOnly } from './carrier.js'
 import { dispatch } from '../rpc/dispatcher.js'
 import { AppError } from '../../shared/errors.js'
 import type {

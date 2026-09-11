@@ -40,6 +40,7 @@ import { getDatabase } from '../db/client.js'
 import { hosts, type HostRow } from '../db/schema.js'
 import { hostPool, type HostRoute } from '../hosts/pool.js'
 import { installOnHost } from '../hosts/install.js'
+import { listDistros } from '../hosts/wsl.js'
 import { AppError } from '../../shared/errors.js'
 import { parseWithSchema as parse } from '../../shared/validation.js'
 import {
@@ -50,7 +51,8 @@ import {
   updateHostInputSchema,
   type Host,
   type HostWithState,
-  type InstallReport
+  type InstallReport,
+  type WslDistro
 } from '../../shared/schemas.js'
 
 function toHost(row: HostRow): Host {
@@ -173,6 +175,37 @@ export const hostsService = {
     return rows.map(withState)
   },
 
+  /**
+   * The WSL distributions this machine could host a daemon in.
+   *
+   * Answered here rather than in a shell channel because it is a fact about the
+   * machine the *core* runs on - the one that will spawn `wsl.exe` - and a
+   * browser tab managing this install's hosts has to be able to ask it. See the
+   * note on `hosts.distros` in `shared/rpc.ts`.
+   *
+   * `alreadyAdded` is joined on here because this is the layer that can see the
+   * host table, and a picker that offered a distribution already in the list
+   * would be offering the duplicate error rather than preventing it. Compared
+   * case-insensitively, because `wsl.exe` matches a distribution name that way
+   * while the unique index does not - so `ubuntu` typed by hand and `Ubuntu`
+   * from this list are one machine, and the picker should say so before the
+   * instance id has to.
+   */
+  async distros(): Promise<WslDistro[]> {
+    const found = await listDistros()
+    if (found.length === 0) return []
+
+    const taken = new Set(
+      getDatabase()
+        .select()
+        .from(hosts)
+        .where(eq(hosts.kind, 'wsl'))
+        .all()
+        .map((row) => row.target.toLowerCase())
+    )
+    return found.map((distro) => ({ ...distro, alreadyAdded: taken.has(distro.name.toLowerCase()) }))
+  },
+
   get(input: unknown): HostWithState {
     const { id } = parse(getHostInputSchema, input)
     return withState(requireRow(id))
@@ -211,6 +244,23 @@ export const hostsService = {
     // instance id would let a repository row follow the address instead of the
     // machine - which is the one thing the id exists to prevent.
     const movedElsewhere = target !== undefined && target !== row.target
+
+    // An ssh target is an *address*, and an address is allowed to change - a
+    // machine gets a new name, a config alias is renamed, the tailnet hands out
+    // a different one. A WSL host's target is not an address, it is which
+    // distribution this is; changing it does not repoint a route at the same
+    // machine, it names a different machine with a different home directory and
+    // a different database. So it is refused rather than quietly accepted, and
+    // the sentence says what to do instead. `update` carries no `kind`, which is
+    // why this is here and not in the schema.
+    if (movedElsewhere && row.kind === 'wsl') {
+      throw new AppError(
+        'INVALID_INPUT',
+        'A WSL host is identified by its distribution. To review a different one, ' +
+          'add it as its own host.',
+        { target: ['A WSL host cannot be pointed at a different distribution.'] }
+      )
+    }
 
     try {
       const updated = getDatabase()

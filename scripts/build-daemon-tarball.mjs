@@ -51,6 +51,7 @@ import {
   mkdirSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync
 } from 'node:fs'
 import { pipeline } from 'node:stream/promises'
@@ -224,5 +225,10 @@ chmodSync(join(stage, 'bin', 'gitwarren'), 0o755)
 //    free to change without changing both.
 const out = join(root, 'out', 'daemon-tarball', `gitwarren-daemon-${version}-${target}.tar.gz`)
 execFileSync('tar', ['czf', out, '-C', work, 'gitwarren-daemon'])
-const size = execFileSync('du', ['-h', out], { encoding: 'utf8' }).split('\t')[0]
-console.log(`${out} (${size})`)
+// `statSync` rather than `du -h`, which does not exist on Windows: the archive
+// was fully built by the line above and the script then died reporting its
+// size, which is the most annoying possible place to fail. Same family as the
+// `npx.cmd` spawn in `run-tests.mjs` - ci.yml runs ubuntu only, so nothing said
+// so until somebody built a tarball on a PC.
+const size = statSync(out).size
+console.log(`${out} (${(size / 1024 / 1024).toFixed(1)} MB)`)

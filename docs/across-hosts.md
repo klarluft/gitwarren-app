@@ -2450,6 +2450,614 @@ M4; large for Windows users who keep code in WSL.
 **Verify:** Windows app, repo in Ubuntu, Claude Code running inside WSL. Native
 Windows repos unaffected.
 
+#### How it is being built, and where it has got to
+
+Four changes, each mergeable on its own, in the order that keeps every one of
+them verifiable against the real Ubuntu distro on this PC rather than against a
+mock. Before them, one repair that is not M5 and is listed because it had to
+happen first:
+
+0. **The test suite on Windows.** `npm test` cannot run here at all, for a
+   reason that has nothing to do with hosts. *(done — see below.)*
+1. **The WSL carrier.** `wsl.exe` as a way of starting a daemon and talking to
+   it, the `kind` column widened, and the pool taught which carrier to open.
+   *(done — see below.)*
+2. **The distro list and the installer.** `hosts.distros`, the add form
+   becoming a picker rather than a text field, and the same linux tarball
+   streamed down the same pipe. *(done — see below.)*
+3. **Editors, reveal and agent access.** `wsl+<distro>`, Explorer reveal
+   through `\\wsl.localhost`, and the Agent Access page for a distro.
+   *(done — see below.)*
+4. **The guard.** A `\\wsl.localhost` path refused as a *local* repository,
+   with a pointer to the thing the person meant. *(done — see below.)*
+
+**What was settled before any of it was written.**
+
+*A WSL host's target is the distro name, and nothing else.* An `ssh` target
+carries the Unix user because spike S1 found that a bare MagicDNS name asks for
+the *client's* username; that negotiation does not exist here. `wsl.exe -d
+Ubuntu` runs as the distro's own default user — `whoami` answers `xfor`,
+decided by `/etc/wsl.conf` over there and not by anything this app could say.
+`wsl.exe` does have a `-u`, and it is deliberately not offered: the daemon
+installs into `$HOME/.gitwarren` and keeps its database there, so a second user
+is a second home, a second database and a second set of reviews. That is not
+another way of reaching one host, it is another host, and a form field most
+people would get wrong is exactly what the schema comment warns against.
+
+*One machine is one row, even when two carriers reach it.* This distro is
+already reachable both ways: it is `xfor@pc-wsl` over ssh from the Mac and will
+be `Ubuntu` over `wsl.exe` from here. Those are two installs and do not interact.
+Within *this* install, adding the same distro over both carriers is refused, and
+M4.1's collision report is what refuses it — but the reason is stronger than
+tidiness. `#/h/<instance>/…` routes by instance id, and `requireInstance` reads
+one row for it; two rows bearing one instance id would make every remote route
+ambiguous, with a repository list that depended on which row won. So the answer
+is not "allow one machine two carriers", it is "pick the carrier you want" — and
+the report already says which other row it collided with.
+
+*The bytes go over the pipe, and the `\\wsl.localhost` route is rejected.*
+Spike S2 measured 56 MB/s through this exact pipe on this exact machine, so the
+46 MB tarball is under a second of it; M4.2's `ssh` pipe did the same file in
+3.4 seconds and nobody minded. The file-path route loses on moving parts rather
+than on speed: it would still need a shell inside the distro to unpack the
+archive and to run `service install`, so it replaces `tar xzf -` reading stdin
+with a file copy *plus* that same shell invocation. It also puts the bytes
+through SMB, and this milestone found out what SMB does to a Linux working tree
+(see the guard). `core/hosts/install.ts` is expressed entirely in terms of "run
+this command on that host, with this on its stdin", so the installer's whole
+delta is which function that is.
+
+*The distro list is a method, not a shell capability.* The tempting comparison
+is `system.editors`, which is a shell channel because launching an editor is
+something only a shell can do. Listing distros is not an act, it is a fact about
+the machine that will spawn `wsl.exe` — which is the machine the *core* runs on,
+not the one the window is drawn on. M4.2's Hosts screen works in a browser tab,
+where it manages the list belonging to the install that served the tab, so the
+tab has to be able to ask this question too; a shell capability would have left
+it unable to. It is `hosts.distros`, which also makes it unforwardable for free:
+`isLocalOnly` refuses the whole `hosts.` prefix, and what distros exist on a
+machine is that machine's own business in exactly the way its host list is. The
+screen offers a WSL host when the answer is non-empty, so a Mac never offers one
+without any code asking what platform it is on.
+
+The list is unfiltered, including the two `docker-desktop` distros this PC has.
+A blocklist of names is a list that goes stale — `rancher-desktop` and
+`podman-machine` are the same shape — and it is M4.3's argument about hidden
+folders one screen along: a listing that silently dropped rows is one you cannot
+trust when what you wanted is not in it. Picking one that cannot host a daemon
+fails during an install someone is watching, in the distro's own words, which is
+the failure M4.2 built for.
+
+*Ten idle minutes stays, and the comment that explains it stops being a lie.*
+`IDLE_TIMEOUT_MS` matches `ControlPersist=10m` "kept in step deliberately", and
+`wsl.exe` has no ControlPersist to keep step with. Measured here: a connection
+to a running distro costs 80 ms, and one that has to start it 1.7 seconds — so
+being wrong about the timeout is a tenth of a second, not a key exchange. The
+number is kept for both carriers because the interesting reason turns out to run
+the other way. A held-open pipe keeps a `serve --stdio` process alive inside the
+distro, and a distro with a process in it is a distro WSL will not idle down. On
+ssh, hanging up lets a multiplexing master expire; on WSL, hanging up is what
+lets the whole virtual machine go to sleep. It matters more here, not less.
+
+**M5.0, done on the PC, 11 September.** `npm test` on Windows ended with
+thirteen failures in one file, every one of them reporting `EPERM: operation
+not permitted, symlink` as the reason a *folder listing* was wrong. Windows does
+not let an unprivileged process create a symlink without Developer Mode, and
+`fs.test.ts` made two of them in `before`, so the hook took all thirteen tests
+down and none of the other twelve had anything to do with symlinks. The one test
+that is about them now skips itself and says why; the rest run. 520 pass, 5
+skipped, 0 fail — the fifth skip is the new one, the other four being M4.1's
+envelope assertions.
+
+This is the third of its kind after `scripts/run-tests.mjs` and the Windows
+drive-letter fix, and they all have one cause: `ci.yml` runs ubuntu only, so
+every Windows-shaped failure in this repository has been found by a person
+sitting at a Windows machine rather than by the suite. A Windows job is the
+honest fix and is deliberately not in this milestone.
+
+Two more of the same family, found getting the checkout to build at all and
+recorded because the next person will hit them in the same order. `better-sqlite3`
+ships a `win32-x64` prebuild *and* a `binding.gyp`, and npm runs `node-gyp
+rebuild` for any package with a `binding.gyp` and no `install` script — so a
+plain `npm install` on Windows tries to compile SQLite, needs Python, and fails
+the whole install even though the binary it was about to build is already in the
+package. `npm install --ignore-scripts` is the way past it. And the `python` on
+this machine's PATH is the Microsoft Store stub, which exits without printing a
+version, so node-gyp reports "THIS VERSION OF PYTHON IS NOT SUPPORTED" for a
+Python that is not installed at all.
+
+**M5.1, done on the PC against the Ubuntu distro, 11 September.** M4.1 said a
+carrier is "one file and an argument vector", and it very nearly is again -
+`wsl.ts` contributes a child process, the pool grew a two-line switch, and
+`kind` widened without a migration because `drizzle/0008_hosts.sql` never had a
+CHECK on it. What is *not* shared with `ssh` is four things, and every one of
+them was found by running the command and reading the bytes rather than by
+reading Microsoft's documentation.
+
+**`--` is not `ssh host '<script>'`, and the difference is silent.** The obvious
+spelling is `wsl.exe -d Ubuntu -- ~/.gitwarren/bin/gitwarren serve --stdio`, and
+it works, which is the problem: what `--` actually does is hand the words to the
+distribution's *login shell*, which expands parameters and tildes in each of them
+and then execs the result with no parsing at all - no word splitting, no quoting,
+no operators. So `-- 'echo $HOME'` as one argument tries to exec a file named
+`echo /home/xfor`, and `-- sh -c '<script>'` has the script's `$root` and `$`
+expanded by the *outer* shell before the inner `sh` sees them. That second one
+is the dangerous shape, because it still produces a number: `$` answered 1269
+where the inner shell answered 1274, so a scratch directory named after the pid
+quietly stops being unique per install. `-e` skips the login shell entirely, and
+naming `sh -c` ourselves buys back tilde expansion and a script-as-one-argument
+under our own control. It is more predictable than `ssh`'s arrangement rather
+than less: over `ssh` the *login* shell runs the command and M4.2 found out the
+hard way that on this box it is `zsh`, whereas here it is always `sh`.
+
+**`wsl.exe` writes its own errors to stdout, which is the protocol.** This is
+the one with no `ssh` analogue whatever. `ssh` puts its complaints on stderr and
+leaves stdout to the remote command - M4.1 depended on that, and it is why the
+daemon's ready banner is on stderr. `wsl.exe` puts "There is no distribution with
+the supplied name." on **stdout**, in front of a stream that is supposed to carry
+nothing but ndjson frames. Nothing can stop it. The frame reader does exactly
+what it should and shuts the connection down saying the host "sent something that
+is not part of the protocol … usually a login script printing to stdout on the
+host" - right about the shape and wrong about the cause, and it would have sent
+somebody to look at their `.zshrc` for a distribution they never installed.
+
+What saves it is the mechanism M4.1 built for a different reason.
+`diagnostics()` already waits for the exit before explaining itself, so it gets
+the last word: a bounded prefix of stdout is kept, `wslSaid` drops the lines that
+are frames, and `describeWslExit` puts what is left in the sentence. A
+distribution that does not exist now fails in **42 ms** with *wsl.exe could not
+start no-such-distro-here. There is no distribution with the supplied name. Error
+code: Wsl/Service/WSL_E_DISTRO_NOT_FOUND*. A frame is a JSON object, so "does
+this line start with `{`" is the whole of the test - cheaper than parsing, and
+the question being asked is not "is this valid JSON" but "did something other
+than the protocol write here".
+
+**Two encodings on one pipe.** `wsl.exe` speaks UTF-16LE and the guest speaks
+UTF-8, so `setEncoding('utf8')` turns half the stream into mojibake - `wsl.exe -l
+-q` reads `U\0b\0u\0n\0t\0u\0`, and an error message is worse because it is the
+thing somebody has to read. `WSL_UTF8=1` fixes it, and is set on the child rather
+than on this process because it changes the output of a program we parse and
+nothing else should have to know. Worth noticing that this is `rpc-wire.ts`'s
+lesson in a third place: two framings hang, two encodings lie, and two encodings
+*on the same stream* lie in only half the sentences.
+
+**There is no `BatchMode`, because there is nothing to prompt for.**
+`BatchMode=yes` is what turns an `ssh` hang into an error, and the hang it
+prevents does not exist here - `wsl.exe` never authenticates, the distribution
+belonging to the Windows user already. What exists instead is a set of failures
+that each arrive as a status with some words attached, so the work was
+enumerating them rather than defending against a wait. A distribution that is not
+installed and WSL that is not enabled are both `wsl.exe`'s own `-1` (which
+Windows reports as 4294967295, and both spellings are accepted because which one
+arrives is a platform detail rather than a promise), told apart by the sentence
+rather than by the code. A distribution without GitWarren is exit 127 from `sh`,
+the same status `ssh` produces, which is why it is the same sentence. The wrong
+architecture is not visible here at all - it gets as far as a perfectly
+successful `tar` and dies at the first `exec`, during an install someone is
+watching, exactly as M4.2 arranged.
+
+**The one message this app has to invent.** `wsl --terminate Ubuntu` under a live
+connection ends the pipe and exits **1 with not one word on either stream** -
+which is M5's equivalent of M4.5 killing the `ssh`, except that `ssh` at least
+said something. Exit 1 is also what a daemon failing on its own account would
+give, so the two are told apart by the evidence: a daemon that failed said so on
+stderr, and silence is what a shutdown looks like. The sentence is therefore
+worded as a possibility, because that is all the evidence supports - *The
+connection to Ubuntu ended without saying why. The distribution may have been
+shut down, by `wsl --terminate` or by WSL idling it out.*
+
+**What moved, and why it moved before it was copied.** `ssh.ts` held the
+connection interface, the launcher path, the two bounds and M4.5's
+"a healthy start is not a cause of death" stderr filter, and all five are things
+a *carrier* has rather than things `ssh` has. They are in `carrier.ts` now, and
+both files are users of it - the same move `ndjson.ts` made at M4 and for the
+same reason, one layer up. The failure it prevents is quieter than a hang this
+time but not by much: the pool holds carriers through that interface and would go
+on compiling while one of them stopped waiting for an exit before explaining
+itself, which is precisely the bug M4.1 spent its time on. `isLocalOnly` moved
+with them, which is what makes M5.2's `hosts.distros` unforwardable by being
+named rather than by anybody remembering to check.
+
+**Verified end to end against the real distribution through the shipping code,**
+which already had the daemon M4 left on it. A cold connection answered
+`repositories.list` in 2.5 seconds and the next request in **1 ms**; the
+distribution named itself `4e0b0adb…` running 0.1.7-beta.1, with the two
+repositories M4 added still there. Two requests in flight at once both came back,
+which is the property `id` exists for. A `NOT_FOUND` crossed the pipe as itself.
+`hosts.list` was refused by the carrier. Through the pool with a `wsl` route: 141
+ms warm, and an unreachable distribution arriving as a *state* carrying
+`wsl.exe`'s words rather than as a throw. Then `wsl --terminate` under an open
+connection: the next request failed in **3 ms** with the invented sentence, and
+the connection after that started the distribution again in 1.8 seconds and got
+the same instance id back.
+
+Two numbers worth keeping for the idle-timeout argument: reconnecting to a
+running distribution costs **80 ms**, and starting a stopped one **1.7 seconds**
+- against `ssh`'s 178 ms cold and 4 ms warm on a multiplexed channel. So
+`IDLE_TIMEOUT_MS` keeps its ten minutes and its comment stops claiming
+`ControlPersist` is the only reason: an open pipe keeps a `serve --stdio` process
+alive *inside* the distribution, and a distribution with a process in it is one
+WSL will not idle down. Letting go retires a multiplexing master on `ssh`; on WSL
+it is what lets the whole virtual machine sleep.
+
+**Not done in M5.1, and why.** Nothing installs into a distribution yet and no
+screen can add one - both are M5.2, and they are one slice for M4.2's reason:
+the picker's main job is to drive the install. `hosts.add` accepts
+`kind: 'wsl'` and the carrier works, so a host is added through the dispatcher
+and not by anybody using the app. A WSL host's target cannot be *edited* to a
+different distribution, and that is a rule rather than a gap: an ssh target is an
+address and addresses change, while a distribution name is which machine this is,
+so repointing it would be naming a different home directory and a different
+database. The service refuses it and says to add the other distribution as its
+own host.
+
+**M5.2, done on the PC against the Ubuntu distro, 11 September.** A distribution
+stops being something the dispatcher can reach and becomes something a person
+can add and install onto. The installer's delta is a switch:
+
+    hosts.distros               what could become a host here
+    runOnHost(route, …)         the same four commands, either carrier
+    a picker, not a text field  because this machine knows the answer
+
+**Nothing was added to the installer, and that is the claim worth checking.**
+`core/hosts/install.ts` was written against "a machine with a shell and a `tar`"
+rather than against `ssh`, and a distribution is one - so `uname -sm`, the
+scratch directory, the one `mv`, the host writing its own launchers and the
+version read back afterwards are all M4.2's, unchanged. What changed is that
+`run` takes a route instead of an ssh target. A test asserts the same four
+commands in the same order against a `wsl` route, including that the tarball is
+still chosen from `uname` and not from the carrier - which is `hosts.kind`'s rule
+in an assertion: what a host runs is discovered by asking it.
+
+**The bytes went over the pipe in 1.1 seconds.** 44.2 MB, against M4.2's 3.4
+seconds for the same archive over `ssh`, which settles the delivery question
+empirically rather than by argument. The `\\wsl.localhost` route was rejected on
+moving parts rather than on speed: it still needs a shell inside the
+distribution to unpack and to run `service install`, so it is a file copy *plus*
+the same shell invocation, and it is only available while the distribution is
+already running - a precondition the pipe does not have, because starting it is
+what the pipe does.
+
+**`hosts.distros` is a method, and the browser tab is why.** The tempting
+comparison is `system.editors`, which is a shell channel because launching an
+editor is something only a shell can do and a tab must never ask a server to
+spawn one. Listing distributions is not an act; it is a fact, and a fact about
+the machine that will spawn `wsl.exe` - which is the machine the *core* runs on,
+not the one the window is drawn on. M4.2's Hosts screen works in a tab, where
+what it manages is the host list of the install that served it, so the tab has
+to be able to ask this too. Under the `hosts.` prefix it is unforwardable
+without anybody remembering to make it so, which is the property `isLocalOnly`
+moving into `carrier.ts` in M5.1 bought. And because an empty answer is what a
+Mac gives, the screen offers a WSL host exactly when the list is non-empty and
+**no code anywhere asks what platform it is on**.
+
+The list is unfiltered, `docker-desktop` and `docker-desktop-data` included. A
+blocklist of names goes stale - `rancher-desktop` and `podman-machine` are the
+same shape - and it is M4.3's argument about hidden folders one screen along: a
+listing that silently drops rows is one you cannot trust when what you wanted is
+not in it. Picking one that cannot host a daemon fails during an install someone
+is watching, in that distribution's own words.
+
+**Three things bit, and two of them are Windows properties rather than
+GitWarren ones.**
+
+*A daemon tarball built on Windows is not installable, and the install said the
+wrong thing about it.* `tar tzvf` on the archive this machine produced shows
+every entry as `-rw-rw-rw-`: NTFS has no POSIX mode, `chmodSync` is a no-op
+there, and bsdtar faithfully records what it was given - so `bin/gitwarren`,
+`bin/gitwarren-mcp` and the 126 MB embedded `bin/node` all arrive without an
+executable bit. M4.2's guard caught it, which is the system working, but it
+reported *the tarball did not contain bin/gitwarren* about a file that is
+plainly there. The fix is in the unpack script rather than in the builder:
+`chmod +x` on `bin/*` before the check. Nothing ever read those bits except that
+one check, and the step after it runs the binary, so setting the bit we require
+is strictly more reliable than asserting somebody else set it - and it makes an
+archive rebuilt on any machine work. The guard now distinguishes "not there"
+from "not executable", because those send a person to different places.
+
+*`scripts/build-daemon-tarball.mjs` built the tarball and then died reporting its
+size.* The last line ran `du -h`, which does not exist on Windows, so a 44 MB
+archive was produced successfully and the script exited non-zero on
+`spawnSync du ENOENT` - the most annoying available place to fail. `statSync`
+instead. Third of its family after `run-tests.mjs` and the drive-letter fix, and
+the same cause every time: `ci.yml` runs ubuntu only.
+
+*The `wsl.exe -l -v` table needs reading rather than splitting.* Three things
+about it: without `WSL_UTF8=1` it is UTF-16LE and a name reads
+`U\0b\0u\0n\0t\0u\0` - which would be *stored* as a host target by anything that
+did not notice; lines end `\r\n`; and the default distribution is marked with a
+leading `*` in the column every other row leaves blank. The header row is dropped
+by position rather than by matching "NAME", because that word is localised and a
+filter reading English would silently drop a distribution actually called `NAME`
+while keeping a header nobody could parse.
+
+**One machine is one row, and the collision fired for real.** Adding `ubuntu`
+alongside `Ubuntu` is two perfectly distinct *descriptions* - `wsl.exe` matches a
+name case-insensitively, the unique index does not - and the second one probed
+gave *ubuntu is the same machine as "Ubuntu" (Ubuntu), which is already in the
+list. Remove one of them.* M4.1 built that report for the hypothetical case of
+one box under two ssh names; this is it happening. The answer is deliberately not
+"allow one machine two carriers": `#/h/<instance>/…` routes by instance id and
+`requireInstance` reads one row for it, so two rows bearing one id would make
+every remote route ambiguous, with a repository list depending on which row won.
+The picker greys out a distribution already added, so the ordinary way to reach
+this is closed before the instance id has to.
+
+**The form has two halves and they are deliberately not symmetrical.** An `ssh`
+target stays free text, because every `~/.ssh/config` alias somebody already has
+must work and no validator can know what those are. A distribution is a *list*,
+because this machine knows exactly which ones exist and offering its own spelling
+removes the case question entirely. Both keep their own error messages - "a user
+name, an @ and a machine name" and "that is not a WSL distribution name" are not
+interchangeable advice - which is why `addHostInputSchema` grew a `superRefine`
+rather than one permissive rule: `kind` is optional, every host added before M5
+saying `ssh` by saying nothing, and a discriminated union cannot discriminate on
+a key that may be absent. The carrier choice appears only when there is something
+to choose, so on a Mac the dialog is what it was before M5.
+
+**Verified end to end through the real window over CDP**, every call made with
+`window.gitwarren.carrier.request` so the preload, the router, the pool and the
+carrier were all in the path. The window listed three distributions; `Ubuntu` was
+added with its label defaulting to the distribution name and `instanceId` null
+until it had been met; the picker then showed it as already added. `hosts.install`
+from the window: **44.2 MB in 3.6 seconds**, the instance id learned
+(`4e0b0adb…`), the row reachable. Then it was a machine to review: its two
+repositories listed with their WSL paths, `fs.list` answering `/home/xfor` with
+45 entries and `/` as its separator, `app.mcp` answering
+`/home/xfor/.gitwarren/bin/gitwarren-mcp`. The duplicate-spelling collision as
+above. An ssh target of "not a host" and a distro name of "no/slashes" each
+refused with their own sentence under the `target` field. No console errors.
+
+**Not done in M5.2, and why.** Editors, the Explorer reveal and the per-host
+Agent Access page are M5.3. A WSL host's target still cannot be edited, and the
+dialog now simply does not draw the field for one rather than drawing a field
+that could only produce the service's refusal. There is no uninstall, for M4.2's
+reason exactly: `hosts.remove` forgets a row here, and `rm -rf ~/.gitwarren` is
+something a person can type into their own distribution and read before pressing
+return.
+
+**M5.3, done on the PC against the Ubuntu distro, 11 September.** The three
+controls that point at a file over there. Two of them were already right and had
+to be told about one more arrangement; the third is the one M4.3 switched off and
+this milestone is allowed to switch back on.
+
+    editorTargetFor             wsl+Ubuntu, not ssh-remote+Ubuntu
+    useRevealPath               can this machine name that file at all
+    app.mcp                     unchanged, and that is the result
+
+**The editor form is the thing M4.4 wrote down a milestone early.** Its note
+said `editor_target` was kept apart from `target` because "the two coincide today
+and stop coinciding at M5, where the carrier is `wsl.exe -d Ubuntu` and the
+editor form is `wsl+Ubuntu`", and this is that sentence becoming a branch. The
+authorities come from different VS Code extensions - `ssh-remote+` from
+ms-vscode-remote.remote-ssh and `wsl+` from ms-vscode-remote.remote-wsl - which
+is the real reason they cannot be one derivation, and also the reason a link's
+failure is silent: the wrong extension is not installed and nothing says so.
+That caught M4.4 out on the Mac, so it was checked first here rather than
+concluded from a URL that looked right.
+
+**Reveal stopped being a rule about remoteness and became a question.** M4.3 hid
+"Show in file manager" for every remote host, and the reasoning was exact:
+`/home/xfor/app` handed to a Mac's Finder opens a window on nothing or on an
+unrelated local folder. M5 does not re-open that hole, it observes that
+`host === undefined` was only ever a *proxy* for the condition actually being
+tested - *can this machine name that file in its own filesystem* - and that the
+proxy was correct only while every remote host was across a network. Windows
+serving a distribution at `\\wsl.localhost\<distro>\…` is the one arrangement
+where the answer is yes for a machine that is not this one.
+
+So `useRevealPath` returns a path or null, and null is still absence rather than
+a disabled button. It returns the *path* rather than a boolean on purpose: the
+caller needs a name to hand the shell, and a second place where the translation
+could be made differently is a second place to get it wrong. Both its conditions
+have to hold and neither implies the other - the host must be reached by
+`wsl.exe`, and the **core** must be on Windows, which is `appInfo.platform` and
+not anything about the browser. In a tab it never gets asked, because
+`capabilities.revealPath` is false and the button is gone first.
+
+It returns null while the host list is still loading, deliberately: an unanswered
+question is not the alarming answer - the same distinction M4.3's banner got
+wrong in the other direction - and the cost of waiting a frame is a button
+appearing late, against a file manager opened on a path that means something
+else.
+
+**`shared/wsl.ts` translates both ways, and the second direction is M5.4's.**
+Towards Windows for the reveal; towards the distribution so that a
+`\\wsl.localhost\…` path typed into the *local* add-repository form can be
+refused with a pointer at what the person meant. Two prefixes are recognised
+because `\\wsl$\` is the older spelling and still resolves, and both separators
+because `git rev-parse --show-toplevel` answers `//wsl.localhost/Ubuntu/…` with
+forward slashes - which is the form the guard is most likely to be shown and the
+one a backslash-only test would miss.
+
+**Agent access needed nothing, and that is the interesting part.** `app.mcp`
+answers "the launcher, as the host resolves it", which was M4.4's whole point,
+and a distribution resolves it to `/home/xfor/.gitwarren/bin/gitwarren-mcp` for
+the same reason `pc-wsl` did over `ssh`. The Agent Access page was already
+fetching through `useApi()` after M4.4's fix, so the per-host page works on a WSL
+host without a line. The local answer on this machine is
+`C:\Users\micha\.gitwarren\bin\gitwarren-mcp.cmd`, which is a pleasing check that
+the two really are different machines rather than one path being shown twice.
+
+**Verified end to end through the real window over CDP.** The host derives
+`wsl+Ubuntu` with `editor_target` still NULL, so it is derived and not stored.
+`reviews.filePath` on the host answered
+`/home/xfor/github.com/klarluft/gitwarren-app/docs/across-hosts.md`, which became
+`vscode://vscode-remote/wsl+Ubuntu/home/xfor/…/docs/across-hosts.md:1` - and
+pressing it through `shell.openInEditor` started
+`ms-vscode-remote.remote-wsl-0.104.3\dist\node\wslDaemon.js`, which is the
+extension resolving the authority rather than a URL that merely looks right. The
+editor picker offered VS Code, Cursor and the JetBrains IDEs, which is
+`remotelyOpenable` reducing a real list for the first time - the Mac in M4.4 had
+one editor and could not exercise it.
+
+Pressing "Show in file manager" on a repository of the WSL host opened an
+Explorer window on
+`file://wsl.localhost/Ubuntu/home/xfor/github.com/klarluft/gitwarren-app`, read
+back out of the shell rather than assumed. `app.mcp` answered the distribution's
+launcher for the host and this machine's `.cmd` for no host.
+
+And the other half of M5's verify line, because the PC is the one machine that
+can check it: `C:\Users\micha\gitwarren-app` added as an ordinary local
+repository reads its git state on NTFS (branch `main`, root commit
+`59843fd3f8ab`), and the distribution's checkout of the same project reports the
+*same root commit* at `/home/xfor/github.com/klarluft/gitwarren-app`. M4.3 built
+that grouping across a network; here it groups two filesystems on one desk.
+
+On the screens: the Hosts screen lists the distribution; Add offers "Connect by
+SSH / WSL" with SSH the default, and choosing WSL replaces the text field with
+the picker, which shows `Ubuntu — already added` beside the two `docker-desktop`
+rows. No horizontal scroll at 390 px on the home screen, the Hosts screen, the
+host's repository list, or with the Add dialog open. No console errors or
+warnings anywhere in the run.
+
+**Not done in M5.3, and why.** Deep links still carry no host, unchanged from
+M4.3 and M4.4: a `gitwarren://` link written inside the distribution opens this
+machine's review of that number, and that is rule 4 needing the loopback
+fragment to grow a host segment, which belongs with M6's live links. The
+attachment path was not re-verified on this carrier - it is
+`shared/rpc-wire.ts` and the router, neither of which can tell `wsl.exe` from
+`ssh`, and M4.4 proved the bytes - so what M5 checked is that nothing about it
+is carrier-specific rather than that an image round-trips again.
+
+**M5.4, done on the PC, 11 September.** The guard, and it is the part of this
+milestone only this machine could have found - because the way to discover what
+the app did with a `\\wsl.localhost` path was to type one in.
+
+**What it did was lie, and then work badly.** Typing
+`\\wsl.localhost\Ubuntu\home\xfor\github.com\klarluft\gitwarren-app` into the
+add-repository form answered *"This folder is not inside a git repository"*. It
+is one. What happens is that Windows git refuses a working tree owned by another
+user - `fatal: detected dubious ownership in repository at
+'//wsl.localhost/Ubuntu/home/xfor/…'` - and `resolveRepositoryRoot` reads any
+non-zero `rev-parse` as "not a repository". True of the exit code, false about
+the folder, and it sends a person to check whether they picked the right one.
+
+The worse half is what happens to somebody who reads git's message and follows
+its advice, which is right there in the error and entirely reasonable: add a
+`safe.directory` exception. Then it *succeeds*, and the repository they get is
+wrong in three ways at once, each measured here rather than assumed.
+
+- **Its git runs over SMB.** `git status` on this project: 479 ms through
+  `\\wsl.localhost`, 74 ms inside the distribution.
+- **It reports a different diff.** Windows git saw two `.sh` scripts as modified
+  with zero content change, where the distribution saw a clean tree. The cause
+  is the executable bit, which is not visible across that share - so the *same
+  repository* has two answers to "what has changed" depending on which side is
+  asked, and the one GitWarren would show is the wrong one.
+- **Its reviews land in the wrong database.** They would be in the Windows
+  install's SQLite, where the agent running inside WSL cannot see them over its
+  own local MCP. That is rule 1 - a host owns its repositories - and it is the
+  entire reason the distribution is a *host* rather than a folder.
+
+So the guard is not tidiness about a path format. It is the difference between
+this milestone working and appearing to.
+
+**It fires before the filesystem is touched, and that ordering is the point.**
+The path is real, the directory exists, and git will answer *something* about
+it - so every check downstream produces a plausible response to the wrong
+question. `refuseWslPath` is the first line of `resolveRepositoryRoot`, ahead of
+even `isDirectory`.
+
+The message carries both halves of the remedy, because "no" is not advice: which
+host to add, and which path to add on it once they have - *That folder is inside
+the WSL distribution "Ubuntu", not on this machine. Add Ubuntu as a WSL host,
+then add /home/xfor/github.com/klarluft/gitwarren-app as a repository on it — so
+its reviews live where the code does and the agent in WSL can read them.* The
+second sentence is the translation `shared/wsl.ts` already does for the Explorer
+reveal, running the other way, which is why that module has two functions.
+
+**It fires on every platform, not only on Windows.** The string means the same
+thing wherever it is read, the advice is the same, and a guard that exists on
+one operating system is one that no test on another can check - which for this
+repository means one that CI would never run. Both UNC spellings are recognised
+and both separators, because `\\wsl$\` still resolves and because
+`git rev-parse --show-toplevel` answers `//wsl.localhost/Ubuntu/…` with forward
+slashes, which is the form somebody is most likely to have copied from an error
+message. An ordinary `\\fileserver\share` is *not* caught, and has a test saying
+so: a file server is a perfectly reasonable place to keep a repository and has
+none of the three problems above.
+
+**Verified by typing one in, through the real dialog.** `repositories.add` with
+that path refused with `INVALID_INPUT` and the sentence above, the advice under
+the `path` input rather than in the dialog's banner - which is M4.4's bridge fix
+still holding. Pressing Add in the form left the dialog open with *Add "Ubuntu"
+as a WSL host and add this repository there.* under the field, and the local
+repository list afterwards held only `C:\Users\micha\gitwarren-app`.
+
+**M5 is complete.** From the Windows app, a distribution is added by picking it
+from a list, has GitWarren installed into it over the pipe, and is then a machine
+whose repositories, reviews, diffs, comments and editor links all work from here;
+the agent inside WSL reads the same reviews over its own local MCP and writes
+back into the same database; a `\\wsl.localhost` path typed into the local form
+is refused with a pointer at the thing the person meant; and native Windows
+repositories are unaffected, including one that turns out to be a clone of the
+distribution's.
+
+The verify line, end to end on this PC: the Windows app with `Ubuntu` as a WSL
+host, its two repositories listed with their WSL paths, review 2 open at
+`#/h/4e0b0adb…/reviews/2/files`, and an MCP session inside the distribution -
+started with the exact command `app.mcp` prints - reading that review from
+`/home/xfor/.gitwarren` and adding a comment that the Windows window then read
+back over the carrier. `C:\Users\micha\gitwarren-app` added as an ordinary local
+repository throughout, reading its git state on NTFS and sharing root commit
+`59843fd3f8ab` with the distribution's checkout of the same project.
+
+**Two things about this milestone are worth keeping separately from the slices.**
+
+*Version skew had nothing to say, for only the second time.* M4.1 through M4.4
+each needed the host reinstalled before their screens worked, because each added
+a method that had to travel. M5 adds exactly one method, `hosts.distros`, and it
+is one that never leaves the machine - so the daemon M4 left in the distribution
+answered M5 unchanged. M4.5 was the first slice with this property and said so;
+it is worth noticing that the reason is the same both times, which is that the
+new thing was about the asking side rather than the answering one.
+
+*`wsl --terminate` is not the equivalent of pulling a cable, and that took
+finding out.* Killing the `ssh` under an open review is a durable outage: the
+machine stays unreachable until something changes. Terminating a distribution
+kills the pipe the pool is holding, and then the pool's next attempt spawns a
+fresh `wsl.exe` - **which starts the distribution again**. So the in-flight
+request fails (3 ms, with the invented sentence M5.1 had to write because
+`wsl.exe` says nothing) and the one after it succeeds, transparently, in about
+1.8 seconds. There is no banner, and there should not be: nothing is wrong any
+more. A distribution being stopped is not a machine being off, and the carrier
+that can start one is the reason.
+
+So M4.5's banner was proved against the durable failure instead - the launcher
+moved aside inside the distribution and the running daemon killed, which is
+exactly what M4.5 did on `pc-wsl`. It rose with **no code written for this
+carrier at all**: *Ubuntu stopped answering*, *GitWarren is not installed on
+Ubuntu: ~/.gitwarren/bin/gitwarren was not found*, *Showing what was loaded at
+9:09 AM. GitWarren keeps trying.*, and a Try again - with the review underneath
+intact, and the banner clearing by itself once the launcher was put back. That is
+the whole of what "learned from request outcomes, never from the pool" was for.
+
+**What Windows turned out to own rather than GitWarren.** Four of these, and
+none is a bug in this application:
+
+- `wsl.exe` speaks UTF-16LE while the guest speaks UTF-8, and writes its own
+  errors to **stdout**, which is the protocol's stream. `WSL_UTF8=1` fixes the
+  first; nothing fixes the second, so `diagnostics()` reads around it.
+- `wsl.exe -d X -- …` hands the words to the login shell for *expansion without
+  parsing*, which makes `$` in a script the outer shell's pid. `-e sh -c` is
+  the spelling that means what it looks like.
+- NTFS has no POSIX mode, so a daemon tarball built on Windows has no executable
+  bit on anything in it, and `chmodSync` is a no-op rather than an error.
+- `python` on this machine's PATH is the Microsoft Store stub, which exits
+  without printing a version - so node-gyp reports "THIS VERSION OF PYTHON IS
+  NOT SUPPORTED" for a Python that is not installed, while trying to compile a
+  `better-sqlite3` whose `win32-x64` prebuild is already in the package.
+
+**And one thing this repository owns.** Three Windows-only breakages were found
+in a day - the symlink in `fs.test.ts`, `du -h` in
+`scripts/build-daemon-tarball.mjs`, and before this milestone the `npx.cmd`
+spawn and the drive-letter path - and every one of them was found by a person at
+a Windows machine rather than by the suite, because `ci.yml` runs ubuntu only.
+A Windows job is the honest fix and is deliberately not part of M5: it is a
+change to how this project is tested rather than to what it does, and folding it
+in here would have made the milestone's diff about something else.
+
 ### M6 — Tailnet and live updates
 
 *Ships: hosts appear by themselves; comments arrive live; reviews on the
@@ -2584,7 +3192,7 @@ least one alternative.
 | Which GUI a link opens | M2, M6 | Loopback resolves on the clicker's machine; tailnet URL for the phone. |
 | Attachments across hosts | M3, M4 | Ingest on the host; HTTP for the web view, the carrier for the app. |
 | Version skew between hosts | M4 | The GUI installs the daemon version it wants; protocol version in the handshake; unknown fields ignored. |
-| Daemon process on headless hosts | M2, M3, M4 | Bundle in M2, `gitwarren service install` in M3.3, spawned on demand over SSH in M4. |
+| Daemon process on headless hosts | M2, M3, M4, M5 | Bundle in M2, `gitwarren service install` in M3.3, spawned on demand over SSH in M4 and through `wsl.exe` in M5 — the same installer either way, since it was written against "a machine with a shell and a `tar`". |
 | Users who will not run Electron | M3 | The same renderer served by the local daemon; the `gitwarren-cli` formula, `npx gitwarren` and the tarball, all from M3.3. |
 | A screen the size of a phone | M3.5, M6 | Files list and diff as separate screens below `lg`, composer above the keyboard, paths that wrap at their separators; the route to the device itself is M6's tailnet. |
 | MCP setup per harness and on remote hosts | M2, M3, M4 | Stable launcher path plus a one-sentence prompt the agent applies to its own config. |

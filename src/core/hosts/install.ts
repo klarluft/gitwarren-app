@@ -5,7 +5,7 @@
  * The promise M4 makes is that a host needs nothing installed but git. This is
  * the file that has to keep it, so the shape of the whole thing follows from
  * one constraint: the host may have no package manager worth using, no Node, no
- * route to the internet and no shell but `sh`. What it does have is `ssh`,
+ * route to the internet and no shell but `sh`. What it does have is a way in,
  * `tar` and a home directory. So four commands cross the wire and nothing else:
  *
  *   1. `uname -sm`                     - which tarball
@@ -62,6 +62,8 @@
 import { createReadStream } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import { runOverSsh } from './ssh.js'
+import { runOverWsl } from './wsl.js'
+import type { RunOnHost } from './carrier.js'
 import { resolveTarball, targetFromUname, type DaemonTarget } from './release.js'
 import { shellQuote } from '../shell-quote.js'
 import { APP_VERSION } from '../version.js'
@@ -71,6 +73,42 @@ import type { HostRoute } from './pool.js'
 
 /** Where everything lives on the far end. `~` is expanded by the remote shell. */
 const REMOTE_ROOT = '$HOME/.gitwarren'
+
+/**
+ * Run one command on a host, whichever carrier reaches it.
+ *
+ * The whole of M5.2's install work, and it is a switch. Everything above and
+ * below is M4.2's and did not change: four commands cross a connection, the
+ * archive unpacks into a scratch directory beside the destination, the host
+ * writes its own launchers by running the binary just unpacked, and the version
+ * is read back rather than assumed. That is what it means for the installer to
+ * have been written against "a machine with a shell and a `tar`" rather than
+ * against `ssh`.
+ *
+ * ## The bytes go over the pipe, and `\\wsl.localhost` was rejected
+ *
+ * A WSL distribution is visible from Windows as `\\wsl.localhost\<distro>\…`, so
+ * the tarball could be *copied* there instead of streamed. It is not, and the
+ * reason is not speed - spike S2 measured 56 MB/s through this pipe on this
+ * machine, which puts the 46 MB archive under a second, and M4.2's `ssh` pipe
+ * did the same file in 3.4 seconds with nobody complaining.
+ *
+ * It loses on moving parts. The file route still needs a shell inside the
+ * distribution to unpack the archive and to run `service install`, so it
+ * replaces `tar xzf -` reading stdin with a file copy *plus* that same shell
+ * invocation - strictly more, to save nothing. It also puts the bytes through
+ * SMB, and M5.4 is about what SMB does to a Linux working tree. And it is only
+ * available while the distribution is running, which is a precondition the pipe
+ * does not have, because starting it is what the pipe does.
+ */
+export const runOnHost: RunOnHost = (route, options) => {
+  switch (route.kind) {
+    case 'wsl':
+      return runOverWsl({ distro: route.target, ...options })
+    case 'ssh':
+      return runOverSsh({ target: route.target, ...options })
+  }
+}
 
 /**
  * What happened, minus the host row.
@@ -97,8 +135,8 @@ export interface InstallOptions {
   force?: boolean
   /** The version to put there. The asking machine's, unless a test says otherwise. */
   version?: string
-  /** Swapped in tests; see `runOverSsh`. */
-  run?: typeof runOverSsh
+  /** Swapped in tests; see `runOnHost`. */
+  run?: RunOnHost
   resolve?: typeof resolveTarball
 }
 
@@ -110,12 +148,8 @@ export interface InstallOptions {
  * whatever is there cannot be identified, so it gets replaced. Nothing branches
  * on the difference, so nothing here works to tell them apart.
  */
-async function installedVersion(
-  target: string,
-  run: typeof runOverSsh
-): Promise<string | null> {
-  const { code, stdout } = await run({
-    target,
+async function installedVersion(route: HostRoute, run: RunOnHost): Promise<string | null> {
+  const { code, stdout } = await run(route, {
     command: `${REMOTE_ROOT}/bin/gitwarren --version 2>/dev/null`
   })
   if (code !== 0) return null
@@ -150,8 +184,27 @@ function unpackScript(version: string): string {
     // script, which is what `set -e` is for: continuing would move an empty
     // directory into place and call it an install.
     'tar xzf - -C "$work"',
-    '[ -x "$work/gitwarren-daemon/bin/gitwarren" ] || {',
+    // The executable bit is set here rather than trusted from the archive,
+    // because the machine that built the archive may not have been able to
+    // express one. A tarball built on Windows carries every file as 0666: NTFS
+    // has no POSIX mode, `chmodSync` is a no-op there, and bsdtar records what
+    // it is given - so `bin/gitwarren`, `bin/gitwarren-mcp` and the embedded
+    // `bin/node` all arrive unexecutable and the check below fails on an
+    // archive whose *contents* are perfectly correct. Found on this PC in M5.2.
+    //
+    // Nothing was ever read from those bits except this one check, and the step
+    // after it runs the binary, so setting the bit we require is strictly more
+    // reliable than asserting somebody else set it. `|| true` because a release
+    // tarball already has them and a read-only oddity should not fail an
+    // install that is about to prove itself by running the thing anyway.
+    'chmod +x "$work/gitwarren-daemon/bin/"* 2>/dev/null || true',
+    '[ -f "$work/gitwarren-daemon/bin/gitwarren" ] || {',
     '  echo "the tarball did not contain bin/gitwarren" >&2',
+    '  rm -rf "$work"',
+    '  exit 1',
+    '}',
+    '[ -x "$work/gitwarren-daemon/bin/gitwarren" ] || {',
+    '  echo "bin/gitwarren is not executable and could not be made so" >&2',
     '  rm -rf "$work"',
     '  exit 1',
     '}',
@@ -173,20 +226,18 @@ function unpackScript(version: string): string {
  */
 export async function installOnHost(
   route: HostRoute,
-  { force = false, version = APP_VERSION, run = runOverSsh, resolve = resolveTarball }: InstallOptions = {}
+  { force = false, version = APP_VERSION, run = runOnHost, resolve = resolveTarball }: InstallOptions = {}
 ): Promise<DaemonInstallReport> {
-  const { target: sshTarget } = route
-
-  const uname = await run({ target: sshTarget, command: 'uname -sm' })
+  const uname = await run(route, { command: 'uname -sm' })
   if (uname.code !== 0) {
     throw new AppError(
       'INTERNAL',
-      `\`uname -sm\` failed on ${sshTarget}: ${uname.stderr.trim() || `exit ${uname.code}`}`
+      `\`uname -sm\` failed on ${route.target}: ${uname.stderr.trim() || `exit ${uname.code}`}`
     )
   }
   const daemonTarget = targetFromUname(uname.stdout)
 
-  const previousVersion = await installedVersion(sshTarget, run)
+  const previousVersion = await installedVersion(route, run)
   if (previousVersion === version && !force) {
     return { action: 'already-current', version, previousVersion, target: daemonTarget, bytes: 0 }
   }
@@ -196,28 +247,26 @@ export async function installOnHost(
   const tarball = await resolve(version, daemonTarget)
   const bytes = (await stat(tarball)).size
 
-  const unpack = await run({
-    target: sshTarget,
+  const unpack = await run(route, {
     command: unpackScript(version),
     stdin: createReadStream(tarball)
   })
   if (unpack.code !== 0) {
     throw new AppError(
       'INTERNAL',
-      `Unpacking GitWarren on ${sshTarget} failed: ${unpack.stderr.trim() || `exit ${unpack.code}`}`
+      `Unpacking GitWarren on ${route.target} failed: ${unpack.stderr.trim() || `exit ${unpack.code}`}`
     )
   }
 
   // The host writes its own launchers, and by running proves the tarball's
   // `node` can execute here. See the note at the top of the file.
-  const launchers = await run({
-    target: sshTarget,
+  const launchers = await run(route, {
     command: `${REMOTE_ROOT}/daemon/${shellQuote(version)}/bin/gitwarren service install --no-login-item`
   })
   if (launchers.code !== 0) {
     throw new AppError(
       'INTERNAL',
-      `GitWarren unpacked on ${sshTarget} but could not start: ` +
+      `GitWarren unpacked on ${route.target} but could not start: ` +
         (launchers.stderr.trim() || `exit ${launchers.code}`) +
         `. The tarball for ${daemonTarget} may be the wrong one for that machine.`
     )
@@ -226,11 +275,11 @@ export async function installOnHost(
   // Read back rather than assumed. This is the assertion that the launcher the
   // carrier will spawn - the stable path, not the versioned one - now resolves
   // to what we just put there.
-  const now = await installedVersion(sshTarget, run)
+  const now = await installedVersion(route, run)
   if (now !== version) {
     throw new AppError(
       'INTERNAL',
-      `${sshTarget} still reports ${now ?? 'no GitWarren'} after installing ${version}. ` +
+      `${route.target} still reports ${now ?? 'no GitWarren'} after installing ${version}. ` +
         'Something else on that machine is maintaining ~/.gitwarren/bin/gitwarren.'
     )
   }

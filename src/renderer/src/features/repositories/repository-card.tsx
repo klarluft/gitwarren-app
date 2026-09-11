@@ -7,6 +7,11 @@
  * that lives on `pc-wsl` it would open a Finder window on a path this Mac does
  * not have. Absent, rather than disabled or pointed somewhere plausible.
  *
+ * M5 made that a question rather than a rule about remoteness: `useRevealPath`
+ * answers "can this machine name that file", which is yes for a WSL
+ * distribution mounted on the Windows box drawing the list, and no for
+ * everything else remote. Same control, same absence, one arrangement more.
+ *
  * `alsoHere` is the other half of the clone grouping, and it is a *link*
  * because that is the useful shape: the point of knowing that the thing you are
  * looking at on `pc-wsl` is also checked out here is to be able to go and look
@@ -19,7 +24,8 @@ import { Button } from '@/components/ui/button'
 import { Tooltip } from '@/components/ui/tooltip'
 import { Card } from '@/components/ui/card'
 import { api } from '@/lib/api'
-import { useHost, useHostScope } from '@/lib/host-scope'
+import { useHostScope } from '@/lib/host-scope'
+import { useRevealPath } from '@/lib/reveal-path'
 import { navigate } from '@/lib/router'
 import { GitStateBadge } from './git-state'
 import type { Route } from '@shared/routes'
@@ -44,8 +50,8 @@ export function RepositoryCard({
   onRemove,
   alsoHere
 }: RepositoryCardProps) {
-  const host = useHost()
   const scope = useHostScope()
+  const revealPath = useRevealPath(repository.path)
   const missing = !repository.git.exists
 
   function open(): void {
@@ -108,17 +114,18 @@ export function RepositoryCard({
       >
         {/* Absent rather than disabled in a browser tab: a disabled button is a
             promise the shell cannot keep, and there is no file manager to put
-            in front of someone reading this over loopback in Chrome. Absent for
-            the same reason on a remote host, where this machine's file manager
-            has no such folder to show. */}
-        {api.capabilities.revealPath && host === undefined && (
+            in front of someone reading this over loopback in Chrome. Absent on
+            a remote host for the same reason - with the one exception
+            `useRevealPath` exists for, a WSL distribution mounted on the
+            Windows machine that is drawing this. */}
+        {api.capabilities.revealPath && revealPath !== null && (
           <Tooltip label={missing ? 'Folder is missing' : 'Show in file manager'}>
             <Button
               variant="ghost"
               size="icon"
               aria-label="Show in file manager"
               disabled={missing}
-              onClick={() => void api.system.revealPath(repository.path)}
+              onClick={() => void api.system.revealPath(revealPath)}
             >
               <FolderOpen />
             </Button>

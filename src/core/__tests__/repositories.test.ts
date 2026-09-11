@@ -111,6 +111,44 @@ test('a non-git directory is rejected', async () => {
   await expectError('NOT_A_GIT_REPOSITORY', () => repositoriesService.add({ path: plain }))
 })
 
+test('a WSL path is refused as a local repository, and says what to do instead', async () => {
+  // The failure this prevents is not a bad error message, it is a repository
+  // that works badly: git over SMB, a diff that disagrees with the one the
+  // distribution reports because the executable bit is invisible across the
+  // share, and reviews in the wrong machine's database where the agent inside
+  // WSL cannot read them. See the note on `refuseWslPath` in `core/git.ts`.
+  //
+  // Runs everywhere rather than only on Windows: the string means the same
+  // thing wherever it is read, and a guard that existed on one platform only
+  // would be one nothing else could check.
+  for (const path of [
+    '\\\\wsl.localhost\\Ubuntu\\home\\xfor\\github.com\\klarluft\\gitwarren-app',
+    // The older spelling, and the forward-slash form `git rev-parse` answers
+    // with - which is the one a person is most likely to have copied.
+    '\\\\wsl$\\Ubuntu\\home\\xfor\\app',
+    '//wsl.localhost/Ubuntu/home/xfor/app'
+  ]) {
+    const error = await expectError('INVALID_INPUT', () => repositoriesService.add({ path }))
+    assert.match(error.message, /WSL distribution "Ubuntu"/)
+    // The message has to carry both halves of the remedy: which host to add,
+    // and which path to add on it once they have.
+    assert.match(error.message, /Add Ubuntu as a WSL host/)
+    assert.match(error.message, /\/home\/xfor/)
+    assert.ok(error.fieldErrors?.path, 'the advice belongs under the path input')
+  }
+})
+
+test('an ordinary UNC path is not mistaken for a WSL one', async () => {
+  // A file server share is a perfectly ordinary place to keep a repository and
+  // has none of the problems above, so the guard must not read every `\\` as
+  // WSL. This one fails later and for the honest reason - there is no such
+  // machine - which is the answer a network path deserves.
+  const error = await expectError('PATH_NOT_FOUND', () =>
+    repositoriesService.add({ path: '\\\\fileserver\\share\\app' })
+  )
+  assert.doesNotMatch(error.message, /WSL/)
+})
+
 test('a path that does not exist is rejected', async () => {
   await expectError('PATH_NOT_FOUND', () =>
     repositoriesService.add({ path: join(workDir, 'nope') })

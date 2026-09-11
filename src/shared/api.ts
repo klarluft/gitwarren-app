@@ -29,6 +29,7 @@ import type {
   HostWithState,
   InstallOnHostInput,
   InstallReport,
+  WslDistro,
   RemoveHostInput,
   UpdateHostInput,
   Comment,
@@ -298,6 +299,17 @@ export interface GitWarrenApi {
     probe(input: GetHostInput): Promise<HostWithState>
     /** Slow, and the only method here that changes the other machine. */
     install(input: InstallOnHostInput): Promise<InstallReport>
+    /**
+     * The WSL distributions on the machine answering, or empty everywhere else.
+     *
+     * Here rather than in `system` even though it looks like a fact about a
+     * machine, and that is the M5 decision: the machine it is a fact *about* is
+     * the one that will spawn `wsl.exe`, which is whoever answers this api - so
+     * a browser tab served by a Windows install gets that install's
+     * distributions, which is exactly what its Add dialog needs. See the note
+     * on `hosts.distros` in `shared/rpc.ts`.
+     */
+    distros(): Promise<WslDistro[]>
   }
   /**
    * What is inside a folder, on the machine this api is pointed at.

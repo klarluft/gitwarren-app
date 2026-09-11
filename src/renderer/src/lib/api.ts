@@ -156,7 +156,8 @@ function buildApi(host: string | undefined): GitWarrenApi {
       update: (input) => ask('hosts.update', input),
       remove: (input) => ask('hosts.remove', input),
       probe: (input) => ask('hosts.probe', input),
-      install: (input) => ask('hosts.install', input)
+      install: (input) => ask('hosts.install', input),
+      distros: () => ask('hosts.distros', undefined)
     },
     fs: {
       list: (input) => ask('fs.list', input, host)
@@ -280,6 +281,8 @@ export const CACHE_KEYS = {
    * screen disagree about what time it is.
    */
   hosts: 'hosts',
+  /** What could become a host here. Unscoped, like the host list itself. */
+  distros: 'wsl-distros',
   repositories: (host?: string) => scoped('repositories', host),
   repository: (repositoryId: number, host?: string) =>
     scoped(`repository:${repositoryId}`, host),
