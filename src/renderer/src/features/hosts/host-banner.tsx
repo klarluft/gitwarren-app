@@ -18,6 +18,18 @@
  * what the person typed. A host that has been forgotten since the link was
  * written has no label to show, and saying so here is better than a screen full
  * of `NOT_FOUND` with no explanation of which machine failed to be found.
+ *
+ * ## Not loaded yet is not the same as not known
+ *
+ * The host list is a read like any other, and for the first frames of a cold
+ * load there is no list - which is not the same claim as "this machine is not
+ * in it". Conflating them made a perfectly ordinary host announce itself as "a
+ * host this GitWarren no longer knows" for half a second on every reload, which
+ * is exactly the lesson `host-status.tsx` already records about a host nobody
+ * has spoken to yet: the honest rendering of an unanswered question is not the
+ * alarming answer. So the sentence is only reached once the list has actually
+ * arrived, and until then the banner says what it does know - that this is
+ * somewhere else - and shows the id.
  */
 import { Server } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -35,21 +47,27 @@ export function HostBanner() {
 
   if (host === undefined) return null
 
-  const row = hosts?.find((candidate) => candidate.instanceId === host)
+  // Undefined while the list is still on its way; null once it has arrived and
+  // this host is genuinely not in it. See the note above.
+  const row = hosts === undefined ? undefined : (hosts.find((c) => c.instanceId === host) ?? null)
 
   return (
     <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-dashed px-3 py-2">
       <Server className="size-4 shrink-0 text-muted-foreground" />
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
         <p className="text-sm font-medium">
-          {row ? row.label : 'A host this GitWarren no longer knows'}
+          {row
+            ? row.label
+            : row === null
+              ? 'A host this GitWarren no longer knows'
+              : 'Another machine'}
         </p>
         {row ? (
           <ReachabilityBadge host={row} />
         ) : (
-          // The id, in this one case, because it is all there is - and because
-          // it is what the person can compare against the Hosts screen to work
-          // out which machine the link was written on.
+          // The id, while there is no label to show - and because it is what
+          // the person can compare against the Hosts screen to work out which
+          // machine the link was written on.
           <span data-selectable className="font-mono text-xs text-muted-foreground">
             {host}
           </span>

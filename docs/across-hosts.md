@@ -1897,7 +1897,7 @@ here as a broken one, in a comment nobody could fix except by editing markdown
 by hand. Absent rather than disabled, which is the rule M3 set for a browser
 tab: a disabled control is a promise the shell cannot keep.
 
-**Three things bit.**
+**Four things bit.**
 
 *Emptying the editor list did not remove the button.* The open-in-editor control
 in `diff-view.tsx` is drawn when it is given a *callback*, not when there is an
@@ -1909,6 +1909,15 @@ local file, which is the single failure shape this slice set out to prevent.
 Found by pressing it against `pc-wsl` and reading what happened, not by a test.
 The callback is now undefined on a host, so the button has nothing to be drawn
 from.
+
+*The banner accused a perfectly good host of not existing.* For the first frames
+of a cold load the host list has not arrived, and `hosts?.find(...)` answers
+undefined — which the banner rendered as "a host this GitWarren no longer
+knows". It is the same mistake `host-status.tsx` already has a paragraph about
+in the other direction: an unanswered question is not the alarming answer, and
+"not loaded yet" is not "not known". Caught by watching a reload rather than by
+reading the code, and the fix is to tell the two apart rather than to make the
+sentence quieter.
 
 *Two lists, one cache key.* A read-coalescing key and an SWR key that ignore the
 host make "the repositories on `pc-wsl`" and "the repositories on this Mac" the
