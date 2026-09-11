@@ -85,6 +85,103 @@ export type GetRepositoryInput = z.input<typeof getRepositoryInputSchema>
 export type RemoveRepositoryInput = z.input<typeof removeRepositoryInputSchema>
 
 /* -------------------------------------------------------------------------- */
+/* Hosts                                                                      */
+/* -------------------------------------------------------------------------- */
+
+export const MAX_TARGET_LENGTH = 255
+
+export const hostIdSchema = z.number().int().positive()
+export const hostKindSchema = z.enum(['ssh'])
+
+/**
+ * An SSH destination.
+ *
+ * Validated for shape rather than for reachability - whether a host answers is
+ * something only a connection can say, and a form that tried to guess would
+ * refuse perfectly good `~/.ssh/config` aliases it has no way to resolve.
+ *
+ * What is rejected is what would stop being a destination and start being an
+ * argument: a leading `-` (which `ssh` would read as an option), and whitespace
+ * or a shell metacharacter, neither of which can appear in a real target and
+ * both of which are how a string in a form becomes a command on the local
+ * machine. `ssh` is spawned without a shell, so this is belt-and-braces - but a
+ * carrier's safety should not rest on a spawn flag somebody could change.
+ */
+export const sshTargetSchema = z
+  .string()
+  .trim()
+  .min(1, 'Enter a host to connect to, like user@machine.')
+  .max(MAX_TARGET_LENGTH)
+  .refine((value) => !value.startsWith('-'), {
+    message: 'A host cannot start with "-".'
+  })
+  .refine((value) => !/[\s;&|`$(){}<>'"\\]/.test(value), {
+    message: 'A host can only contain a user name, an @ and a machine name.'
+  })
+
+/** A row as stored, plus how it is doing right now. */
+export const hostSchema = z.object({
+  id: hostIdSchema,
+  /** Null until the host has been reached once. See the schema note. */
+  instanceId: z.string().nullable(),
+  label: z.string(),
+  kind: hostKindSchema,
+  target: z.string(),
+  editorTarget: z.string().nullable(),
+  lastSeenAt: z.iso.datetime().nullable(),
+  createdAt: z.iso.datetime()
+})
+
+/**
+ * Reachability, which is never stored.
+ *
+ * Read from the connection pool at the moment of asking, for the same reason
+ * git state is read live rather than cached: a host that was up ten minutes ago
+ * is not a fact about now, and a screen showing one as though it were is the
+ * bug this whole milestone has to avoid.
+ */
+export const hostStateSchema = z.object({
+  connected: z.boolean(),
+  failures: z.number().int().nonnegative(),
+  lastError: z.string().optional(),
+  retryAfter: z.number().optional()
+})
+
+export const hostWithStateSchema = hostSchema.extend({ state: hostStateSchema })
+
+export const addHostInputSchema = z.object({
+  target: sshTargetSchema,
+  /** Defaults to the target with any `user@` removed. */
+  label: z.string().trim().min(1, 'Name cannot be empty.').max(MAX_NAME_LENGTH).optional(),
+  kind: hostKindSchema.optional(),
+  editorTarget: z.string().trim().max(MAX_TARGET_LENGTH).optional()
+})
+
+export const updateHostInputSchema = z
+  .object({
+    id: hostIdSchema,
+    label: z.string().trim().min(1, 'Name cannot be empty.').max(MAX_NAME_LENGTH).optional(),
+    target: sshTargetSchema.optional(),
+    editorTarget: z.string().trim().max(MAX_TARGET_LENGTH).nullable().optional()
+  })
+  .refine(
+    (value) =>
+      value.label !== undefined || value.target !== undefined || value.editorTarget !== undefined,
+    { message: 'Provide something to change.', path: ['label'] }
+  )
+
+export const getHostInputSchema = z.object({ id: hostIdSchema })
+export const removeHostInputSchema = z.object({ id: hostIdSchema })
+
+export type Host = z.infer<typeof hostSchema>
+export type HostWithState = z.infer<typeof hostWithStateSchema>
+export type HostConnectionState = z.infer<typeof hostStateSchema>
+export type AddHostInput = z.input<typeof addHostInputSchema>
+export type UpdateHostInput = z.input<typeof updateHostInputSchema>
+export type GetHostInput = z.input<typeof getHostInputSchema>
+export type RemoveHostInput = z.input<typeof removeHostInputSchema>
+
+/* -------------------------------------------------------------------------- */
 /* Reviews                                                                    */
 /* -------------------------------------------------------------------------- */
 

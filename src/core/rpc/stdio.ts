@@ -35,20 +35,9 @@
  * protocol, which is the failure this whole arrangement exists to prevent.
  */
 import { handleRequest } from './dispatcher.js'
+import { MAX_FRAME_BYTES, readFrames } from './ndjson.js'
 import { AppError } from '../../shared/errors.js'
 import type { RpcRequest, RpcResponse } from '../../shared/rpc.js'
-
-/**
- * How much of an unterminated line to hold before giving up.
- *
- * A frame is a request, and requests are tiny - with one exception. An image on
- * its way into the attachment store travels as bytes, and 10 MB of them (the
- * ingest limit) is about 14 MB once base64 has had them, or four times that if
- * a caller sends the `number[]` form. 64 MB leaves room for the worst of those
- * and still bounds what a peer that never sends a newline can make this process
- * allocate.
- */
-const MAX_FRAME_BYTES = 64 * 1024 * 1024
 
 /**
  * The id used when a frame is so malformed there is no id to answer under.
@@ -85,8 +74,6 @@ function asRequest(value: unknown): RpcRequest | null {
  * cope with out-of-order responses is a caller that is not using the protocol.
  */
 export function serveStdio({ input, output, onEnd }: StdioCarrierOptions): void {
-  let buffer = ''
-
   const write = (message: RpcResponse): void => {
     // One `write` per message rather than a stringify into a shared buffer:
     // Node serialises writes on a stream, so two responses finishing in the
@@ -126,37 +113,17 @@ export function serveStdio({ input, output, onEnd }: StdioCarrierOptions): void 
       })
   }
 
-  input.setEncoding('utf8')
-
-  input.on('data', (chunk: string) => {
-    buffer += chunk
-
-    if (buffer.length > MAX_FRAME_BYTES && !buffer.includes('\n')) {
+  // Framing is `ndjson.ts`, shared with the client half of the protocol so that
+  // the two ends cannot disagree about where a frame ends. What is left here is
+  // only what a *server* does with a frame once it has one.
+  readFrames(input, {
+    onFrame: answer,
+    // Refused rather than fatal, and the connection is kept: a peer that has
+    // mangled one frame is more likely to be a human poking at the pipe than a
+    // broken program, and hanging up would take the diagnosis away with it.
+    onOverflow: () => {
       refuse(NO_ID, `A frame exceeded ${MAX_FRAME_BYTES} bytes without a newline.`)
-      buffer = ''
-      return
-    }
-
-    // Everything up to the last newline is complete frames; whatever follows it
-    // is the start of the next one and stays in the buffer. A chunk boundary
-    // falls wherever the OS put it and means nothing.
-    let newline = buffer.indexOf('\n')
-    while (newline !== -1) {
-      const line = buffer.slice(0, newline).trim()
-      buffer = buffer.slice(newline + 1)
-      // Blank lines are skipped rather than refused: a peer that pads its
-      // output, or a file being replayed by hand, should not get an error back.
-      if (line) answer(line)
-      newline = buffer.indexOf('\n')
-    }
-  })
-
-  input.on('end', () => {
-    // A trailing frame with no newline after it. Honoured, because a peer that
-    // writes a request and closes the pipe has asked a perfectly good question.
-    const line = buffer.trim()
-    buffer = ''
-    if (line) answer(line)
-    onEnd?.()
+    },
+    onEnd: () => onEnd?.()
   })
 }

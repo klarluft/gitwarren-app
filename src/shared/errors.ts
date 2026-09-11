@@ -19,6 +19,22 @@ export const APP_ERROR_CODES = [
    */
   'FORBIDDEN',
   'GIT_UNAVAILABLE',
+  /**
+   * The host that owns this data could not be reached, or stopped answering
+   * while we were asking.
+   *
+   * The one code whose right response is usually to wait rather than to change
+   * anything, which is why it is not folded into `INTERNAL`: nothing is broken,
+   * a machine is asleep. It is also the only code a screen is allowed to keep
+   * showing stale content underneath - see the disconnection banner in M4.5 -
+   * because the alternative is blanking a review someone is reading over a
+   * thirty-second network blip.
+   *
+   * A request that fails this way was *not* necessarily un-answered: the daemon
+   * may have done the work and lost the reply on the way back. So a carrier
+   * never retries a write on it. See `core/rpc/stdio-client.ts`.
+   */
+  'HOST_OFFLINE',
   'INTERNAL'
 ] as const
 

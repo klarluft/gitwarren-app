@@ -82,7 +82,11 @@ export function registerIpcHandlers(): void {
   // Every channel that existed before M1, still answering, now through the
   // dispatcher. The table lives in `shared/api.ts` next to the channel names.
   for (const [channel, method] of Object.entries(CHANNEL_METHODS)) {
-    handle(channel, (payload) => dispatch(method, payload as RpcParams<RpcMethod>))
+    // `RpcParams<typeof method>` rather than `RpcParams<RpcMethod>`: the table
+    // covers only the pre-M1 channels, so the params union here is the smaller
+    // one. Widening it to every method made this stop compiling the moment M4
+    // added a method no legacy channel maps to.
+    handle(channel, (payload) => dispatch(method, payload as RpcParams<typeof method>))
   }
 
   // ---------------------------------------------------------------------------

@@ -26,16 +26,21 @@
  * different piece of software. Shell capabilities live in `main/ipc.ts` and
  * never enter this map.
  */
+import { getInstanceId } from '../instance.js'
+import { APP_VERSION } from '../version.js'
 import { attachmentsService } from '../services/attachments.js'
 import { commentsService } from '../services/comments.js'
+import { hostsService } from '../services/hosts.js'
 import { repositoriesService } from '../services/repositories.js'
 import { reviewedFilesService } from '../services/reviewed-files.js'
 import { reviewsService } from '../services/reviews.js'
 import { traced } from '../trace.js'
 import { HUMAN_AUTHOR } from '../../shared/actors.js'
 import { AppError } from '../../shared/errors.js'
+import { RPC_PROTOCOL_VERSION } from '../../shared/rpc.js'
 import type {
   AttachmentIngestParams,
+  HostIdentity,
   ReviewOpen,
   RpcMethod,
   RpcParams,
@@ -114,13 +119,46 @@ function toIngestSource(params: unknown): { bytes: Buffer; originalName?: string
 }
 
 /**
+ * This install, as a host sees it.
+ *
+ * Synchronous: the instance id is a cached file read and the version is a
+ * build-time constant.
+ */
+function describeThisInstance(): HostIdentity {
+  return {
+    instanceId: getInstanceId(),
+    protocol: RPC_PROTOCOL_VERSION,
+    version: APP_VERSION
+  }
+}
+
+/**
  * The map. Every entry is a one-line delegation, and that thinness is the
  * point: validation, path resolution and error semantics live in the service,
  * so the GUI, the daemon and the MCP server cannot disagree about what a valid
  * review is. Each service re-parses its own input, so `params` is deliberately
  * `unknown` all the way down to it.
  */
-const handlers: { [M in RpcMethod]: (params: unknown) => Promise<RpcResult<M>> } = {
+const handlers: {
+  // Sync or async. `traced` has always accepted both, and better-sqlite3 is
+  // synchronous, so a service whose work is one indexed read is telling the
+  // truth by not being a promise - `hosts.list` and `app.instance` are the
+  // first two that had no reason to pretend otherwise.
+  [M in RpcMethod]: (params: unknown) => Promise<RpcResult<M>> | RpcResult<M>
+} = {
+  'app.instance': () => describeThisInstance(),
+
+  // Answered by whoever is asked, and never forwarded onward - see the note on
+  // these in `shared/rpc.ts`. They are in the map because a screen reaches the
+  // core through the dispatcher and nowhere else, which is what lets the Hosts
+  // screen work identically in the window and in a browser tab.
+  'hosts.list': () => hostsService.list(),
+  'hosts.get': (params) => hostsService.get(params),
+  'hosts.add': (params) => hostsService.add(params),
+  'hosts.update': (params) => hostsService.update(params),
+  'hosts.remove': (params) => hostsService.remove(params),
+  'hosts.probe': (params) => hostsService.probe(params),
+
   'repositories.list': () => repositoriesService.list(),
   'repositories.get': (params) => repositoriesService.get(params),
   'repositories.add': (params) => repositoriesService.add(params),
