@@ -364,3 +364,51 @@ test('a file that could not be read is outdated rather than a crash', () => {
 
   assert.deepEqual(resolved, { state: 'outdated', line: null, startLine: null })
 })
+
+/* -------------------------------------------------------------------------- */
+/* Line endings                                                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The Windows case, which is not an edge case: `core.autocrlf=true` is what Git
+ * for Windows installs by default, and under it `git diff` reports a line with
+ * no CR while the same line read off disk keeps one. A comment captured from
+ * either document has to be findable in the other, or every anchor that falls
+ * back from the diff to the file goes outdated on Windows and nowhere else.
+ */
+test('a CRLF file matches an anchor captured from a CR-less diff', () => {
+  const resolved = resolveAnchorInFile(['function work() {\r', '  const a = 1\r'], {
+    filePath: 'src/app.ts',
+    side: 'head',
+    line: 2,
+    anchorText: '  const a = 1'
+  })
+
+  assert.deepEqual(resolved, { state: 'anchored', line: 2, startLine: null })
+})
+
+test('a diff matches an anchor captured from a CRLF file', () => {
+  // The other direction, which is what happens to a comment left in the browse
+  // tab on a file that the branch later changes.
+  const resolved = resolveAnchor(file, {
+    filePath: 'src/app.ts',
+    side: 'head',
+    line: 2,
+    anchorText: 'const b = 2\r'
+  })
+
+  assert.deepEqual(resolved, { state: 'anchored', line: 2, startLine: null })
+})
+
+test('a carriage return inside a line is content, not a terminator', () => {
+  // Only the last one is a terminator. A CR in the middle of a line is a byte
+  // somebody committed, and two lines differing only there are two lines.
+  const resolved = resolveAnchorInFile(['a\rb'], {
+    filePath: 'src/app.ts',
+    side: 'head',
+    line: 1,
+    anchorText: 'ab'
+  })
+
+  assert.deepEqual(resolved, { state: 'outdated', line: null, startLine: null })
+})

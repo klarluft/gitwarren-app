@@ -102,6 +102,37 @@ interface NumberedLine {
 }
 
 /**
+ * A line's text without its terminator.
+ *
+ * Windows, and specifically the configuration Git for Windows installs by
+ * default. With `core.autocrlf=true` the blob holds LF and the working tree
+ * holds CRLF, and git resolves that difference in opposite directions for the
+ * two documents this module compares: `git diff` applies the clean filter, so
+ * its lines arrive with no CR, while a file read off disk keeps it. The same
+ * line is then `const a = 1` in one and `const a = 1\r` in the other.
+ *
+ * That was harmless while an anchor was only ever looked for in a diff. It
+ * stops being harmless the moment a comment can be captured from one document
+ * and re-found in the other, which is exactly what an anchor does now: every
+ * such comment would go outdated on Windows the first time the fallback ran,
+ * and nothing on screen would explain why.
+ *
+ * Normalising here, in the comparison, rather than where the lines are
+ * produced. Stripping at the source would mean rewriting what a `DiffLine`
+ * *contains*, which is the input to the reviewed-file digests
+ * (`shared/diff-digest.ts`) and to every `anchorText` already stored - so on a
+ * repository with CRLF genuinely committed it would silently lapse people's
+ * reviewed marks and strand their existing comments. Comparing without the
+ * terminator fixes the mismatch and leaves both of those alone; it also means
+ * an anchor stored before this change still matches.
+ *
+ * One CR, only at the end. A CR anywhere else in a line is content.
+ */
+function withoutTerminator(content: string): string {
+  return content.endsWith('\r') ? content.slice(0, -1) : content
+}
+
+/**
  * Find the file a thread belongs to.
  *
  * Renames are matched on either name: a thread left on `old/name.ts` before the
@@ -132,8 +163,10 @@ function resolveIn(lines: NumberedLine[], anchor: ThreadAnchor): ResolvedAnchor 
     startLine: span === 0 ? null : Math.max(line - span, 1)
   })
 
+  const wanted = withoutTerminator(anchor.anchorText)
+
   const atStoredLine = lines.find((line) => line.number === anchor.line)
-  if (atStoredLine?.content === anchor.anchorText) {
+  if (atStoredLine !== undefined && withoutTerminator(atStoredLine.content) === wanted) {
     return withRange('anchored', anchor.line)
   }
 
@@ -143,7 +176,7 @@ function resolveIn(lines: NumberedLine[], anchor: ThreadAnchor): ResolvedAnchor 
   let bestLine: number | null = null
   let bestDistance = Number.POSITIVE_INFINITY
   for (const candidate of lines) {
-    if (candidate.content !== anchor.anchorText) continue
+    if (withoutTerminator(candidate.content) !== wanted) continue
     const distance = Math.abs(candidate.number - anchor.line)
     if (distance < bestDistance) {
       bestLine = candidate.number

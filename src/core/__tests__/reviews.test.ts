@@ -363,7 +363,14 @@ test('a file the branch never touched is in the tree and can be read', async () 
 
   const content = await reviewsService.file({ id, path: '.gitignore', changes: 'all' })
   assert.equal(content.error, null)
-  assert.deepEqual(content.lines, ['*.log'])
+  // Compared without the line terminator: this file is checked out by git
+  // rather than written by the test, so on a Windows runner with the default
+  // `core.autocrlf` it arrives as `*.log\r`. What the test is about is that the
+  // content is there to read, not which bytes end the line.
+  assert.deepEqual(
+    content.lines.map((line) => line.replace(/\r$/, '')),
+    ['*.log']
+  )
 })
 
 test('a file outside the repository is refused rather than read', async () => {
