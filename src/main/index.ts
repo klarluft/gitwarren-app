@@ -45,21 +45,12 @@ import { registerIpcHandlers } from './ipc.js'
 import { startLinkServer, stopLinkServer } from './link-server.js'
 import { wasOpenedAtLogin } from './login-item.js'
 import { ensureMcpLauncher } from './mcp-launch.js'
+import { isQuitting, markQuitting } from './quitting.js'
 import { shouldStartHidden } from './start-hidden.js'
 import { createTray, destroyTray } from './tray.js'
 import { disposeUpdater, initialiseUpdater } from './updater.js'
 
 const isDev = !app.isPackaged
-
-/**
- * Set on `before-quit` so the window's `close` handler knows the difference
- * between "the user is putting this away" and "the app is going".
- *
- * A module-level flag rather than a property of the window, because the window
- * it applies to may not be the window that exists when the flag is set: the
- * user can close and reopen several times in one run.
- */
-let quitting = false
 
 // Before `app.whenReady()`: privileged scheme registration is only accepted
 // this early. See `attachment-protocol.ts` for why the scheme exists at all.
@@ -126,7 +117,7 @@ function createWindow(): BrowserWindow {
    * makes and the one the milestone is asking for.
    */
   window.on('close', (event) => {
-    if (quitting) return
+    if (isQuitting()) return
     event.preventDefault()
     window.hide()
   })
@@ -322,7 +313,7 @@ if (process.argv.includes('--serve')) {
   })
 
   app.on('before-quit', () => {
-    quitting = true
+    markQuitting()
     stopForwardingEvents()
     disposeUpdater()
     destroyTray()

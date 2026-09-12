@@ -13,6 +13,7 @@
 import { app, BrowserWindow } from 'electron'
 import electronUpdater from 'electron-updater'
 import { IPC_CHANNELS, type UpdateStatus } from '../shared/api.js'
+import { markQuitting } from './quitting.js'
 import { requestHiddenRelaunch } from './start-hidden.js'
 
 // electron-updater is CommonJS, so the named export has to come off the default.
@@ -109,7 +110,18 @@ export function quitAndInstall(): void {
     requestHiddenRelaunch()
   }
 
+  // Before handing over, and this line is the whole reason the update ever
+  // applies. `quitAndInstall` closes every window first and calls `app.quit()`
+  // only once they are all gone - so on this path `before-quit`, where the
+  // shutdown is normally declared, fires *after* the closes it would have
+  // authorised. Without this the window hides itself as it does on any other
+  // close, the last window never goes, `app.quit()` is never reached, and the
+  // app sits there on the old version with the restart button still showing.
+  markQuitting()
+
   // isSilent: true, isForceRunAfter: true - no installer UI, app comes back up.
+  // macOS ignores both: Squirrel does its own install, and the relaunch is
+  // governed by `autoRunAppAfterInstall`, which defaults to true.
   autoUpdater.quitAndInstall(true, true)
 }
 
