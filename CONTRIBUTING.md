@@ -15,9 +15,12 @@ can agree on the shape before you spend time on it.
 Two things are deliberate design constraints rather than gaps, and changes that
 break them will not be merged:
 
-- **It runs on one machine.** No server, no account system, no telemetry, no
-  network calls in the core review path. If a feature needs a backend, it is out
-  of scope for this project.
+- **It runs on machines the user owns.** No server, no account system, no
+  telemetry, and nothing relayed through anybody else. GitWarren reaches your
+  other machines directly — over `ssh`, over `wsl.exe`, or over your own tailnet
+  — and a repository's reviews stay on the machine that repository is on. If a
+  feature needs a backend, a hosted relay or an account, it is out of scope for
+  this project.
 - **Git is read, not reimplemented.** GitWarren shells out to the user's own
   `git`. It does not bundle a git implementation and does not write to the user's
   repositories.

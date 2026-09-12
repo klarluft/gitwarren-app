@@ -1,8 +1,8 @@
 {
   "name": "gitwarren",
   "version": "__VERSION__",
-  "description": "Local-only code review for your git repositories, served on loopback",
-  "keywords": ["code-review", "git", "diff", "mcp", "local-first"],
+  "description": "Code review for your own machines and your own agents, served on loopback. No Electron, no account.",
+  "keywords": ["code-review", "git", "diff", "mcp", "local-first", "ssh", "wsl", "tailscale", "self-hosted"],
   "homepage": "https://github.com/klarluft/gitwarren-app",
   "repository": { "type": "git", "url": "git+https://github.com/klarluft/gitwarren-app.git" },
   "bugs": "https://github.com/klarluft/gitwarren-app/issues",
