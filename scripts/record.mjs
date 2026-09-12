@@ -25,9 +25,9 @@ export class Recorder {
   /**
    * @param cdp a connected `Cdp`
    * @param options `frameDir` to spool PNGs into, the `size` and `scale` the
-   *   page is being emulated at, and the `fps` the cut will run at - which is
-   *   only a floor on how long a single frame may claim to be, since the
-   *   screencast itself is irregular by design.
+   *   page is being emulated at, and the `fps` the cut will run at. The
+   *   screencast itself is irregular by design; the rate is what the cut is
+   *   resampled to, and says nothing about how long any one frame lasted.
    */
   constructor(cdp, { frameDir, size, scale, fps }) {
     this.cdp = cdp
@@ -114,15 +114,26 @@ export function probe(file) {
  * the last frame *is* the first and the video loops without a seam. Given
  * null, the cut ends where the storyboard stopped.
  *
+ * `width` is the delivered width; the frames are whatever the page was
+ * emulated at. A page shot small and scaled up is a page whose text is larger
+ * in the frame, which is what a clip watched on a phone needs, and the scale is
+ * done once here on the master rather than on each deliverable.
+ *
  * @returns the paths written.
  */
-export async function encode(recorder, { outDir, name, loopFade = null, poster = true }) {
+export async function encode(recorder, { outDir, name, loopFade = null, poster = true, width = null }) {
   const { frames, endedAt, marks, squeezes, frameDir, fps } = recorder
   if (frames.length < 2) throw new Error('Too few frames recorded')
 
+  // Each frame lasts until the next one arrived, and no longer. This used to
+  // floor every frame at 1/fps, which read as harmless until a clip was cut on
+  // a 120Hz display: a scroll or a fade delivers a frame per compositor tick,
+  // every one of them was stretched to 33ms, and a 27-second recording came
+  // out at 46. The `fps` filter below picks whichever frame is showing at each
+  // tick of the cut, which is the right thing to do with frames 8ms apart.
   const durations = frames.map((frame, index) => {
     const next = frames[index + 1]
-    return Math.max((next ? next.at : endedAt) - frame.at, 1 / fps)
+    return Math.max((next ? next.at : endedAt) - frame.at, 0.001)
   })
 
   // A frame is on screen from its timestamp until the next one, so the frame
@@ -156,7 +167,7 @@ export async function encode(recorder, { outDir, name, loopFade = null, poster =
   await run('ffmpeg', [
     '-y', '-loglevel', 'error',
     '-f', 'concat', '-safe', '0', '-i', listFile,
-    '-vf', `fps=${fps},format=yuv444p`,
+    '-vf', `fps=${fps}${width === null ? '' : `,scale=${width}:-2:flags=lanczos`},format=yuv444p`,
     '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '8',
     master
   ])
@@ -171,7 +182,9 @@ export async function encode(recorder, { outDir, name, loopFade = null, poster =
     const fadeAt = (duration - loopFade).toFixed(3)
     filter =
       // Both inputs on one clock, or xfade refuses to join them.
-      `[1:v]format=yuv420p,fps=${fps},settb=AVTB[tail];[0:v]format=yuv420p,fps=${fps},settb=AVTB[main];` +
+      // The tail is a raw frame, so it takes the same scale the master did.
+      `[1:v]${width === null ? '' : `scale=${width}:-2:flags=lanczos,`}format=yuv420p,fps=${fps},settb=AVTB[tail];` +
+      `[0:v]format=yuv420p,fps=${fps},settb=AVTB[main];` +
       `[main][tail]xfade=transition=fade:duration=${loopFade}:offset=${fadeAt}`
     inputs = [
       '-i', master,

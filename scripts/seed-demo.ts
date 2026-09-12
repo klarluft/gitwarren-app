@@ -17,6 +17,7 @@ import { eq, sql } from 'drizzle-orm'
 import { getDatabase } from '../src/core/db/client.js'
 import { comments, commentThreads, repositories, reviews } from '../src/core/db/schema.js'
 import { commentsService } from '../src/core/services/comments.js'
+import { hostsService } from '../src/core/services/hosts.js'
 import { repositoriesService } from '../src/core/services/repositories.js'
 import { reviewsService } from '../src/core/services/reviews.js'
 import { HUMAN_AUTHOR, type CommentAuthor } from '../src/shared/actors.js'
@@ -24,6 +25,15 @@ import type { ReviewDiff } from '../src/shared/git.js'
 
 /** Where scripts/make-demo-repos.sh put the demo repositories. */
 const DEMO_ROOT = process.env.DEMO_REPO_ROOT ?? '/tmp/gw-demo-repos'
+
+/**
+ * A machine on the tailnet to list as a host, for a capture that shows one.
+ *
+ * Only the row is written: nothing is connected to here, so a name that is
+ * asleep costs the seed nothing. The screen that shows it is what reaches it,
+ * and what it shows is whatever that machine actually says.
+ */
+const TAILNET_HOST = process.env.DEMO_TAILNET_HOST
 
 /**
  * A Claude Code session, as the MCP handshake would describe one. The session
@@ -82,6 +92,8 @@ async function main(): Promise<void> {
   db.update(repositories).set({ createdAt: ago(40 * DAY) }).where(eq(repositories.id, app.id)).run()
   db.update(repositories).set({ createdAt: ago(12 * DAY) }).where(eq(repositories.id, docs.id)).run()
   db.update(repositories).set({ createdAt: ago(5 * DAY) }).where(eq(repositories.id, site.id)).run()
+
+  if (TAILNET_HOST) hostsService.add({ target: TAILNET_HOST, kind: 'websocket' })
 
   // ---- reviews ------------------------------------------------------------
 

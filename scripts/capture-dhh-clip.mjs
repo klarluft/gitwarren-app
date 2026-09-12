@@ -11,8 +11,24 @@
  *
  * That is two questions, and the clip answers them in order: **Expand all
  * lines** turns a change set back into a file, and the browse tab reaches a
- * file the change never touched. Nothing is narrated and nothing is claimed
- * on screen that the app does not do.
+ * file the change never touched. Then a third beat for the other half of his
+ * setup - a stack of machines on a tailnet - showing one of them reviewed from
+ * here. Nothing is claimed on screen that the app does not do: the host on the
+ * Hosts screen is a real machine, reached for real while the clip records.
+ *
+ * ## What the second cut fixed
+ *
+ * The first cut was twenty-five seconds of dark code with no cursor and no
+ * words, and the honest review of it was "I don't know what I'm looking at".
+ * So every beat now has a one-line caption saying what it is, the pointer is
+ * drawn (a screencast has none), and the page is shot smaller and delivered
+ * larger so the product is legible at a phone's width. See `overlay.mjs`.
+ *
+ * The holds are on a clock rather than a chain of waits. A caption swap, a
+ * pointer glide and a `settle` each cost a fraction of a second, and nine beats
+ * of those added eighteen seconds to a cut budgeted at twenty-four. So each
+ * beat now ends at a fixed second from the first frame, and whatever the
+ * overhead turns out to be comes out of the hold rather than the total.
  *
  * ## Why a browser and not the app
  *
@@ -25,18 +41,23 @@
  *
  * ## Setup
  *
- * The demo repositories and a seeded database, exactly as the hero video takes
- * them:
+ * The demo repositories and a seeded database, as the hero video takes them,
+ * plus one host on the tailnet for the third beat (any machine of yours that
+ * is running GitWarren with "Reachable on your tailnet" on):
  *
  *   DEMO_REPO_ROOT=~/Developer/klarluft scripts/make-demo-repos.sh
  *   rm -rf /tmp/gw-demo
- *   GITWARREN_DATA_DIR=/tmp/gw-demo DEMO_REPO_ROOT=~/Developer/klarluft npx tsx scripts/seed-demo.ts
+ *   GITWARREN_DATA_DIR=/tmp/gw-demo DEMO_REPO_ROOT=~/Developer/klarluft \
+ *     DEMO_TAILNET_HOST=pc-win.tail688c0c.ts.net npx tsx scripts/seed-demo.ts
  *
  * Then the web build, and the server that hands it out. `serve` prints the URL
- * with its per-launch token on the end; it is needed below:
+ * with its per-launch token on the end; it is needed below. Run from source
+ * the daemon calls itself `0.0.0-dev`, and the host's card would then offer an
+ * update to that; give it the version the host actually runs instead:
  *
  *   npm run build:web
- *   GITWARREN_DATA_DIR=/tmp/gw-demo npx tsx src/cli/gitwarren.ts serve
+ *   NODE_OPTIONS="--import data:text/javascript,globalThis.__APP_VERSION__='0.1.8'" \
+ *     GITWARREN_DATA_DIR=/tmp/gw-demo npx tsx src/cli/gitwarren.ts serve
  *
  * Then a Chrome with a debugging port and nothing else in it. A scratch
  * profile keeps it to one tab, which is the one this attaches to:
@@ -56,6 +77,7 @@
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Cdp, hideScrollbars, settle, wait } from './cdp.mjs'
+import { caption, clickAt, cursorTo, install, parkCursor } from './overlay.mjs'
 import { Recorder, encode } from './record.mjs'
 
 const PORT = Number(process.env.CDP_PORT ?? 9222)
@@ -63,15 +85,23 @@ const OUT_DIR = process.env.VIDEO_DIR ?? 'video-out'
 const FRAME_DIR = join(tmpdir(), 'gitwarren-dhh-frames')
 
 /**
- * 16:9 rather than the hero's 3:2. X plays a landscape video inline at about
- * this shape, and a letterboxed clip in a timeline reads as a screenshot of a
- * video rather than as a video.
+ * 16:9, shot at 1120 wide and delivered at 1920.
+ *
+ * X plays a landscape video inline at about this shape, and a letterboxed clip
+ * in a timeline reads as a screenshot of a video rather than as a video. The
+ * viewport is the narrowest the review layout keeps its file tree at, so the
+ * product fills the frame and 13px UI text arrives at a phone as large as it
+ * is going to get.
  */
-const SIZE = { width: 1280, height: 720 }
+const SIZE = { width: 1120, height: 630 }
 const SCALE = 2
 const FPS = 30
+const OUTPUT_WIDTH = 1920
 
 const REVIEW_ID = Number(process.env.DEMO_REVIEW_ID ?? 1)
+
+/** The label the seeded tailnet host gets: the first label of its hostname. */
+const HOST_LABEL = process.env.DEMO_TAILNET_LABEL ?? 'pc-win'
 
 /**
  * The file the change *did* touch: committed bindings plus a staged edit, in a
@@ -90,52 +120,49 @@ const CHANGED_FILE = 'src/renderer/src/features/reviews/review-files-tab.tsx'
  */
 const UNTOUCHED_FILE = 'src/renderer/src/features/reviews/review-conversation-tab.tsx'
 
-// ---- input ------------------------------------------------------------------
-
-/** A bare key press, as the hotkey layer sees it. Never inserts text. */
-async function press(cdp, key, code, keyCode) {
-  await cdp.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key, code, windowsVirtualKeyCode: keyCode })
-  await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode: keyCode })
-}
-
-async function moveMouse(cdp, x, y) {
-  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y })
-}
-
-async function click(cdp, x, y) {
-  await moveMouse(cdp, x, y)
-  await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 })
-  await wait(60)
-  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 })
-}
+/** What gets typed into the tree's filter to find it. */
+const UNTOUCHED_FILTER = 'conversation-tab'
 
 // ---- the page --------------------------------------------------------------
+
+/**
+ * The centre of the first element an expression finds, or null.
+ *
+ * Null also for an element that exists but is scrolled out of the viewport: a
+ * mouse event dispatched at a point off the screen lands on nothing and says
+ * nothing, and the second take lost its tab switch to exactly that.
+ */
+async function locate(cdp, expression) {
+  return cdp.evaluate(`(() => {
+    const el = (() => { ${expression} })()
+    if (!el || el.offsetParent === null) return null
+    const r = el.getBoundingClientRect()
+    const x = Math.round(r.left + r.width / 2)
+    const y = Math.round(r.top + r.height / 2)
+    if (x < 0 || y < 0 || x > innerWidth || y > innerHeight) return null
+    return { x, y }
+  })()`)
+}
+
+async function locateOrFail(cdp, expression, what) {
+  const point = await locate(cdp, expression)
+  if (!point) throw new Error(`Cannot find ${what} on screen`)
+  return point
+}
+
+function fileCard(file) {
+  return `document.getElementById('file-' + encodeURIComponent(${JSON.stringify(file)}))`
+}
 
 /** Put a file's card at the top of the page, the way clicking the tree does. */
 async function scrollToFile(cdp, file) {
   const found = await cdp.evaluate(`(() => {
-    const card = document.getElementById('file-' + encodeURIComponent(${JSON.stringify(file)}))
+    const card = ${fileCard(file)}
     if (!card) return null
     card.scrollIntoView({ block: 'start', behavior: 'smooth' })
     return 'ok'
   })()`)
   if (found !== 'ok') throw new Error(`No card for ${file} on screen`)
-}
-
-/**
- * Where a file card's "Expand all lines" button is, or null when the file has
- * nothing folded - which is worth failing on rather than recording, since a
- * clip of that button doing nothing is the opposite of the point.
- */
-async function locateExpandAll(cdp, file) {
-  return cdp.evaluate(`(() => {
-    const card = document.getElementById('file-' + encodeURIComponent(${JSON.stringify(file)}))
-    if (!card) return null
-    const button = card.querySelector('button[aria-label="Expand all lines in this file"]')
-    if (!button || button.offsetParent === null) return null
-    const r = button.getBoundingClientRect()
-    return { x: r.left + r.width / 2, y: r.top + r.height / 2 }
-  })()`)
 }
 
 /**
@@ -147,7 +174,7 @@ async function locateExpandAll(cdp, file) {
  */
 function countExpanders(cdp, file) {
   return cdp.evaluate(`(() => {
-    const card = document.getElementById('file-' + encodeURIComponent(${JSON.stringify(file)}))
+    const card = ${fileCard(file)}
     if (!card) return -1
     return card.querySelectorAll('button[aria-label^="Show "]').length
   })()`)
@@ -157,6 +184,73 @@ async function goTo(cdp, hash) {
   await cdp.evaluate(`location.hash = ${JSON.stringify(hash)}`)
   await wait(300)
   await settle(cdp)
+}
+
+function scrollMain(cdp, options) {
+  return cdp.evaluate(`document.querySelector('main')?.scrollTo(${JSON.stringify(options)})`)
+}
+
+/** Type into whatever has focus, one character at a time, as a person would. */
+async function type(cdp, text) {
+  for (const char of text) {
+    await cdp.send('Input.insertText', { text: char })
+    await wait(45)
+  }
+}
+
+/** A click with the real pointer only: for the warm-up, where nothing records. */
+async function plainClick(cdp, { x, y }) {
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y })
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 })
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 })
+}
+
+const TRY_NOW = `document.querySelector('button[aria-label=${JSON.stringify(`Try ${HOST_LABEL} now`)}]')`
+
+/** The Repositories button on the host's card. */
+const REPOSITORIES_BUTTON =
+  `const li = ${TRY_NOW}?.closest('li')
+   return [...(li?.querySelectorAll('button') ?? [])].find((b) => b.textContent.trim().startsWith('Repositories'))`
+
+/**
+ * Reach the tailnet host before anything records, and learn its route.
+ *
+ * A seeded host is a description of a machine, not a known one: `#/h/<id>/`
+ * needs the instance id the machine reports on first connect, and the Hosts
+ * screen does not connect to anything on its own. "Try now" is the deliberate
+ * reach, so the warm-up presses it, waits for the card to say "Reachable", and
+ * only then can the Repositories button exist for the clip to click.
+ */
+async function reachHost(cdp) {
+  await goTo(cdp, '#/hosts')
+  const tryNow = await locate(cdp, `return ${TRY_NOW}`)
+  if (!tryNow) throw new Error(`No host labelled ${HOST_LABEL} on the Hosts screen; seed with DEMO_TAILNET_HOST`)
+  await plainClick(cdp, tryNow)
+
+  const deadline = Date.now() + 30_000
+  let text = ''
+  while (Date.now() < deadline) {
+    text = (await cdp.evaluate(`${TRY_NOW}?.closest('li')?.innerText ?? ''`)) ?? ''
+    if (/\bReachable\b/.test(text) && !/Unreachable|Checking/.test(text)) break
+    await wait(400)
+  }
+  if (!/\bReachable\b/.test(text) || /Unreachable/.test(text)) {
+    throw new Error(`${HOST_LABEL} did not become reachable:\n${text}`)
+  }
+  if (/available/.test(text)) {
+    throw new Error(
+      `${HOST_LABEL} runs a different GitWarren than this serve claims to be, and its card offers an ` +
+        `update. Start serve with __APP_VERSION__ set to the host's version (see the header).\n${text}`
+    )
+  }
+  await settle(cdp)
+
+  const repositories = await locateOrFail(cdp, REPOSITORIES_BUTTON, `the Repositories button on ${HOST_LABEL}'s card`)
+  await plainClick(cdp, repositories)
+  await wait(400)
+  await settle(cdp)
+  const hostRoute = await cdp.evaluate('location.hash')
+  if (!/^#\/h\//.test(hostRoute)) throw new Error(`Repositories did not lead to a host route (got ${hostRoute})`)
 }
 
 // ---- the storyboard ----------------------------------------------------------
@@ -172,7 +266,6 @@ async function main() {
     deviceScaleFactor: SCALE,
     mobile: false
   })
-  await hideScrollbars(cdp)
 
   // Unfolded gaps and the open file survive a hash change, so a second take in
   // the same tab would start where the first one finished. Reload instead: this
@@ -180,9 +273,12 @@ async function main() {
   await cdp.send('Page.reload', { ignoreCache: false })
   await wait(2500)
   await settle(cdp)
+  await hideScrollbars(cdp)
+  await install(cdp)
 
-  // Warm both tabs before recording, so the clip shows the product rather than
-  // a skeleton while git is asked a question.
+  // Warm every screen before recording, so the clip shows the product rather
+  // than a skeleton while git - or another machine - is asked a question.
+  await reachHost(cdp)
   await goTo(cdp, `#/reviews/${REVIEW_ID}/browse/${encodeURIComponent(UNTOUCHED_FILE)}`)
   await wait(800)
   await goTo(cdp, `#/reviews/${REVIEW_ID}/files`)
@@ -191,57 +287,120 @@ async function main() {
   const folded = await countExpanders(cdp, CHANGED_FILE)
   if (folded < 1) throw new Error(`${CHANGED_FILE} has nothing folded; the clip has no point to make`)
 
-  // Park the pointer where it hovers nothing, and start from the top.
-  await moveMouse(cdp, SIZE.width - 12, SIZE.height - 12)
-  await cdp.evaluate(`document.querySelector('main')?.scrollTo({ top: 0, behavior: 'instant' })`)
+  await parkCursor(cdp, SIZE)
+  await caption(cdp, null)
+  await scrollMain(cdp, { top: 0, behavior: 'instant' })
   await wait(600)
 
   const recorder = new Recorder(cdp, { frameDir: FRAME_DIR, size: SIZE, scale: SCALE, fps: FPS })
   await recorder.start()
 
+  // Every beat ends at a fixed second from here; see the header.
+  const startedAt = Date.now()
+  const until = (seconds) => wait(Math.max(0, startedAt + seconds * 1000 - Date.now()))
+
   // 1. What is under review: an agent's work, still uncommitted.
-  await wait(2400)
+  await caption(cdp, "Reviewing an agent's work — before it's committed")
+  await until(2.4)
 
   // 2. The change set, and only the change set - three lines of context, and
   //    the rest of the file folded away behind the expanders.
   await scrollToFile(cdp, CHANGED_FILE)
-  await wait(3000)
+  await caption(cdp, 'The diff alone: 3 lines of context, the rest folded away')
+  await until(5.4)
 
   // 3. The first half of the answer: the file, whole, with the change in it.
-  const button = await locateExpandAll(cdp, CHANGED_FILE)
-  if (!button) throw new Error('No "Expand all lines" button on the changed file')
-  await moveMouse(cdp, button.x, button.y)
-  await wait(450)
-  await click(cdp, button.x, button.y)
-  await wait(1400)
+  const expandAll = await locateOrFail(
+    cdp,
+    `return ${fileCard(CHANGED_FILE)}?.querySelector('button[aria-label="Expand all lines in this file"]')`,
+    'the "Expand all lines" button'
+  )
+  await cursorTo(cdp, expandAll.x, expandAll.y)
+  await wait(200)
+  await clickAt(cdp, expandAll.x, expandAll.y)
+  await caption(cdp, 'Expand all lines — the whole file, change in place')
+  await wait(500)
   const left = await countExpanders(cdp, CHANGED_FILE)
   if (left !== 0) throw new Error(`Expand all left ${left} gaps folded`)
-  await moveMouse(cdp, SIZE.width - 12, SIZE.height - 12)
-  await wait(2400)
+  await parkCursor(cdp, SIZE)
+  await until(9.0)
 
   // 4. Reading down through context that was never in the diff.
-  await cdp.evaluate(`document.querySelector('main')?.scrollBy({ top: 620, behavior: 'smooth' })`)
-  await wait(2400)
+  await cdp.evaluate(`document.querySelector('main')?.scrollBy({ top: 560, behavior: 'smooth' })`)
+  await caption(cdp, 'Read around the change, not just the hunk')
+  await until(11.4)
 
   // 5. The second half: the tab that reaches a file the change never touched.
-  await press(cdp, '4', 'Digit4', 52)
-  await wait(1800)
+  //    Back up to the top first, where the tabs are.
+  await scrollMain(cdp, { top: 0, behavior: 'smooth' })
+  await wait(650)
+  const browseTab = await locateOrFail(
+    cdp,
+    `return [...document.querySelectorAll('[role="tab"]')].find((t) => t.textContent.trim().startsWith('Browse files'))`,
+    'the "Browse files" tab'
+  )
+  await caption(cdp, "Browse files — anything the change didn't touch")
+  await cursorTo(cdp, browseTab.x, browseTab.y)
+  await wait(150)
+  await clickAt(cdp, browseTab.x, browseTab.y)
+  await wait(300)
+  await settle(cdp, { timeout: 4000 })
+  await until(14.0)
 
   // 6. And there it is - the conversation tab, which the branch's own registry
-  //    declares a scope for and never binds.
-  //
-  //    The scroll offset is the diff's, carried across the tab switch, so the
-  //    file would otherwise open halfway down. It should start where a file
-  //    starts.
-  await goTo(cdp, `#/reviews/${REVIEW_ID}/browse/${encodeURIComponent(UNTOUCHED_FILE)}`)
-  await cdp.evaluate(`document.querySelector('main')?.scrollTo({ top: 0, behavior: 'instant' })`)
-  await wait(3600)
+  //    declares a scope for and never binds. Found the way a person finds a
+  //    file in an unfamiliar tree: by typing part of its name.
+  const filter = await locateOrFail(
+    cdp,
+    `return document.querySelector('input[aria-label="Filter files in this repository"]')`,
+    'the file filter'
+  )
+  await caption(cdp, 'Any file in the repo — touched by the change or not')
+  await cursorTo(cdp, filter.x, filter.y)
+  await clickAt(cdp, filter.x, filter.y)
+  await type(cdp, UNTOUCHED_FILTER)
+  await wait(150)
+  const match = await locateOrFail(
+    cdp,
+    `return document.querySelector('nav[aria-label="Matching files"] button[title^=${JSON.stringify(UNTOUCHED_FILE)}]')`,
+    `${UNTOUCHED_FILE} among the matches`
+  )
+  await cursorTo(cdp, match.x, match.y)
+  await wait(150)
+  await clickAt(cdp, match.x, match.y)
+  await parkCursor(cdp, SIZE)
+  await wait(300)
+  await settle(cdp, { timeout: 4000 })
+  await scrollMain(cdp, { top: 0, behavior: 'instant' })
+  await until(18.4)
+
+  // 7. The other half of his setup: a stack of machines on a tailnet. The card
+  //    is a real host, reached for real a moment ago.
+  await caption(cdp, 'Your other machines, over your tailnet')
+  await goTo(cdp, '#/hosts')
+  await scrollMain(cdp, { top: 0, behavior: 'instant' })
+  await until(21.4)
+
+  // 8. Into that machine: its repositories, from here.
+  const repos = await locateOrFail(cdp, REPOSITORIES_BUTTON, `the Repositories button on ${HOST_LABEL}'s card`)
+  await caption(cdp, 'Review what your agents did there — from here')
+  await cursorTo(cdp, repos.x, repos.y)
+  await wait(150)
+  await clickAt(cdp, repos.x, repos.y)
+  await parkCursor(cdp, SIZE)
+  await wait(300)
+  await settle(cdp, { timeout: 4000 })
+  await until(25.0)
+
+  // 9. Where to get it.
+  await caption(cdp, 'gitwarren.com — open source, runs on your machines')
+  await until(27.2)
 
   await recorder.stop()
   await cdp.send('Emulation.clearDeviceMetricsOverride')
   cdp.close()
 
-  await encode(recorder, { outDir: OUT_DIR, name: 'dhh-clip', loopFade: null })
+  await encode(recorder, { outDir: OUT_DIR, name: 'dhh-clip', loopFade: null, width: OUTPUT_WIDTH })
 }
 
 main().catch((error) => {
