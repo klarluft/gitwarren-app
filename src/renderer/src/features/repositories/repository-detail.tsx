@@ -90,7 +90,7 @@ export function RepositoryDetail({ repositoryId }: { repositoryId: number }) {
       // it arrives a frame late on a host: the host list has to load before this
       // machine knows whether it can name that file. Without it the `o` key
       // would keep the value from the render where the answer was still null.
-      [api, host, repository, revealPath]
+      [api, repository, revealPath]
     )
   )
 

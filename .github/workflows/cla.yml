@@ -23,6 +23,11 @@ jobs:
        github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA') ||
       github.event_name == 'pull_request_target'
     steps:
+      # Already the newest release there is: v2.6.1 is from 2024 and still
+      # declares `node20`, so Actions warns that the runner is forcing it onto
+      # Node 24. Nothing to bump until upstream ships a `node24` release, and
+      # this is the one action here that could actually break when that
+      # compatibility shim goes away.
       - uses: contributor-assistant/github-action@v2.6.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
