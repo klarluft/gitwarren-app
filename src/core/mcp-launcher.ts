@@ -33,7 +33,8 @@ export function getMcpLauncherPath(): string {
 }
 
 /**
- * The CLI's own stable path, written by `gitwarren service install`.
+ * The CLI's own stable path, written by `gitwarren service install` and, since
+ * the launchers became a side effect of serving, by `gitwarren serve` too.
  *
  * `.cmd` on Windows for the same reason the MCP launcher takes it: a file the
  * Task Scheduler and a user's own shell both have to be able to run has to be
@@ -77,6 +78,6 @@ export function describeMcpLaunch(): McpLaunchInfo {
     direct: { command: launcher, args: [], env: {} },
     note: available
       ? undefined
-      : 'No MCP launcher on this machine yet. `gitwarren service install` writes it.'
+      : 'No MCP launcher on this machine yet. `gitwarren agent-setup` writes it, and so does `gitwarren serve`.'
   }
 }

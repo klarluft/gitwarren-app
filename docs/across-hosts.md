@@ -1307,6 +1307,34 @@ path is written and typed but has only been exercised on macOS and Linux;
 shape as the Windows launcher-banner bug M2 shipped, so it should be run on the
 PC before the milestone is called done.
 
+**M3.3 revisited on 12 September, after the first install on a Linux box.**
+The formula's caveats listed `serve`, `open` and `service install` and said
+nothing about which one a person wanted, `uninstall` was missing from every
+place a newcomer looked, and the model underneath was the confusing part: the
+MCP launcher was written by `service install` alone, so `gitwarren serve`
+followed by a look at the Agent Access page ended in an instruction to
+register a login item — a command about logging in, to a person who wanted an
+agent. Three changes. `gitwarren serve` now writes both launchers once it is
+up, the way the app writes the MCP one on every launch, and `agent-setup`
+writes the one it names rather than pointing elsewhere; `service install` is
+one thing again, *keep it running*, and says so — "running in the background,
+and will start again when you log in" — with the Scheduled Task started on the
+spot like the other two. Every usage block, caveat and README is now ordered
+by what a person wants: run it now, keep it running, let an agent in, and each
+says the MCP server reads the same SQLite file whether or not anything is
+serving. And Linux without Homebrew got a way in: `packaging/install.sh`,
+served as `https://gitwarren.com/install.sh` by a Cloudflare redirect, fetches
+the release tarball, checks it against the sha256 the release's own formula
+names, and lays it out exactly as `core/hosts/install.ts` does over ssh —
+`~/.gitwarren/daemon/<version>/` and the stable launcher — so the app and the
+script can upgrade each other's install. Verified in a bare `ubuntu:24.04`
+container with the worktree's own linux-x64 tarball: `serve` wrote the
+launchers and printed the new sentences, a second `serve` refused with the
+first one's URL, the MCP server answered `initialize` through the launcher,
+and the script installed v0.1.8 from GitHub with curl and again with only
+wget. `service install` on a real systemd was not re-exercised — the only
+change there is wording.
+
 **M3.4, done on the Mac, 10 September.** The screen that hands GitWarren to an
 agent. Most of the words were already right — M2 wrote the sentence and put it
 above the snippet — so this change is mostly about where they live and who they

@@ -35,7 +35,7 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { readLiveDaemonRuntime } from '../core/daemon-runtime.js'
-import { getCliLauncherPath } from '../core/mcp-launcher.js'
+import { getCliLauncherPath, getMcpLauncherPath } from '../core/mcp-launcher.js'
 import { getDataDirectory } from '../core/paths.js'
 import { describeSelf } from './install.js'
 import { writeLaunchers } from './launchers.js'
@@ -52,11 +52,18 @@ const USAGE = `gitwarren service install [--no-login-item]
 gitwarren service uninstall
 gitwarren service status
 
-install   writes ~/.gitwarren/bin/gitwarren and gitwarren-mcp, and registers a
-          login item that runs \`gitwarren serve --listen\`.
-uninstall removes the login item. The launchers stay: an agent config may name
-          one, and removing a login item is not a request to break that.
-status    says what is registered and what is running.
+install    keeps GitWarren running in the background: it starts now, and again
+           at every login, so \`gitwarren open\` and the links an agent hands
+           you always have something to open. Registers a LaunchAgent on
+           macOS, a systemd user unit on Linux, an at-logon task on Windows.
+           Also writes ~/.gitwarren/bin/gitwarren and gitwarren-mcp, the
+           stable paths the app and an agent start this install by.
+           --no-login-item writes those two files and registers nothing,
+           for a machine that is only ever reached from another one.
+uninstall  stops the background GitWarren and removes the login item. The two
+           files in ~/.gitwarren/bin stay, because an agent config may name
+           one; delete that directory by hand to remove them.
+status     what is registered, what is running, and where the data is.
 `
 
 /** `~/Library/Logs/GitWarren/daemon.log`. macOS only - see `units.ts`. */
@@ -141,6 +148,11 @@ function registerLoginItem(launcher: string): string {
       'ONLOGON',
       '/F'
     ])
+    // Started now as well as at logon, for the reason the systemd branch gives
+    // `--now`: the command a user just typed should have a visible effect, and
+    // "log out and back in" is not one. `ask` rather than `must` because a
+    // task that refuses to run this instant is still registered.
+    ask('schtasks', ['/Run', '/TN', WINDOWS_TASK])
     return `Scheduled Task "${WINDOWS_TASK}"`
   }
 
@@ -225,22 +237,38 @@ function install(argv: readonly string[]): boolean {
   }
 
   if (argv.includes('--no-login-item')) {
-    console.log('--no-login-item: nothing was registered to start at login.')
+    console.log('Nothing was registered to start at login (--no-login-item).')
     return true
   }
 
-  console.log(registerLoginItem(cli) + ' will run `gitwarren serve --listen` at login.')
+  // Whoever holds the data directory *before* the item is registered, because
+  // registering starts the daemon, and a moment later the answer would be
+  // "the daemon" whether or not it is about to stand aside.
+  const owner = readLiveDaemonRuntime()
+
+  console.log(`registered ${registerLoginItem(cli)}`)
 
   // Said after the fact rather than as a refusal. The user asked for a login
   // item and now has one; what they also have is an app that will win the race
   // for the port every time, and finding that out in three weeks by wondering
   // why the daemon is never up is worse than a sentence now.
-  const owner = readLiveDaemonRuntime()
   if (owner?.owner === 'gui') {
     console.log(
-      '\nGitWarren.app is running and owns this data directory. A data directory has one ' +
-        'owner, so the daemon will stand aside whenever the app is up - which is fine, and ' +
-        'means the login item only does something on the logins where you do not open it.'
+      '\nThe desktop app is running and owns this data directory, so the background ' +
+        'GitWarren has stood aside for now. Only one can serve at a time; the login item ' +
+        'does its job on the logins where you do not open the app.'
+    )
+  } else if (owner !== null) {
+    console.log(
+      '\nA `gitwarren serve` is already running in a terminal, so the background GitWarren ' +
+        'has stood aside for now. Stop that one and it takes over at the next login, or ' +
+        'straight away if you run `gitwarren service install` again.'
+    )
+  } else {
+    console.log(
+      '\nGitWarren is now running in the background, and will start again when you log in. ' +
+        '`gitwarren open` opens it in your browser; `gitwarren service uninstall` undoes ' +
+        'all of this.'
     )
   }
 
@@ -259,23 +287,26 @@ export function runService(argv: readonly string[]): boolean {
       case 'uninstall':
         console.log(`removed ${removeLoginItem()}`)
         console.log(
-          'The launchers in ~/.gitwarren/bin were left alone. Delete them by hand if an ' +
-            'agent no longer needs to reach this machine.'
+          'GitWarren no longer runs in the background or starts at login. `gitwarren serve` ' +
+            'still runs it in a terminal. The two files in ~/.gitwarren/bin were left alone, ' +
+            'because an agent config may name one; delete that directory to remove them.'
         )
         return true
 
       case 'status': {
         const owner = readLiveDaemonRuntime()
-        console.log(`Login item:  ${loginItemState()}`)
-        console.log(`Launcher:    ${existsSync(getCliLauncherPath()) ? getCliLauncherPath() : 'not written'}`)
+        const mcp = getMcpLauncherPath()
+        console.log(`Login item:    ${loginItemState()}`)
+        console.log(`CLI launcher:  ${existsSync(getCliLauncherPath()) ? getCliLauncherPath() : 'not written'}`)
+        console.log(`MCP launcher:  ${existsSync(mcp) ? mcp : 'not written - `gitwarren agent-setup` writes it'}`)
         console.log(
-          `Serving now: ${
+          `Running now:   ${
             owner === null
-              ? 'nothing'
-              : `${owner.owner === 'gui' ? 'GitWarren.app' : 'gitwarren serve'} (pid ${owner.pid})`
+              ? 'nothing - `gitwarren serve` runs it in this terminal'
+              : `${owner.owner === 'gui' ? 'the desktop app' : 'gitwarren serve'} (pid ${owner.pid})`
           }`
         )
-        console.log(`Data:        ${getDataDirectory()}`)
+        console.log(`Data:          ${getDataDirectory()}`)
         return true
       }
 

@@ -72,16 +72,30 @@ class GitwarrenCli < Formula
     bin.install_symlink libexec/"bin/gitwarren-mcp"
   end
 
+  # Read once, at the moment someone has just installed this and does not yet
+  # know what it is. So it answers the three questions that moment has - how
+  # do I start it, how do I keep it running, how does my agent get in - in
+  # that order, and says what each command does to the machine rather than
+  # what it is called. The desktop app is last because a person who wanted it
+  # has probably typed the wrong formula.
   def caveats
     <<~EOS
-      GitWarren serves its web view on 127.0.0.1 only:
+      To run GitWarren in this terminal and open it in your browser:
 
-        gitwarren serve         start it, and print a URL carrying this launch's token
-        gitwarren open          open that URL in your browser
-        gitwarren service install   start it at login, and write the agent launcher
+        gitwarren serve --open
 
-      `service install` also writes ~/.gitwarren/bin/gitwarren-mcp, which is the
-      one command to point an agent at. The desktop app is a separate package:
+      That serves on 127.0.0.1 only and stops when you press Ctrl-C. To keep
+      GitWarren running in the background instead, starting now and again at
+      every login:
+
+        gitwarren service install       (undo with: gitwarren service uninstall)
+
+      Either one also writes ~/.gitwarren/bin/gitwarren-mcp, the command a coding
+      agent starts GitWarren's MCP server with. `gitwarren agent-setup` prints the
+      sentence to give the agent. Reviews live in one SQLite file, and the MCP
+      server reads it whether or not GitWarren is being served.
+
+      `gitwarren --help` lists everything. The desktop app is a separate package:
 
         brew install --cask klarluft/tap/gitwarren
     EOS

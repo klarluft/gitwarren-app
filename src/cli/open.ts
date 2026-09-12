@@ -19,8 +19,8 @@
  * for wanting one permanently, which is `gitwarren service install`. The
  * refusal names both.
  */
-import { execFile } from 'node:child_process'
 import { readFileSync } from 'node:fs'
+import { openInBrowser } from './browser.js'
 import { readLiveDaemonRuntime } from '../core/daemon-runtime.js'
 import { getWebTokenPath } from '../core/web/token.js'
 import { webUrlFor } from './target.js'
@@ -36,40 +36,6 @@ token so the tab is authenticated without anything being copied.
            piping somewhere.
 `
 
-/**
- * Hand a URL to the desktop.
- *
- * `execFile`, never a shell: the URL carries a token and a fragment, and the
- * one thing that must not happen to a string like that is word splitting by
- * something that also understands `;`. Windows is the exception in shape rather
- * than in rule - `start` is a `cmd` builtin and cannot be executed directly -
- * and its empty `""` is the window *title*, which has to be there or `cmd`
- * reads the quoted URL as one.
- *
- * Detached and unreferenced, because `open` and `xdg-open` on some desktops do
- * not return until the browser they started exits, and this command has nothing
- * left to say once the URL is handed over.
- */
-function openInBrowser(url: string): void {
-  const [command, args]: [string, string[]] =
-    process.platform === 'darwin'
-      ? ['open', [url]]
-      : process.platform === 'win32'
-        ? ['cmd', ['/c', 'start', '', url]]
-        : ['xdg-open', [url]]
-
-  const child = execFile(command, args, { windowsHide: true }, (error) => {
-    if (error) {
-      console.error(
-        `[gitwarren] could not ask ${command} to open a browser (${error.message}). ` +
-          `The URL is:\n\n    ${url}\n`
-      )
-      process.exitCode = 1
-    }
-  })
-  child.unref()
-}
-
 export function runOpen(argv: readonly string[]): boolean {
   const print = argv.includes('--print')
   const rest = argv.filter((argument) => argument !== '--print')
@@ -82,8 +48,9 @@ export function runOpen(argv: readonly string[]): boolean {
   const owner = readLiveDaemonRuntime()
   if (owner === null) {
     console.error(
-      '[gitwarren] nothing is serving this machine. Start it with `gitwarren serve`, or ' +
-        '`gitwarren service install` to have it start at login.'
+      '[gitwarren] GitWarren is not running on this machine, so there is nothing to open. ' +
+        '`gitwarren serve` runs it in a terminal; `gitwarren service install` keeps it ' +
+        'running in the background.'
     )
     process.exitCode = 1
     return true
@@ -126,7 +93,11 @@ export function runOpen(argv: readonly string[]): boolean {
   // and substituted, and a URL on stderr is the one thing that would make it
   // useless for that.
   if (print) console.log(url)
-  else openInBrowser(url)
+  else
+    openInBrowser(url, (message) => {
+      console.error(`[gitwarren] ${message}. The URL is:\n\n    ${url}\n`)
+      process.exitCode = 1
+    })
 
   return true
 }

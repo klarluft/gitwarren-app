@@ -45,7 +45,7 @@ import { getInstanceId } from '../core/instance.js'
 import { getDatabasePath } from '../core/paths.js'
 import { serveStdio } from '../core/rpc/stdio.js'
 import { DAEMON_READY_PREFIX, RPC_PROTOCOL_VERSION } from '../shared/rpc.js'
-import { runListen } from './listen.js'
+import { runListen, type ListenHooks } from './listen.js'
 
 const USAGE = `gitwarren serve --stdio
 gitwarren serve --listen
@@ -58,20 +58,26 @@ hand it is a way to see what the protocol says:
 
 --listen serves the web view on loopback and prints a URL carrying this
 launch's token. It claims this machine's data directory, so it refuses to
-start while the app is running - see daemon/listen.ts.
+start while the app is running - see daemon/listen.ts. \`gitwarren serve\` with
+no flag means this one.
 `
 
 /**
  * Start the daemon. Returns false when argv asked for something that is not a
  * carrier, so the caller can decide whether that is a usage error or a
  * different mode of its own - `main/index.ts` reuses this for `--serve`.
+ *
+ * `hooks` belong to `--listen` alone and are what the CLI does once a human's
+ * server is up - write the launchers, open a browser. They are passed through
+ * rather than done here because this file must stay free of anything a
+ * `--stdio` daemon spawned over ssh would not want.
  */
-export function runDaemon(argv: readonly string[]): boolean {
+export function runDaemon(argv: readonly string[], hooks: ListenHooks = {}): boolean {
   // Checked before `--stdio` only because it is the mode that can *refuse*, and
   // its refusals are sentences rather than a usage block. The two are exclusive:
   // one binds a port and owns the machine, the other answers a pipe and owns
   // nothing.
-  if (argv.includes('--listen')) return runListen()
+  if (argv.includes('--listen')) return runListen(hooks)
 
   if (!argv.includes('--stdio')) {
     console.error(USAGE)
