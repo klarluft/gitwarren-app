@@ -285,6 +285,13 @@ jobs:
     # Same reasoning as the matrix: a failure here should not throw away
     # installers that already uploaded to the draft.
     continue-on-error: true
+    # A job-level block *replaces* the workflow's `contents: write` rather than
+    # adding to it, so that has to be repeated here or `gh release upload`
+    # above loses the permission it needs. `id-token: write` is what lets this
+    # job ask GitHub for the OIDC token npm trades for a publish credential.
+    permissions:
+      contents: write
+      id-token: write
 
     steps:
       - uses: actions/checkout@v4
@@ -332,29 +339,42 @@ jobs:
           gh release upload "$TAG" out/daemon-tarball/*.tar.gz --clobber
           gh release upload "$TAG" out/daemon-tarball/gitwarren-cli.rb --clobber
 
-      # Skipped rather than failed without a token, like homebrew-tap.yml: a
-      # release that produced every asset and did not publish to npm is a
-      # `npm publish out/npm` away from being finished, and failing the job
-      # would suggest the artifacts are suspect when they are not.
+      # Published by trusted publishing: npm trades the OIDC token GitHub mints
+      # for this workflow for a credential that lives minutes, so there is no
+      # NPM_TOKEN here and none in the repository secrets. Nothing long-lived
+      # exists to leak, and npm generates a provenance attestation from the
+      # same exchange — which the token era never produced.
       #
-      # `--provenance` needs the `id-token: write` permission on this job, which
-      # is deliberately not granted: this workflow already has `contents: write`
-      # at the top, and widening a release workflow's token to sign statements
-      # about itself is a decision to take on its own rather than as a footnote
-      # to packaging. Without it npm publishes the tarball unattested, which is
-      # what every release before this one did too.
+      # The trust lives on the package at npmjs.com, matched against the owner,
+      # the repository, and this workflow's *filename*. Renaming this file, or
+      # moving the publish into a workflow of another name, breaks the publish
+      # until the publisher is updated to match; the failure reads as an
+      # authentication error rather than as a name mismatch, so change the two
+      # together.
+      #
+      # The registry-url step is what points npm at the registry the publisher
+      # was configured on. It runs here rather than on the job's first
+      # setup-node deliberately: doing it up front also writes an auth
+      # placeholder into .npmrc, and `npm ci` then fails against a variable
+      # nothing sets.
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          registry-url: 'https://registry.npmjs.org'
+
       - name: Publish to npm
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
-          if [ -z "$NODE_AUTH_TOKEN" ]; then
-            echo "NPM_TOKEN is not set; skipping. Publish by hand with: npm publish ./out/npm"
-            exit 0
-          fi
-          echo "//registry.npmjs.org/:_authToken=\${NODE_AUTH_TOKEN}" > ~/.npmrc
+          # Trusted publishing needs npm 11.5.1 or newer, and the npm bundled
+          # with a Node release is whatever shipped with it. package.json's
+          # engines field already asks for a newer npm than that, so this
+          # agrees with the project rather than only with the registry.
+          npm install -g npm@latest
+          npm --version
+
           # A prerelease tag must not become `npm install gitwarren`'s default.
-          # `0.1.7-beta.1` goes out as `next`; a plain `v0.1.7` as `latest`.
+          # `0.1.8-beta.1` goes out as `next`; a plain `v0.1.8` as `latest`.
           #
           # `./out/npm`, never `out/npm`: npm reads a bare `<a>/<b>` as a GitHub
           # shorthand and tries to clone a repository of that name, reporting it
