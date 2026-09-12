@@ -1,7 +1,7 @@
 {
   "name": "gitwarren",
   "productName": "GitWarren",
-  "version": "0.1.8-beta.1",
+  "version": "0.1.8",
   "description": "Code review for your own machines and your own agents",
   "author": {
     "name": "Klarluft B.V.",
