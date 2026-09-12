@@ -41,6 +41,12 @@ interface DiffSnippetProps {
   /** Head sha the snapshot was taken against, shown with the note. */
   capturedSha?: string | null
   onOpen?: () => void
+  /**
+   * Where `onOpen` goes, for the tooltip. A snippet can lead to Files changed
+   * or, for a comment on a file that diff does not contain, to Browse files -
+   * and a button that names the wrong one of those is worse than a plain path.
+   */
+  openLabel?: string
   className?: string
 }
 
@@ -55,6 +61,7 @@ export function DiffSnippet({
   historical = false,
   capturedSha = null,
   onOpen,
+  openLabel = 'Files changed',
   className
 }: DiffSnippetProps) {
   // "was line" matches how the Files changed tab labels a thread it can no
@@ -78,7 +85,7 @@ export function DiffSnippet({
         type="button"
         onClick={onOpen}
         disabled={!onOpen}
-        title={onOpen ? `Open ${filePath} in Files changed` : filePath}
+        title={onOpen ? `Open ${filePath} in ${openLabel}` : filePath}
         className={cn(
           'flex w-full items-center gap-2 px-3 py-2 text-left',
           onOpen && 'transition-colors hover:bg-muted/60'

@@ -47,13 +47,13 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { errorMessage, isDisconnection } from '@/lib/errors'
 import { formatStep } from '@/lib/keys'
 import { plural } from '@/lib/format'
-import { useApi, useHost } from '@/lib/host-scope'
+import { useApi, useHost, useHostScope } from '@/lib/host-scope'
 import { useNarrow } from '@/lib/narrow'
 import { useStoredFlag, useStoredPreference } from '@/lib/preferences'
 import { revealElement } from '@/lib/reveal'
 import { cn } from '@/lib/utils'
 import { useRegisterCommands, type Command } from '@/features/commands/command-registry'
-import type { DiffFocus } from '@/lib/router'
+import { replace, type DiffFocus } from '@/lib/router'
 import { CommentThreadCard } from '../comments/comment-thread-card'
 import { useCommentMutations, useReviewComments } from '../comments/use-comments'
 import { ChangedFilesTree } from './changed-files-tree'
@@ -71,6 +71,7 @@ import {
 import { fileDiffDigest } from '@shared/diff-digest'
 import { remotelyOpenable } from '@shared/editors'
 import { findAnchorFile, isInlineAnchor, resolveAnchor } from '@shared/comment-anchors'
+import type { DiffSide } from '@shared/comment-anchors'
 import { threadSnippet } from '@shared/comment-snippets'
 import type { DiffChanges, FileDiff as FileDiffData } from '@shared/git'
 import { isSelfReview } from '@shared/schemas'
@@ -262,13 +263,27 @@ function useActiveFile(paths: string[]): string | null {
 }
 
 /**
+ * The line half of a focus, when it has one.
+ *
+ * A focus may name only a file - see `DiffFocus` - and the card wants the pair
+ * or nothing. Written once here rather than as the same conditional at the
+ * three places that need it.
+ */
+export function focusedLine(
+  focus: DiffFocus | null | undefined
+): { side: DiffSide; line: number } | undefined {
+  if (!focus || focus.side === undefined || focus.line === undefined) return undefined
+  return { side: focus.side, line: focus.line }
+}
+
+/**
  * Scroll to the line the URL asked for, and mark it while the reader finds it.
  *
  * The target may not be in the DOM yet - the diff is still rendering, or the
  * file card is collapsed and about to open - so this retries for a few frames
  * rather than firing once and missing. A line that never appears (the comment
- * was on code this diff does not contain) falls back to the file's card, which
- * is where such a thread is listed.
+ * was on code this diff does not contain, or the link named no line at all)
+ * falls back to the file's card, which is where such a thread is listed.
  */
 function useFocusScroll(focus: DiffFocus | undefined, ready: boolean): DiffFocus | null {
   const [marked, setMarked] = useState<DiffFocus | null>(null)
@@ -282,7 +297,8 @@ function useFocusScroll(focus: DiffFocus | undefined, ready: boolean): DiffFocus
     let clear = 0
 
     const find = (): void => {
-      const line = document.getElementById(lineDomId(focus.filePath, focus.side, focus.line))
+      const at = focusedLine(focus)
+      const line = at ? document.getElementById(lineDomId(focus.filePath, at.side, at.line)) : null
       const target = line ?? document.getElementById(fileDomId(focus.filePath))
 
       if (target) {
@@ -381,6 +397,9 @@ function useFilesLayout(): {
 export function ReviewFilesTab({ review, focus }: { review: Review; focus?: DiffFocus }) {
   const api = useApi()
   const host = useHost()
+  // Every link out of this tab has to carry the host, or a reviewer three
+  // clicks into another machine's review is walked back to their own.
+  const scope = useHostScope()
   const [changes, setChanges] = useState<DiffChanges>(DEFAULT_DIFF_CHANGES)
   const [editorId, setEditorId] = useStoredPreference('editor', null)
   const [openError, setOpenError] = useState<unknown>(null)
@@ -892,30 +911,57 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
         </p>
       )}
 
-      {/* Threads whose file has left the diff entirely - it was reverted, or
-          the base ref moved on and absorbed the change. Nothing below would
-          render them, and a discussion that silently disappears because the
+      {/* Threads on a file this diff does not contain. Two different stories
+          end up here and the card does not pretend to tell them apart, because
+          the useful response is the same for both: a file that left the diff -
+          reverted, or absorbed when the base ref moved on - and a file the
+          branch never touched, which since the browse tab is an ordinary place
+          to leave a comment.
+
+          What changed is that they are no longer a dead end. Browse reads the
+          file straight from the head, so it can show these threads against the
+          code they are about instead of stranding them at the top of a diff
+          they are not in. A discussion that silently disappears because the
           code moved is exactly the failure this app should not have. */}
       {orphanedFiles.length > 0 && (
         <Card className="flex flex-col gap-2 border-warning/40 p-3">
           <p className="text-xs text-muted-foreground">
             {plural(orphanedFiles.length, 'file')} with comments{' '}
-            {orphanedFiles.length === 1 ? 'is' : 'are'} no longer in this diff.
+            {orphanedFiles.length === 1 ? 'is' : 'are'} not part of this diff. Open{' '}
+            {orphanedFiles.length === 1 ? 'it' : 'them'} in Browse files to read the code.
           </p>
           {orphanedFiles.map(([path, fileThreads]) => (
             <div key={path} className="flex flex-col gap-3">
               {fileThreads.map((thread) => {
-                // No file to read the code from, so this is the stored snapshot
-                // or nothing at all.
+                // No file to read the code from *here* - this tab has only the
+                // diff - so this is the stored snapshot or nothing at all.
                 const snippet = threadSnippet(thread, thread.anchor, undefined)
                 const hasSnippet = snippet !== null && snippet.lines.length > 0
+                const openInBrowse = (): void =>
+                  replace({
+                    name: 'review',
+                    reviewId: review.id,
+                    tab: 'browse',
+                    focus:
+                      thread.line === null || thread.side === null
+                        ? { filePath: path }
+                        : { filePath: path, side: thread.side, line: thread.line },
+                    ...scope
+                  })
 
                 return (
                   <div key={thread.id} className="flex flex-col gap-2">
                     {hasSnippet ? (
-                      <DiffSnippet {...snippet} />
+                      <DiffSnippet {...snippet} onOpen={openInBrowse} openLabel="Browse files" />
                     ) : (
-                      <p className="font-mono text-xs text-muted-foreground">{path}</p>
+                      <button
+                        type="button"
+                        onClick={openInBrowse}
+                        title={`Open ${path} in Browse files`}
+                        className="self-start rounded font-mono text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                      >
+                        {path}
+                      </button>
                     )}
                     <CommentThreadCard
                       thread={thread}
@@ -1026,7 +1072,7 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
                   // arriving link cannot light up the same number in every file.
                   focus={focus?.filePath === file.path ? focus : undefined}
                   search={find.searchFor(file.path)}
-                  marked={marked?.filePath === file.path ? marked : undefined}
+                  marked={marked?.filePath === file.path ? focusedLine(marked) : undefined}
                   reviewed={{
                     isReviewed: reviewedPaths.has(file.path),
                     hasChangedSince: changedSincePaths.has(file.path),

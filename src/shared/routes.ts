@@ -12,22 +12,33 @@
  */
 import { isInstanceId } from './instance-id.js'
 
-export const REVIEW_TABS = ['conversation', 'commits', 'files'] as const
+export const REVIEW_TABS = ['conversation', 'commits', 'files', 'browse'] as const
 export type ReviewTab = (typeof REVIEW_TABS)[number]
 
 /**
- * A line of the diff to scroll to and mark on arrival.
+ * Where in a tab full of code the reader is being sent.
  *
  * In the hash rather than in a module variable so that the jump from a
  * conversation thread to its code is a *location*: it survives a reload, it can
- * be gone back to, and the files tab does not have to be told about it by
- * whoever happened to render it.
+ * be gone back to, and the tab does not have to be told about it by whoever
+ * happened to render it.
+ *
+ * The line is optional, and that is what the browse tab writes: "open
+ * `src/app.ts`" is a perfectly good destination on a screen that shows one file
+ * at a time, and `#/reviews/4/browse/src%2Fapp.ts` is how a person would expect
+ * to be able to say it. A path without a line already had a meaning in Files
+ * changed too - scroll to that file's card - which is exactly what arriving
+ * with a line the diff does not contain has always fallen back to.
+ *
+ * `side` travels with the line rather than on its own. On its own it would be
+ * an assertion about a file with no line to make it about, and the two are
+ * written and read as one pair everywhere they appear.
  */
 export interface DiffFocus {
   filePath: string
-  side: 'base' | 'head'
-  /** Line on that side, already resolved against the diff being shown. */
-  line: number
+  side?: 'base' | 'head'
+  /** Line on that side, already resolved against the code being shown. */
+  line?: number
 }
 
 /**
@@ -129,7 +140,8 @@ export function hrefFor(route: Route): string {
       if (!route.focus) return base
       // The path is encoded whole, slashes included, so it stays one segment.
       const { filePath, side, line } = route.focus
-      return `${base}/${encodeURIComponent(filePath)}/${side}/${line}`
+      const at = side === undefined || line === undefined ? '' : `/${side}/${line}`
+      return `${base}/${encodeURIComponent(filePath)}${at}`
     }
   }
 }
@@ -138,21 +150,61 @@ function isReviewTab(value: string | undefined): value is ReviewTab {
   return REVIEW_TABS.includes(value as ReviewTab)
 }
 
-/** `<encoded path>/<side>/<line>`, or nothing if any of it is missing or wrong. */
+/**
+ * Is this a path inside the repository, as a link is allowed to name one?
+ *
+ * The same rule as `isSafeRelativePath` in `core/git-compare.ts`, applied a
+ * long way earlier. That one is the real defence - it guards the actual file
+ * read, and it is the one that must never be removed - but a hash is hostile
+ * input that can arrive from a deep link an agent wrote into a comment, and
+ * this parser's standing promise is that it never produces a location the app
+ * could not already express. `../../etc/passwd` is not one of those, so it does
+ * not become a `Route` in the first place.
+ *
+ * Checked here rather than left to the reader because since the browse tab a
+ * focus path is not only a scroll target: it is the file the screen goes and
+ * asks for.
+ */
+function isLinkablePath(path: string): boolean {
+  if (path === '' || path.startsWith('/') || path.startsWith('\\')) return false
+  if (/^[a-zA-Z]:/.test(path)) return false
+  return !path.split(/[\\/]/).includes('..')
+}
+
+/**
+ * `<encoded path>`, or `<encoded path>/<side>/<line>`.
+ *
+ * All or nothing, and deliberately so. A bare path is a complete destination -
+ * the browse tab's "open this file", and in Files changed the scroll-to-card
+ * that arriving with an unfindable line has always fallen back to. But segments
+ * that are *present and wrong* - `a.ts/sideways/9`, `a.ts/head/oops` - mean the
+ * link was built by something that got the grammar wrong, and the honest
+ * response to half a location is none of it. The tab itself is still perfectly
+ * openable, which is where such a link lands.
+ */
 function parseFocus(segments: string[]): DiffFocus | undefined {
   const [encoded, side, rawLine] = segments
-  if (!encoded || (side !== 'base' && side !== 'head')) return undefined
+  if (!encoded) return undefined
+
+  let filePath: string
+  try {
+    filePath = decodeURIComponent(encoded)
+  } catch {
+    // A hand-mangled hash with a stray `%`.
+    return undefined
+  }
+
+  if (!isLinkablePath(filePath)) return undefined
+
+  // Nothing after the path: the file is the destination.
+  if (side === undefined && rawLine === undefined) return { filePath }
+
+  if (side !== 'base' && side !== 'head') return undefined
 
   const line = Number(rawLine)
   if (!Number.isInteger(line) || line <= 0) return undefined
 
-  try {
-    return { filePath: decodeURIComponent(encoded), side, line }
-  } catch {
-    // A hand-mangled hash with a stray `%`. Losing the focus is the right
-    // failure - the tab itself is still perfectly openable.
-    return undefined
-  }
+  return { filePath, side, line }
 }
 
 /**

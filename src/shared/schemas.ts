@@ -481,6 +481,19 @@ export const reviewDiffInputSchema = z.object({
 })
 
 /**
+ * Every file in the repository at the review's head.
+ *
+ * The same two fields as the diff, and `changes` means the same thing here for
+ * the same reason: it decides whether the head is a commit or a worktree, and
+ * therefore whether a file created on this branch but not committed yet is part
+ * of the repository a reviewer can open.
+ */
+export const reviewTreeInputSchema = z.object({
+  id: reviewIdSchema,
+  changes: diffChangesSchema
+})
+
+/**
  * One file of a review, read whole so the diff can be expanded past its hunks.
  * `changes` has to match the diff on screen, or the expanded context would come
  * from a different version of the file than the hunks around it.
@@ -537,6 +550,7 @@ export type GetReviewInput = z.input<typeof getReviewInputSchema>
 export type RemoveReviewInput = z.input<typeof removeReviewInputSchema>
 export type ReviewCommitsInput = z.input<typeof reviewCommitsInputSchema>
 export type ReviewDiffInput = z.input<typeof reviewDiffInputSchema>
+export type ReviewTreeInput = z.input<typeof reviewTreeInputSchema>
 export type ReviewFileInput = z.input<typeof reviewFileInputSchema>
 export type ReviewImageInput = z.input<typeof reviewImageInputSchema>
 export type OpenReviewFileInput = z.input<typeof openReviewFileInputSchema>

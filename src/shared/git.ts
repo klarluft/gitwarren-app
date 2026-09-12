@@ -160,6 +160,39 @@ export interface FileContent {
 }
 
 /**
+ * Every file in the repository at the review's head - what the branch changed
+ * and, far more of it, what it did not.
+ *
+ * Paths only. A tree read exists so a reviewer can *find* a file and then ask
+ * for it by name, and the two things a listing is otherwise tempted to carry -
+ * size and mode - are a `stat` per entry over what may be an `ssh` pipe, for
+ * columns nobody reads. The file itself arrives through `FileContent`, which is
+ * the same call the diff's expanders already make.
+ *
+ * Flat rather than nested, and that is deliberate too. The screen folds these
+ * into a tree with the code `changed-files-tree.tsx` has always used, so a
+ * nested response would be the same information in a shape only one consumer
+ * could use - and a shape that costs an object per directory on the wire.
+ */
+export interface ReviewTree {
+  /** Repository-relative, `/`-separated, sorted. */
+  paths: string[]
+  /**
+   * Where the listing came from - the worktree on disk (so it includes
+   * uncommitted and untracked files), or the head commit's tree.
+   *
+   * Worth carrying for the same reason `FileContent.source` is: it is the
+   * difference between "this repository has no such file" and "the commit you
+   * are reading does not have it yet".
+   */
+  source: 'worktree' | 'commit'
+  /** True when the repository has more files than one listing will carry. */
+  truncated: boolean
+  /** Set when the tree could not be read at all; `paths` is then empty. */
+  error: string | null
+}
+
+/**
  * Image formats a diff previews rather than writing off as "binary".
  *
  * Raster only, and deliberately so. SVG is text, so it already gets a real line

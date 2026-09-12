@@ -13,10 +13,26 @@
  * number is a position in a document that keeps being rewritten; the text is
  * what the reviewer was actually looking at.
  *
+ * ## Two things a comment can be anchored in
+ *
+ * A diff, which is what this module did when the only readable thing in a
+ * review was its patch - and a *file*, since a comment may now be left on a
+ * file the branch never touched. The rule above is the same for both, and so is
+ * every case that makes it interesting (the text moved, the text is gone, the
+ * text appears five times), so the search is written once over a list of
+ * numbered lines and the two entry points differ only in where they get that
+ * list. A diff contributes the lines its hunks happen to print; a file
+ * contributes all of them.
+ *
+ * That equivalence is load-bearing rather than tidy. A comment on an unchanged
+ * file resolved by a diff-only rule would be `outdated` from the moment it was
+ * written - not because anything drifted, but because the reader was asking the
+ * wrong document.
+ *
  * This module is deliberately pure and dependency-free. The renderer runs it
- * against the diff it has already fetched, and the MCP server runs it against a
- * diff it reads itself, so both surfaces report the same anchor for the same
- * thread.
+ * against the diff or file it has already fetched, and the MCP server runs it
+ * against ones it reads itself, so both surfaces report the same anchor for the
+ * same thread.
  */
 import type { DiffLine, FileDiff } from './git.js'
 
@@ -73,6 +89,50 @@ function numberOn(line: DiffLine, side: DiffSide): number | null {
 }
 
 /**
+ * One line of whatever document the comment is being re-found in.
+ *
+ * The smallest thing the search below actually needs, which is why it is this
+ * and not `DiffLine`: a file has no sides and no insert/delete, and asking it
+ * to pretend otherwise would mean inventing an `oldNumber` for every line of
+ * every unchanged file just to throw it away one function later.
+ */
+interface NumberedLine {
+  number: number
+  content: string
+}
+
+/**
+ * A line's text without its terminator.
+ *
+ * Windows, and specifically the configuration Git for Windows installs by
+ * default. With `core.autocrlf=true` the blob holds LF and the working tree
+ * holds CRLF, and git resolves that difference in opposite directions for the
+ * two documents this module compares: `git diff` applies the clean filter, so
+ * its lines arrive with no CR, while a file read off disk keeps it. The same
+ * line is then `const a = 1` in one and `const a = 1\r` in the other.
+ *
+ * That was harmless while an anchor was only ever looked for in a diff. It
+ * stops being harmless the moment a comment can be captured from one document
+ * and re-found in the other, which is exactly what an anchor does now: every
+ * such comment would go outdated on Windows the first time the fallback ran,
+ * and nothing on screen would explain why.
+ *
+ * Normalising here, in the comparison, rather than where the lines are
+ * produced. Stripping at the source would mean rewriting what a `DiffLine`
+ * *contains*, which is the input to the reviewed-file digests
+ * (`shared/diff-digest.ts`) and to every `anchorText` already stored - so on a
+ * repository with CRLF genuinely committed it would silently lapse people's
+ * reviewed marks and strand their existing comments. Comparing without the
+ * terminator fixes the mismatch and leaves both of those alone; it also means
+ * an anchor stored before this change still matches.
+ *
+ * One CR, only at the end. A CR anywhere else in a line is content.
+ */
+function withoutTerminator(content: string): string {
+  return content.endsWith('\r') ? content.slice(0, -1) : content
+}
+
+/**
  * Find the file a thread belongs to.
  *
  * Renames are matched on either name: a thread left on `old/name.ts` before the
@@ -82,21 +142,18 @@ export function findAnchorFile(files: FileDiff[], filePath: string): FileDiff | 
   return files.find((file) => file.path === filePath || file.oldPath === filePath)
 }
 
-export function resolveAnchor(file: FileDiff | undefined, anchor: ThreadAnchor): ResolvedAnchor {
-  if (!file) return OUTDATED
-
+/**
+ * The search itself: the stored line if it still reads the same, else the
+ * nearest line that does, else nothing.
+ *
+ * Both entry points below come through here, so "how a comment follows its
+ * code" is one piece of behaviour with one set of tests rather than two
+ * implementations that agree until someone touches one of them.
+ */
+function resolveIn(lines: NumberedLine[], anchor: ThreadAnchor): ResolvedAnchor {
   // Nothing to verify against, so there is no honest way to claim the stored
   // line is still the right one. Report it as outdated rather than guess.
   if (anchor.anchorText === null) return OUTDATED
-
-  // Only lines that exist on the requested side can carry the anchor: an
-  // inserted line has no base number, a deleted line has no head number.
-  const lines: DiffLine[] = []
-  for (const hunk of file.hunks) {
-    for (const line of hunk.lines) {
-      if (numberOn(line, anchor.side) !== null) lines.push(line)
-    }
-  }
 
   /** Keep the range the length it was written at; see `ResolvedAnchor`. */
   const span = Math.max(anchor.line - (anchor.startLine ?? anchor.line), 0)
@@ -106,8 +163,10 @@ export function resolveAnchor(file: FileDiff | undefined, anchor: ThreadAnchor):
     startLine: span === 0 ? null : Math.max(line - span, 1)
   })
 
-  const atStoredLine = lines.find((line) => numberOn(line, anchor.side) === anchor.line)
-  if (atStoredLine?.content === anchor.anchorText) {
+  const wanted = withoutTerminator(anchor.anchorText)
+
+  const atStoredLine = lines.find((line) => line.number === anchor.line)
+  if (atStoredLine !== undefined && withoutTerminator(atStoredLine.content) === wanted) {
     return withRange('anchored', anchor.line)
   }
 
@@ -117,18 +176,57 @@ export function resolveAnchor(file: FileDiff | undefined, anchor: ThreadAnchor):
   let bestLine: number | null = null
   let bestDistance = Number.POSITIVE_INFINITY
   for (const candidate of lines) {
-    if (candidate.content !== anchor.anchorText) continue
-    const number = numberOn(candidate, anchor.side)
-    if (number === null) continue
-    const distance = Math.abs(number - anchor.line)
+    if (withoutTerminator(candidate.content) !== wanted) continue
+    const distance = Math.abs(candidate.number - anchor.line)
     if (distance < bestDistance) {
-      bestLine = number
+      bestLine = candidate.number
       bestDistance = distance
     }
   }
 
   if (bestLine === null) return OUTDATED
   return withRange('moved', bestLine)
+}
+
+export function resolveAnchor(file: FileDiff | undefined, anchor: ThreadAnchor): ResolvedAnchor {
+  if (!file) return OUTDATED
+
+  // Only lines that exist on the requested side can carry the anchor: an
+  // inserted line has no base number, a deleted line has no head number.
+  const lines: NumberedLine[] = []
+  for (const hunk of file.hunks) {
+    for (const line of hunk.lines) {
+      const number = numberOn(line, anchor.side)
+      if (number !== null) lines.push({ number, content: line.content })
+    }
+  }
+
+  return resolveIn(lines, anchor)
+}
+
+/**
+ * The same question asked of a file's own text, for a comment on a file the
+ * diff does not contain.
+ *
+ * `lines` is the file as `FileContent` carries it: index 0 is line 1, which is
+ * the one place in this module where that conversion happens.
+ *
+ * Head side only, and that is not a limitation so much as what the words mean.
+ * "Base" and "head" are ends of a *comparison*; a file nobody changed has one
+ * version, and it is the one on screen. A base-side anchor arriving here is a
+ * thread about a line the change removed, which by definition is a line this
+ * file does not have - so it is outdated, and saying so is more honest than
+ * matching its text against the current file and claiming a hit.
+ */
+export function resolveAnchorInFile(
+  lines: string[] | undefined,
+  anchor: ThreadAnchor
+): ResolvedAnchor {
+  if (lines === undefined || anchor.side === 'base') return OUTDATED
+  return resolveIn(
+    lines.map((content, index) => ({ number: index + 1, content })),
+    anchor
+  )
 }
 
 /** True for a thread that is about a line rather than about the review overall. */

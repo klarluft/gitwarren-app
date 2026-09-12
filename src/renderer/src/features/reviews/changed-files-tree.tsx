@@ -1,11 +1,9 @@
 /**
  * The list of changed files beside the diff.
  *
- * A flat list of paths is unreadable past about a dozen files - every row
- * starts with the same forty characters - so the paths are folded into a tree.
- * Directories with a single child are collapsed into their parent
- * (`src/renderer/src` on one row), which is what makes a deep source tree fit
- * in a narrow column and is the one thing GitHub's file tree gets most right.
+ * The folding into a tree is `path-tree.ts`, shared with the browse tab's
+ * listing of the whole repository. What is here is what a *changed* file's row
+ * says: how much changed, whether anyone commented, whether it has been read.
  *
  * The tree is a *navigation* aid, not a second copy of the diff: it scrolls the
  * page to a file, and it says how much changed and whether anyone commented.
@@ -16,75 +14,8 @@ import { Check, ChevronDown, ChevronRight, History } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { FileStatusIcon } from './diff-view'
 import { FilePath } from './file-path'
+import { buildPathTree, type PathNode } from './path-tree'
 import type { FileDiff } from '@shared/git'
-
-interface FileNode {
-  kind: 'file'
-  /** Full repository-relative path - also the DOM anchor and the tree key. */
-  path: string
-  name: string
-  file: FileDiff
-}
-
-interface DirectoryNode {
-  kind: 'directory'
-  path: string
-  /** May be several segments, when a chain of lone directories was folded. */
-  name: string
-  children: TreeNode[]
-}
-
-type TreeNode = FileNode | DirectoryNode
-
-function buildTree(files: FileDiff[]): TreeNode[] {
-  const root: DirectoryNode = { kind: 'directory', path: '', name: '', children: [] }
-
-  for (const file of files) {
-    const segments = file.path.split('/')
-    const name = segments.pop() as string
-    let parent = root
-
-    for (const segment of segments) {
-      const path = parent.path ? `${parent.path}/${segment}` : segment
-      const existing = parent.children.find(
-        (child): child is DirectoryNode => child.kind === 'directory' && child.path === path
-      )
-      if (existing) {
-        parent = existing
-      } else {
-        const created: DirectoryNode = { kind: 'directory', path, name: segment, children: [] }
-        parent.children.push(created)
-        parent = created
-      }
-    }
-
-    parent.children.push({ kind: 'file', path: file.path, name, file })
-  }
-
-  // The root itself is not collapsed: folding it away would silently drop the
-  // one directory every file in the review shares, which is exactly the label
-  // that tells you what part of the tree you are looking at.
-  return root.children.map((child) => (child.kind === 'directory' ? collapse(child) : child))
-}
-
-/** Fold `a` -> `b` -> [files] into a single `a/b` row. */
-function collapse(node: DirectoryNode): DirectoryNode {
-  const children = node.children.map((child) =>
-    child.kind === 'directory' ? collapse(child) : child
-  )
-
-  const only = children.length === 1 ? children[0] : undefined
-  if (only?.kind === 'directory') {
-    return {
-      kind: 'directory',
-      path: only.path,
-      name: node.name ? `${node.name}/${only.name}` : only.name,
-      children: only.children
-    }
-  }
-
-  return { ...node, children }
-}
 
 export interface ChangedFilesTreeProps {
   files: FileDiff[]
@@ -107,7 +38,9 @@ export function ChangedFilesTree({
   reviewedPaths,
   changedSincePaths
 }: ChangedFilesTreeProps) {
-  const tree = useMemo(() => buildTree(files), [files])
+  const tree = useMemo(() => buildPathTree(files.map((file) => file.path)), [files])
+  // What each row needs about its own file, looked up by path - see `path-tree.ts`.
+  const byPath = useMemo(() => new Map(files.map((file) => [file.path, file])), [files])
 
   return (
     <nav aria-label="Changed files" className="flex flex-col gap-px py-1 text-xs">
@@ -116,6 +49,7 @@ export function ChangedFilesTree({
           key={node.path}
           node={node}
           depth={0}
+          byPath={byPath}
           activePath={activePath}
           onSelect={onSelect}
           unresolvedByFile={unresolvedByFile}
@@ -130,14 +64,16 @@ export function ChangedFilesTree({
 function TreeRows({
   node,
   depth,
+  byPath,
   activePath,
   onSelect,
   unresolvedByFile,
   reviewedPaths,
   changedSincePaths
 }: {
-  node: TreeNode
+  node: PathNode
   depth: number
+  byPath: Map<string, FileDiff>
 } & Omit<ChangedFilesTreeProps, 'files'>) {
   const [open, setOpen] = useState(true)
   // Indent by nesting depth, but stop growing it before the column runs out of
@@ -169,6 +105,7 @@ function TreeRows({
               key={child.path}
               node={child}
               depth={depth + 1}
+              byPath={byPath}
               activePath={activePath}
               onSelect={onSelect}
               unresolvedByFile={unresolvedByFile}
@@ -180,6 +117,8 @@ function TreeRows({
     )
   }
 
+  // Always present: the tree was built from these very paths.
+  const file = byPath.get(node.path) as FileDiff
   const unresolved = unresolvedByFile.get(node.path) ?? 0
   const isActive = node.path === activePath
   const isReviewed = reviewedPaths.has(node.path)
@@ -210,7 +149,7 @@ function TreeRows({
       ) : hasChangedSince ? (
         <History className="mt-0.5 size-3 shrink-0 text-warning" />
       ) : (
-        <FileStatusIcon status={node.file.status} className="mt-0.5 size-3 shrink-0" />
+        <FileStatusIcon status={file.status} className="mt-0.5 size-3 shrink-0" />
       )}
       {/* The whole name, wrapped if it has to be. A file list that cannot tell
           you which file a row is is not doing the one job it has. */}
@@ -223,10 +162,10 @@ function TreeRows({
           {unresolved}
         </span>
       )}
-      {!node.file.isBinary && (
+      {!file.isBinary && (
         <span className="mt-px shrink-0 font-mono text-[0.625rem] tabular-nums">
-          <span className="text-success">+{node.file.additions}</span>{' '}
-          <span className="text-destructive">−{node.file.deletions}</span>
+          <span className="text-success">+{file.additions}</span>{' '}
+          <span className="text-destructive">−{file.deletions}</span>
         </span>
       )}
     </button>

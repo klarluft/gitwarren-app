@@ -81,6 +81,10 @@ before(() => {
   // a line the reviewer cannot see - in a three-line file the whole file is
   // context and every line is anchorable.
   write(checkout, 'long.ts', longFile('original'))
+  // A file the feature branch never touches, so it is in the repository and
+  // nowhere in the diff. This is what the browse tab is for, and what a comment
+  // on unchanged code has to anchor against.
+  write(checkout, 'untouched.ts', 'const untouched = true\nexport default untouched\n')
   git(checkout, 'add', '.')
   git(checkout, 'commit', '-m', 'initial')
 
@@ -423,20 +427,84 @@ test('the snapshot is never rewritten by later activity on the thread', async ()
   git(checkout, 'reset', '--hard', 'HEAD~1')
 })
 
-test('commenting on a line outside the diff is kept, and says so', async () => {
+test('a line outside the diff anchors against the file itself', async () => {
   // Line 1 of `long.ts` is far above the only hunk, so the reviewer never sees
-  // it in this diff. An agent reading the file with git can still have
-  // something to say about it, and dropping the comment would be worse than
-  // showing it out of line - so it is stored with no anchor text and reported
-  // as unpinnable.
+  // it in this diff - but the file does have a line 1, and it is the line the
+  // comment is about. Anchoring only against the patch used to report this as
+  // outdated the moment it was written.
   const thread = await commentsService.createThread(
     { reviewId, body: 'Unrelated but worth noting.', filePath: 'long.ts', line: 1 },
     claude
   )
 
+  assert.equal(thread.anchorText, 'line 1')
+  assert.deepEqual(
+    thread.anchorSnapshot?.lines.map((line) => line.content),
+    ['line 1']
+  )
+
+  const [anchored] = await commentsService.listAnchored({ reviewId })
+  assert.deepEqual(anchored?.anchor, { state: 'anchored', line: 1, startLine: null })
+})
+
+test('a file the branch never touched can be commented on', async () => {
+  const thread = await commentsService.createThread(
+    { reviewId, body: 'This was already wrong.', filePath: 'untouched.ts', line: 2 },
+    claude
+  )
+
+  assert.equal(thread.anchorText, 'export default untouched')
+
+  const [anchored] = await commentsService.listAnchored({ reviewId })
+  assert.deepEqual(anchored?.anchor, { state: 'anchored', line: 2, startLine: null })
+})
+
+test('a comment on an unchanged file follows its line when the file moves', async () => {
+  const thread = await commentsService.createThread(
+    { reviewId, body: 'This was already wrong.', filePath: 'untouched.ts', line: 2 },
+    claude
+  )
+  assert.equal(thread.anchorText, 'export default untouched')
+
+  // Two lines pushed in above it. The stored line number is now wrong and the
+  // text is the only thing that can find it again - the same rule the diff
+  // side has always followed.
+  write(checkout, 'untouched.ts', '// a note\n// and another\nconst untouched = true\nexport default untouched\n')
+  git(checkout, 'add', '.')
+  git(checkout, 'commit', '-m', 'preamble')
+
+  const [anchored] = await commentsService.listAnchored({ reviewId })
+  assert.deepEqual(anchored?.anchor, { state: 'moved', line: 4, startLine: null })
+
+  git(checkout, 'reset', '--hard', 'HEAD~1')
+})
+
+test('a line the file does not have is still kept, and says so', async () => {
+  // Nothing in the diff and nothing in the file either: `long.ts` is 40 lines.
+  // The comment is worth keeping - an agent may have been reading a stale copy
+  // - but nothing can honestly pin it to a line a reader can see.
+  const thread = await commentsService.createThread(
+    { reviewId, body: 'Off the end.', filePath: 'long.ts', line: 900 },
+    claude
+  )
+
   assert.equal(thread.anchorText, null)
-  // Nothing was on screen to snapshot either; the comment stands on its own.
   assert.equal(thread.anchorSnapshot, null)
+
+  const [anchored] = await commentsService.listAnchored({ reviewId })
+  assert.deepEqual(anchored?.anchor, { state: 'outdated', line: null, startLine: null })
+})
+
+test('a base-side line outside the diff is not matched against the current file', async () => {
+  // "Base" means the version the change started from. A file's text can only
+  // speak for the head side, so claiming a hit here would be pinning a comment
+  // about removed code to code that is still there.
+  const thread = await commentsService.createThread(
+    { reviewId, body: 'What happened to this?', filePath: 'long.ts', side: 'base', line: 1 },
+    claude
+  )
+
+  assert.equal(thread.anchorText, null)
 
   const [anchored] = await commentsService.listAnchored({ reviewId })
   assert.deepEqual(anchored?.anchor, { state: 'outdated', line: null, startLine: null })

@@ -76,7 +76,8 @@ export function deepLinkPathFor(route: ReviewRoute): string {
   if (!route.focus) return base
 
   const { filePath, side, line } = route.focus
-  return `${base}/${encodeURIComponent(filePath)}/${side}/${line}`
+  const at = side === undefined || line === undefined ? '' : `/${side}/${line}`
+  return `${base}/${encodeURIComponent(filePath)}${at}`
 }
 
 /**

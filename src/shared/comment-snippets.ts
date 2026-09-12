@@ -71,6 +71,43 @@ export function snippetAt(
 }
 
 /**
+ * The same few lines, taken from a file rather than from a patch.
+ *
+ * For a comment on a file the diff does not contain - which since the browse
+ * tab is an ordinary thing to write - there is no hunk to slice, only the file
+ * itself. `lines` is as `FileContent` carries it, index 0 being line 1.
+ *
+ * Head side only, and there is no parameter for it: a file has one version, and
+ * the numbers in it are head-side numbers. The caller decides whether a
+ * base-side anchor should reach here at all, and none of them let it.
+ *
+ * `clipped` means the same thing it does above - there is more file above the
+ * snippet - which for a file is true whenever the lead-in did not reach line 1.
+ */
+export function snippetInFile(
+  lines: string[],
+  line: number,
+  context = SNIPPET_CONTEXT_LINES
+): AnchorSnippet | null {
+  const content = lines[line - 1]
+  if (content === undefined) return null
+
+  const start = Math.max(1, line - context)
+  return {
+    lines: Array.from({ length: line - start + 1 }, (_, offset) => ({
+      type: 'context' as const,
+      content: lines[start + offset - 1] as string,
+      // Unchanged code has the same number on both sides of the comparison, and
+      // saying so is what lets a stored snapshot render through the same
+      // component as one taken from a diff.
+      oldNumber: start + offset,
+      newNumber: start + offset
+    })),
+    clipped: start > 1
+  }
+}
+
+/**
  * Choosing which code to show above a line comment.
  *
  * There are two candidates and the order between them is the whole point:

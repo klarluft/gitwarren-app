@@ -10,7 +10,12 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { findAnchorFile, isInlineAnchor, resolveAnchor } from '../comment-anchors.js'
+import {
+  findAnchorFile,
+  isInlineAnchor,
+  resolveAnchor,
+  resolveAnchorInFile
+} from '../comment-anchors.js'
 import type { DiffLine, FileDiff } from '../git.js'
 
 /**
@@ -271,4 +276,139 @@ test('inline threads are told apart from review-level ones', () => {
   assert.equal(isInlineAnchor({ filePath: null, side: null, line: null }), false)
   // A half-filled anchor is not inline: all three columns are written together.
   assert.equal(isInlineAnchor({ filePath: 'a.ts', side: 'head', line: null }), false)
+})
+
+/* -------------------------------------------------------------------------- */
+/* Anchored in a file rather than in a diff                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The browse tab's case: a comment on a file the patch does not contain, which
+ * has to be re-found in the file's own text. The rules are the same ones proved
+ * above - that is the point of the shared search - so what these check is that
+ * the file entry point really does go through it, and the two places where a
+ * file differs from a diff: line 1 is index 0, and there is no base side.
+ */
+const source = ['function work() {', '  const a = 1', '  const b = 2', '}']
+
+test('a file line still holding its text is anchored', () => {
+  const resolved = resolveAnchorInFile(source, {
+    filePath: 'src/app.ts',
+    side: 'head',
+    line: 2,
+    anchorText: '  const a = 1'
+  })
+
+  assert.deepEqual(resolved, { state: 'anchored', line: 2, startLine: null })
+})
+
+test('a file line pushed down by an edit above follows its text', () => {
+  const withPreamble = ['// a note', ...source]
+
+  const resolved = resolveAnchorInFile(withPreamble, {
+    filePath: 'src/app.ts',
+    side: 'head',
+    line: 2,
+    anchorText: '  const a = 1'
+  })
+
+  assert.deepEqual(resolved, { state: 'moved', line: 3, startLine: null })
+})
+
+test('a range in a file keeps the length it was written at', () => {
+  const withPreamble = ['// a note', '// and another', ...source]
+
+  const resolved = resolveAnchorInFile(withPreamble, {
+    filePath: 'src/app.ts',
+    side: 'head',
+    line: 3,
+    startLine: 1,
+    anchorText: '  const b = 2'
+  })
+
+  assert.deepEqual(resolved, { state: 'moved', line: 5, startLine: 3 })
+})
+
+test('text the file no longer contains is outdated', () => {
+  const resolved = resolveAnchorInFile(source, {
+    filePath: 'src/app.ts',
+    side: 'head',
+    line: 2,
+    anchorText: '  const a = 99'
+  })
+
+  assert.deepEqual(resolved, { state: 'outdated', line: null, startLine: null })
+})
+
+test('a base-side anchor is never matched against the current file', () => {
+  // "Base" is the version the change started from. `  const a = 1` is sitting
+  // right there on line 2, and claiming it would pin a comment about removed
+  // code to code that is still present.
+  const resolved = resolveAnchorInFile(source, {
+    filePath: 'src/app.ts',
+    side: 'base',
+    line: 2,
+    anchorText: '  const a = 1'
+  })
+
+  assert.deepEqual(resolved, { state: 'outdated', line: null, startLine: null })
+})
+
+test('a file that could not be read is outdated rather than a crash', () => {
+  const resolved = resolveAnchorInFile(undefined, {
+    filePath: 'src/app.ts',
+    side: 'head',
+    line: 2,
+    anchorText: '  const a = 1'
+  })
+
+  assert.deepEqual(resolved, { state: 'outdated', line: null, startLine: null })
+})
+
+/* -------------------------------------------------------------------------- */
+/* Line endings                                                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The Windows case, which is not an edge case: `core.autocrlf=true` is what Git
+ * for Windows installs by default, and under it `git diff` reports a line with
+ * no CR while the same line read off disk keeps one. A comment captured from
+ * either document has to be findable in the other, or every anchor that falls
+ * back from the diff to the file goes outdated on Windows and nowhere else.
+ */
+test('a CRLF file matches an anchor captured from a CR-less diff', () => {
+  const resolved = resolveAnchorInFile(['function work() {\r', '  const a = 1\r'], {
+    filePath: 'src/app.ts',
+    side: 'head',
+    line: 2,
+    anchorText: '  const a = 1'
+  })
+
+  assert.deepEqual(resolved, { state: 'anchored', line: 2, startLine: null })
+})
+
+test('a diff matches an anchor captured from a CRLF file', () => {
+  // The other direction, which is what happens to a comment left in the browse
+  // tab on a file that the branch later changes.
+  const resolved = resolveAnchor(file, {
+    filePath: 'src/app.ts',
+    side: 'head',
+    line: 2,
+    anchorText: 'const b = 2\r'
+  })
+
+  assert.deepEqual(resolved, { state: 'anchored', line: 2, startLine: null })
+})
+
+test('a carriage return inside a line is content, not a terminator', () => {
+  // Only the last one is a terminator. A CR in the middle of a line is a byte
+  // somebody committed, and two lines differing only there are two lines.
+  const resolved = resolveAnchorInFile(['a\rb'], {
+    filePath: 'src/app.ts',
+    side: 'head',
+    line: 1,
+    anchorText: 'ab'
+  })
+
+  assert.deepEqual(resolved, { state: 'outdated', line: null, startLine: null })
 })

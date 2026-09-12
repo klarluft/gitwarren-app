@@ -193,6 +193,7 @@ function buildApi(host: string | undefined): GitWarrenApi {
       remove: (input) => ask('reviews.remove', input, host),
       commits: (input) => ask('reviews.commits', input, host),
       diff: (input) => ask('reviews.diff', input, host),
+      tree: (input) => ask('reviews.tree', input, host),
       file: (input) => ask('reviews.file', input, host),
       image: (input) => ask('reviews.image', input, host),
       reviewedFiles: (input) => ask('reviews.reviewedFiles', input, host),
@@ -337,6 +338,13 @@ export const CACHE_KEYS = {
   reviewDiff: (reviewId: number, changes: DiffChanges, host?: string) =>
     scoped(`review-diff:${reviewId}:${changes}`, host),
   /**
+   * The repository's file list, keyed by the same setting as the diff: it is
+   * what decides whether the head is a worktree or a commit, and therefore
+   * whether a file that exists only on disk is in the listing at all.
+   */
+  reviewTree: (reviewId: number, changes: DiffChanges, host?: string) =>
+    scoped(`review-tree:${reviewId}:${changes}`, host),
+  /**
    * Keyed by the same setting as the diff: expanded context read from another
    * version of the file would not line up with the hunks it sits between.
    */
@@ -386,6 +394,7 @@ export const CACHE_PREFIXES = {
   review: 'review:',
   reviewCommits: 'review-commits:',
   reviewDiff: 'review-diff:',
+  reviewTree: 'review-tree:',
   reviewFile: 'review-file:',
   reviewImage: 'review-image:'
 } as const
