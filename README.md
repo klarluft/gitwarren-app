@@ -1264,7 +1264,7 @@ npm run package:dir    # unpacked app only, much faster
 | Linux | `-x86_64.AppImage`, `-arm64.AppImage`, `latest-linux.yml`, `latest-linux-arm64.yml` |
 | Any host | `gitwarren-daemon-<v>-{linux,darwin}-{x64,arm64}.tar.gz` |
 | Homebrew | `gitwarren-cli.rb`, the formula with this release's four checksums |
-| npm | `gitwarren@<v>`, published from `out/npm` when `NPM_TOKEN` is set |
+| npm | `gitwarren@<v>`, published from `out/npm` by trusted publishing |
 
 The `.blockmap` files are what make updates differential: electron-updater
 compares block hashes with the installed version and downloads only the changed
@@ -1291,6 +1291,19 @@ remote host runs `uname -sm` there, maps the answer to one of the four targets,
 and fetches `gitwarren-daemon-<version>-<target>.tar.gz` from the release by URL
 — one request, no listing and no search. The Homebrew formula names the same
 URLs. Renaming them breaks both.
+
+The **npm package** carries no credential to publish it. The `daemon` job asks
+GitHub for an OIDC token, npm trades that for a credential good for minutes, and
+the exchange also produces a provenance attestation — so there is no `NPM_TOKEN`
+in this repository's secrets and there is not meant to be one. The trust is
+configured on the package at npmjs.com against this repository and the
+*filename* `release.yml`, which is the one thing to remember: renaming that
+workflow breaks publishing, and it fails as an authentication error rather than
+as a name mismatch.
+
+`gitwarren@0.1.7` was published by hand, because a trusted publisher can only be
+configured on a package that already exists and npm has no pre-registration for
+one that does not. Nothing else will be.
 
 The **Homebrew formula** is rendered by `scripts/build-homebrew-formula.mjs`
 from `packaging/homebrew/gitwarren-cli.rb` in the same job that builds the
