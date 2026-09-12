@@ -55,8 +55,17 @@ export function timeOfDay(timestamp: number): string {
 /**
  * "412 KB". Powers of two with the units people expect next to a file, which
  * is what every git host prints beside an image.
+ *
+ * The guard on the first line is about where the number comes from. A size is
+ * whatever the store reported, and a file that vanished between the listing and
+ * the stat hands back `undefined` through a type that promised a number - which
+ * arrives here as `NaN` and leaves as the string "NaN B", printed in the corner
+ * of an image the user is looking at. An em dash is the honest thing to draw
+ * when nobody knows the size, and putting it here rather than a `?? ''` at each
+ * of the three call sites means the next caller inherits the answer.
  */
 export function fileSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return '—'
   if (bytes < 1024) return `${bytes} B`
   const units = ['KB', 'MB', 'GB']
   let value = bytes / 1024
@@ -68,7 +77,17 @@ export function fileSize(bytes: number): string {
   return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`
 }
 
-/** "3 files" / "1 file" - pluralisation is not worth a dependency. */
+const COUNT = new Intl.NumberFormat()
+
+/**
+ * "3 files" / "1 file" - pluralisation is not worth a dependency.
+ *
+ * The count goes through `Intl` for the same reason the timestamps above do: a
+ * review that refreshes a vendored lockfile really does say 24000 files, and an
+ * unseparated run of digits is a number the reader has to stop and count. The
+ * locale is the one the window is already formatting its dates in, so the
+ * separator matches the rest of the screen rather than being chosen here.
+ */
 export function plural(count: number, singular: string, pluralForm = `${singular}s`): string {
-  return `${count} ${count === 1 ? singular : pluralForm}`
+  return `${COUNT.format(count)} ${count === 1 ? singular : pluralForm}`
 }

@@ -43,6 +43,22 @@
  * be two 45 MB streams and two `ssh` connections from a screen with one
  * spinner, and the honest way to say "this is one operation you are waiting on"
  * is to let it be one.
+ *
+ * ## A host that has just been added is asked about itself
+ *
+ * The one place this screen reaches a machine without being asked to, and the
+ * exception is narrow enough to state exactly: somebody has this second
+ * described a machine and pressed Add. `hosts.list` is a SQLite read and the
+ * fresh row has never been connected to, so before `probeAdded` the card drew
+ * "Not tried yet" next to what was then "GitWarren not installed" - a sentence
+ * about software on a machine nothing had spoken to. Pressing refresh replaced
+ * it with the truth, which is how the bug was found, and having to press
+ * refresh to find out what you just added is the bug.
+ *
+ * This does not reopen `use-hosts.ts`'s refusal to poll. That refusal is about
+ * a screen left open holding a connection to every machine in the list, on a
+ * timer, forever. This is one connection, to one machine, once, in direct
+ * response to a button - the same standard `probe` and `install` already meet.
  */
 import { useCallback, useMemo, useState } from 'react'
 import useSWR from 'swr'
@@ -98,6 +114,27 @@ export function HostsPage() {
       // anything landing here is the app failing rather than the machine - and
       // it belongs in front of the person, not in a console.
       setOutcome({ kind: 'error', label: host.label, message: errorMessage(caught) })
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  /**
+   * Reach a host that has just been added.
+   *
+   * Deliberately not `probe`: a failure here must not raise the install-result
+   * dialog. `hosts.probe` answers rather than throws for a machine that is
+   * simply not there, so anything thrown is this app failing - and even that,
+   * in response to something nobody explicitly asked for, belongs on the card
+   * as `state.lastError` rather than in a modal over a screen the person is
+   * still using. The row says what happened either way.
+   */
+  async function probeAdded(host: HostWithState): Promise<void> {
+    setBusy({ id: host.id, what: 'probe' })
+    try {
+      await probeHost(host.id)
+    } catch {
+      // See above. The list is revalidated by `probeHost` regardless.
     } finally {
       setBusy(null)
     }
@@ -197,7 +234,7 @@ export function HostsPage() {
           is the thing you came here to do something about, and a proposal
           under twelve rows is a proposal nobody sees. It draws nothing at all
           when there is nothing to propose. */}
-      <DiscoveredHosts />
+      <DiscoveredHosts onAdded={(host) => void probeAdded(host)} />
 
       {isLoading && <LoadingState />}
 
@@ -225,7 +262,12 @@ export function HostsPage() {
         </ul>
       )}
 
-      <HostFormDialog open={formOpen} onOpenChange={setFormOpen} host={editing} />
+      <HostFormDialog
+        open={formOpen}
+        onOpenChange={setFormOpen}
+        host={editing}
+        onAdded={(host) => void probeAdded(host)}
+      />
       <RemoveHostDialog
         host={removing}
         onOpenChange={(open) => {

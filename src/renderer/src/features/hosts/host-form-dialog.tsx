@@ -39,6 +39,13 @@
  * started - and a form that refused would be wrong about a situation it cannot
  * see. The row lands in the list and says "Not tried yet", with "Try now" beside
  * it.
+ *
+ * What the row does *not* do any more is sit there waiting to be asked. The
+ * form reports the host it created through `onAdded`, and the screen reaches it
+ * once - see the note on `probeAdded` in `hosts-page.tsx`. That is the
+ * difference between refusing to add an unreachable host, which would be wrong,
+ * and finding out whether it is reachable, which is the question the person had
+ * when they pressed the button.
  */
 import { useState, type FormEvent } from 'react'
 import useSWR from 'swr'
@@ -60,30 +67,45 @@ import { useHostMutations, useWslDistros } from './use-hosts'
 import { addHostInputSchema, updateHostInputSchema } from '@shared/schemas'
 import { parseWithSchema } from '@shared/validation'
 import { api, CACHE_KEYS } from '@/lib/api'
-import type { Host, HostKind, WslDistro } from '@shared/schemas'
+import type { Host, HostKind, HostWithState, WslDistro } from '@shared/schemas'
 
 interface HostFormDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   /** Present when editing; absent when adding. */
   host?: Host | undefined
+  /** The host that was just created. Never called for an edit. */
+  onAdded?: (host: HostWithState) => void
 }
 
-export function HostFormDialog({ open, onOpenChange, host }: HostFormDialogProps) {
+export function HostFormDialog({ open, onOpenChange, host, onAdded }: HostFormDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         {/* Mounted only while open, which is what resets the fields between
             openings - fresh mount, fresh `useState`, nothing left over. */}
         {open && (
-          <HostForm key={host?.id ?? 'new'} host={host} onDone={() => onOpenChange(false)} />
+          <HostForm
+            key={host?.id ?? 'new'}
+            host={host}
+            onAdded={onAdded}
+            onDone={() => onOpenChange(false)}
+          />
         )}
       </DialogContent>
     </Dialog>
   )
 }
 
-function HostForm({ host, onDone }: { host: Host | undefined; onDone: () => void }) {
+function HostForm({
+  host,
+  onDone,
+  onAdded
+}: {
+  host: Host | undefined
+  onDone: () => void
+  onAdded: ((host: HostWithState) => void) | undefined
+}) {
   const isEditing = host !== undefined
   const { addHost, updateHost } = useHostMutations()
   // Only asked while adding. Editing cannot change a carrier, so the list would
@@ -146,7 +168,13 @@ function HostForm({ host, onDone }: { host: Host | undefined; onDone: () => void
           ...(trimmedLabel ? { label: trimmedLabel } : {}),
           ...(trimmedEditor ? { editorTarget: trimmedEditor } : {})
         })
-        await addHost(input)
+        const created = await addHost(input)
+        // After `onDone`, not before: the probe is a second round trip and the
+        // dialog has no business staying open across it. The row is already in
+        // the list by now, so the screen can put a spinner on it.
+        onDone()
+        onAdded?.(created)
+        return
       }
       onDone()
     } catch (caught) {
