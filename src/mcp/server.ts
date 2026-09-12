@@ -415,10 +415,12 @@ server.registerTool(
     description:
       'Every discussion on a review: review-level threads and line comments alike, each with its ' +
       'full message history and who wrote each message. Line threads also carry an `anchor` ' +
-      'saying where they land in the diff as it stands right now - "anchored" (the line is ' +
+      'saying where they land in the code as it stands right now - "anchored" (the line is ' +
       'unchanged), "moved" (the code shifted and `anchor.line` is its current line) or "outdated" ' +
-      '(the line is no longer in the diff, so the comment may be about code that has since been ' +
-      'rewritten). Check the anchor before acting on a line comment. An outdated one still ' +
+      '(the line is gone, so the comment may be about code that has since been rewritten). ' +
+      'Threads about files the diff does not contain are resolved against those files at the ' +
+      'head rather than against the patch, so a comment on unchanged code reports an honest ' +
+      'anchor too. Check the anchor before acting on a line comment. An outdated one still ' +
       'carries `anchorSnapshot`, the code as it read when the comment was written, which is how ' +
       'to tell what was being objected to before it was rewritten.\n\n' +
       'A body may contain images, written as markdown pointing at a ' +
@@ -450,8 +452,12 @@ server.registerTool(
       'default) for the code as it will be, "base" to remark on a line the change removed. ' +
       'Add `startLine` to comment on a block rather than a single line; `line` is then the ' +
       'last line of it, and the one the whole range follows if the code moves. ' +
-      'The line is not required to be part of the diff: the comment is kept either way, and the ' +
-      'returned thread says whether it could be anchored to a visible line. ' +
+      'The line is not required to be part of the diff. A line the patch does not print is ' +
+      'looked up in the file itself at the head, so a remark on code this branch did not touch ' +
+      'anchors and follows that code exactly as one on a changed line does - people read these ' +
+      'in the review\'s Browse files tab. Only a line that is in neither the diff nor the file ' +
+      '(past the end of it, or on the "base" side outside the patch) is kept without an anchor; ' +
+      'the returned thread says which happened. ' +
       'Comments are attributed automatically from the MCP handshake - see `agent_identity`.\n\n' +
       ATTACHMENT_GUIDANCE +
       GUI_URL_NOTE + WEB_URL_NOTE,

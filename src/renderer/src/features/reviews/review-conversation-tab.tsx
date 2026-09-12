@@ -24,6 +24,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Markdown } from '@/components/markdown'
 import { errorMessage, isDisconnection } from '@/lib/errors'
 import { absoluteTime, relativeTime } from '@/lib/format'
+import { useHostScope } from '@/lib/host-scope'
 import { replace } from '@/lib/router'
 import { CommentComposer } from '../comments/comment-composer'
 import { CommentThreadCard } from '../comments/comment-thread-card'
@@ -44,6 +45,19 @@ interface TimelineEntry {
   thread: CommentThread
   /** What to print above it. Null for a review-level thread. */
   snippet: ThreadSnippet | null
+  /**
+   * Which tab this thread's code lives in.
+   *
+   * `files` for a thread about a file the diff contains, `browse` for one about
+   * a file it does not - a comment left on unchanged code, which is an ordinary
+   * thing to have since the browse tab. Sending those to Files changed would
+   * land the reader on the orphan list at the top of a diff their comment is
+   * not in, rather than on the line they wrote it about.
+   *
+   * Null while the diff is still being read, and for a review-level thread:
+   * neither has a file to go to.
+   */
+  tab: 'files' | 'browse' | null
 }
 
 /**
@@ -56,7 +70,7 @@ interface TimelineEntry {
  */
 function buildTimeline(threads: CommentThread[], files: FileDiff[] | undefined): TimelineEntry[] {
   const entries = threads.map<TimelineEntry>((thread) => {
-    if (!isInlineAnchor(thread)) return { thread, snippet: null }
+    if (!isInlineAnchor(thread)) return { thread, snippet: null, tab: null }
 
     const file = files === undefined ? undefined : findAnchorFile(files, thread.filePath)
     const anchor =
@@ -70,13 +84,18 @@ function buildTimeline(threads: CommentThread[], files: FileDiff[] | undefined):
             anchorText: thread.anchorText
           })
 
-    return { thread, snippet: threadSnippet(thread, anchor, file) }
+    return {
+      thread,
+      snippet: threadSnippet(thread, anchor, file),
+      tab: files === undefined ? null : file === undefined ? 'browse' : 'files'
+    }
   })
 
   return entries.sort((a, b) => a.thread.createdAt.localeCompare(b.thread.createdAt))
 }
 
 export function ReviewConversationTab({ review, onEdit }: ReviewConversationTabProps) {
+  const scope = useHostScope()
   const { threads, error, isLoading } = useReviewComments(review.id)
   const mutations = useCommentMutations()
 
@@ -117,7 +136,7 @@ export function ReviewConversationTab({ review, onEdit }: ReviewConversationTabP
         </p>
       )}
 
-      {timeline.map(({ thread, snippet }) => (
+      {timeline.map(({ thread, snippet, tab }) => (
         <div key={thread.id} className="flex flex-col gap-2">
           {snippet !== null &&
             // A thread with neither a snapshot nor a live anchor has nothing to
@@ -139,16 +158,21 @@ export function ReviewConversationTab({ review, onEdit }: ReviewConversationTabP
                   replace({
                     name: 'review',
                     reviewId: review.id,
-                    tab: 'files',
-                    ...(snippet.line === null
-                      ? {}
-                      : {
-                          focus: {
-                            filePath: snippet.filePath,
-                            side: snippet.side,
-                            line: snippet.line
-                          }
-                        })
+                    // Whichever tab can actually show this code - see
+                    // `TimelineEntry.tab`. Falls back to Files changed while the
+                    // diff is still being read, which is where it always went.
+                    tab: tab ?? 'files',
+                    focus:
+                      snippet.line === null
+                        ? // Browse needs the path even with no line: it is the
+                          // whole destination there, and Files changed has
+                          // always scrolled to the file's card on one.
+                          { filePath: snippet.filePath }
+                        : { filePath: snippet.filePath, side: snippet.side, line: snippet.line },
+                    // Every link out of this screen has to carry the host, or a
+                    // reviewer three clicks into another machine's review is
+                    // walked back to their own by a link that looks local.
+                    ...scope
                   })
                 }
               />

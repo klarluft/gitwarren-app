@@ -319,6 +319,53 @@ test('excluding uncommitted work reads the committed blob instead', async () => 
   assert.deepEqual(content.lines, ['one', 'TWO', 'three'])
 })
 
+test('the tree lists the whole repository, not only what changed', async () => {
+  const id = await createReview()
+  const tree = await reviewsService.tree({ id, changes: 'all' })
+
+  assert.equal(tree.error, null)
+  // From the worktree, because that is where the head branch is - which is why
+  // the staged and untracked files are here and the diff's uncommitted work is
+  // browsable.
+  assert.equal(tree.source, 'worktree')
+  assert.deepEqual(tree.paths, [
+    '.gitignore',
+    'a.txt',
+    'b.txt',
+    'staged.txt',
+    'untracked.txt'
+  ])
+  // `noise.log` is ignored, and stays out of the listing exactly as it stays
+  // out of a commit. A file browser that showed build output would be a file
+  // browser nobody could find anything in.
+  assert.ok(!tree.paths.includes('noise.log'))
+  assert.equal(tree.truncated, false)
+})
+
+test('excluding uncommitted work lists the head commit instead', async () => {
+  const id = await createReview()
+  const tree = await reviewsService.tree({ id, changes: 'committed' })
+
+  assert.equal(tree.source, 'commit')
+  assert.deepEqual(tree.paths, ['.gitignore', 'a.txt', 'b.txt'])
+})
+
+test('a file the branch never touched is in the tree and can be read', async () => {
+  // The whole point of browsing: `.gitignore` is in neither side of this
+  // review's diff, and is still a file somebody may want to read and remark on.
+  const id = await createReview()
+
+  const tree = await reviewsService.tree({ id, changes: 'all' })
+  assert.ok(tree.paths.includes('.gitignore'))
+
+  const diff = await reviewsService.diff({ id, changes: 'all' })
+  assert.ok(!diff.files.some((file) => file.path === '.gitignore'))
+
+  const content = await reviewsService.file({ id, path: '.gitignore', changes: 'all' })
+  assert.equal(content.error, null)
+  assert.deepEqual(content.lines, ['*.log'])
+})
+
 test('a file outside the repository is refused rather than read', async () => {
   const id = await createReview()
   const content = await reviewsService.file({ id, path: '../../../etc/hosts' })

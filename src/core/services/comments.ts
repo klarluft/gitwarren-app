@@ -25,7 +25,7 @@ import {
   type RepositoryRow,
   type ReviewRow
 } from '../db/schema.js'
-import { readReviewDiff } from '../git-compare.js'
+import { readReviewDiff, readReviewFile } from '../git-compare.js'
 import { attachmentReferencesIn, ingestBodyAttachments } from '../attachment-ingest.js'
 import { attachmentsBySha, parseAttachmentUrl } from './attachments.js'
 import { AppError } from '../../shared/errors.js'
@@ -34,11 +34,12 @@ import {
   findAnchorFile,
   isInlineAnchor,
   resolveAnchor,
+  resolveAnchorInFile,
   type AnchorState,
   type DiffSide
 } from '../../shared/comment-anchors.js'
 import type { DiffChanges } from '../../shared/git.js'
-import { contextForRange, snippetAt } from '../../shared/comment-snippets.js'
+import { contextForRange, snippetAt, snippetInFile } from '../../shared/comment-snippets.js'
 import { parseWithSchema as parse } from '../../shared/validation.js'
 import {
   anchorSnapshotSchema,
@@ -249,19 +250,35 @@ function readThreads(reviewId: number): CommentThread[] {
 }
 
 /**
- * What the diff said at the moment a thread was opened.
+ * What the code said at the moment a thread was opened.
  *
  * Two things are kept, and they do different jobs. `anchorText` is the one line,
- * and it is what `resolveAnchor` re-finds the comment by later. `snapshot` is
- * that line with the few above it - GitHub's `diff_hunk` - and it exists purely
- * so the comment is still readable after the code it was about has been
+ * and it is what the anchor resolvers re-find the comment by later. `snapshot`
+ * is that line with the few above it - GitHub's `diff_hunk` - and it exists
+ * purely so the comment is still readable after the code it was about has been
  * rewritten. Neither is ever updated afterwards; a snapshot that follows the
  * branch is not a snapshot.
  *
- * Both are null when the line is not in the diff - an agent commenting on an
- * unchanged part of a file, or on a stale line number. That is not an error:
- * the comment is still worth keeping, it simply cannot be pinned to a line the
- * reader can see, and `resolveAnchor` reports it as outdated from the start.
+ * ## Two places the line can be found, and why the second one matters
+ *
+ * The diff first, because a comment on changed code should be captured from
+ * exactly the patch the commenter was reading - the base side of an
+ * `uncommitted` diff numbers a different commit than the base side of a
+ * committed one, and only the diff knows which.
+ *
+ * Then the file, for every line the patch does not print. That is not a rare
+ * fallback: it is the ordinary case for the browse tab, where the whole point
+ * is to remark on code the branch did not touch, and it was already the case
+ * for a comment left on a line unfolded out of a diff's expanders. Before this,
+ * both stored no anchor at all - which meant the comment was reported
+ * `outdated` from the second it was written, not because anything had drifted
+ * but because nobody had looked in the document it was actually about.
+ *
+ * Both are still null when neither can vouch for the line: a base-side line
+ * outside the patch (by definition one this change removed, which the current
+ * file cannot speak for), a binary or unreadable file, a line number past the
+ * end. That is not an error - the comment is kept either way - it simply cannot
+ * be pinned to a line a reader can see.
  */
 async function captureAnchor(
   repositoryPath: string,
@@ -279,17 +296,68 @@ async function captureAnchor(
     .flatMap((hunk) => hunk.lines)
     .find((candidate) => (side === 'base' ? candidate.oldNumber : candidate.newNumber) === line)
 
-  return {
-    anchorText: found?.content ?? null,
-    anchorSha: diff.head.sha,
-    // A comment on a block is snapshotted across the whole block, so an
-    // outdated one is still shown against everything it was about rather than
-    // against its last line alone.
-    snapshot:
-      found === undefined
-        ? null
-        : snippetAt(file, side, line, contextForRange(startLine, line))
+  if (found !== undefined) {
+    return {
+      anchorText: found.content,
+      anchorSha: diff.head.sha,
+      // A comment on a block is snapshotted across the whole block, so an
+      // outdated one is still shown against everything it was about rather than
+      // against its last line alone.
+      snapshot: snippetAt(file, side, line, contextForRange(startLine, line))
+    }
   }
+
+  const unanchored = { anchorText: null, anchorSha: diff.head.sha, snapshot: null }
+  if (side === 'base') return unanchored
+
+  const content = await readReviewFile(repositoryPath, review.baseRef, review.headRef, filePath, {
+    changes
+  })
+  const text = content.error !== null || content.isBinary ? undefined : content.lines[line - 1]
+  if (text === undefined) return unanchored
+
+  return {
+    anchorText: text,
+    anchorSha: diff.head.sha,
+    snapshot: snippetInFile(content.lines, line, contextForRange(startLine, line))
+  }
+}
+
+/**
+ * The files needed to re-find comments the diff could not place.
+ *
+ * Capped, and the cap is the reason this is a function rather than four lines
+ * inline. `listAnchored` is an agent-facing call; a review that has collected
+ * comments on a hundred different untouched files would otherwise spawn a
+ * hundred git processes to answer one question about a discussion. Past the
+ * ceiling the remaining threads keep the answer the diff gave them, which is
+ * the same `outdated` they reported before any of this existed - degraded, not
+ * wrong.
+ *
+ * Paths are read together rather than in sequence: they are independent reads
+ * of independent files, so the cost is the slowest rather than the sum.
+ */
+const MAX_ANCHOR_FILE_READS = 25
+
+async function readFilesForAnchoring(
+  repositoryPath: string,
+  review: ReviewRow,
+  paths: string[]
+): Promise<Map<string, string[]>> {
+  const read = await Promise.all(
+    paths.slice(0, MAX_ANCHOR_FILE_READS).map(async (path) => {
+      const content = await readReviewFile(repositoryPath, review.baseRef, review.headRef, path, {
+        // The widest view of the branch, matching the diff read above it: a
+        // comment should anchor against the code as the branch actually stands.
+        changes: 'all'
+      })
+      return [path, content.error !== null || content.isBinary ? null : content.lines] as const
+    })
+  )
+
+  return new Map(
+    read.filter((entry): entry is readonly [string, string[]] => entry[1] !== null)
+  )
 }
 
 /**
@@ -354,11 +422,18 @@ export const commentsService = {
   },
 
   /**
-   * The same threads, each resolved against the current diff.
+   * The same threads, each resolved against the code as it stands now.
    *
    * This is the shape agents get. They have no diff in hand and no way to run
    * the anchoring themselves, and an agent acting on a comment needs to know
    * whether it still points at live code.
+   *
+   * The diff answers for every thread about changed code, in one read. What is
+   * left over are threads about files the patch does not contain - comments
+   * left in the browse tab, and the ones an agent writes on unchanged code - and
+   * those are re-found in the files themselves, one read per distinct path. The
+   * order matters: a file that *is* in the diff must be resolved against the
+   * diff, because a base-side line has no counterpart in the head-side file.
    */
   async listAnchored(input: unknown): Promise<AnchoredCommentThread[]> {
     const { reviewId } = parse(listCommentsInputSchema, input)
@@ -375,19 +450,65 @@ export const commentsService = {
       changes: 'all'
     })
 
-    return threads.map((thread) => {
-      if (!isInlineAnchor(thread)) return { ...thread, anchor: null }
+    const placed = threads.map((thread) => {
+      if (!isInlineAnchor(thread)) return { thread, anchor: null, path: null }
       const file = findAnchorFile(diff.files, thread.filePath)
       return {
-        ...thread,
+        thread,
         anchor: resolveAnchor(file, {
           filePath: thread.filePath,
           side: thread.side,
           line: thread.line,
           startLine: thread.startLine,
           anchorText: thread.anchorText
-        })
+        }),
+        /**
+         * Which file to read if the diff could not place it - under the name
+         * the file has *now*, so a thread left before a rename is re-found in
+         * the file it became rather than at a path nothing answers to.
+         */
+        path: file?.path ?? thread.filePath
       }
+    })
+
+    /**
+     * The threads the diff had nothing to say about, on the head side, with
+     * something to search for.
+     *
+     * "Outside the diff" is not the same as "outside the patch": a file can be
+     * in the diff and the commented line still nowhere in its hunks - a remark
+     * on the function a change sits inside, or on any line a reviewer unfolded
+     * out of an expander. Both land here, which is why the test is the *result*
+     * the diff gave rather than whether the file appeared in it.
+     */
+    const unplaced = placed.filter(
+      (entry) =>
+        entry.anchor?.state === 'outdated' &&
+        entry.path !== null &&
+        entry.thread.side === 'head' &&
+        entry.thread.anchorText !== null
+    )
+
+    const files = await readFilesForAnchoring(repository.path, review, [
+      ...new Set(unplaced.map((entry) => entry.path as string))
+    ])
+
+    return placed.map(({ thread, anchor, path }) => {
+      if (anchor === null || anchor.state !== 'outdated' || path === null) {
+        return { ...thread, anchor }
+      }
+
+      const refound = resolveAnchorInFile(files.get(path), {
+        filePath: path,
+        side: thread.side,
+        line: thread.line,
+        startLine: thread.startLine,
+        anchorText: thread.anchorText
+      })
+
+      // Only ever an improvement: the diff already said outdated, so a miss
+      // here leaves the answer exactly where it was.
+      return { ...thread, anchor: refound.state === 'outdated' ? anchor : refound }
     })
   },
 

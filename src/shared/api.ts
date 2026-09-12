@@ -17,7 +17,14 @@
  * The MCP server uses none of this - it talks to `core/services` directly - and
  * that is deliberate: this file is transport, not behaviour.
  */
-import type { FileContent, FileImage, RepositoryRefs, ReviewCommits, ReviewDiff } from './git.js'
+import type {
+  FileContent,
+  FileImage,
+  RepositoryRefs,
+  ReviewCommits,
+  ReviewDiff,
+  ReviewTree
+} from './git.js'
 import type { AttachmentIngestParams, BridgeCarrier, ReviewOpen, RpcMethod } from './rpc.js'
 import type {
   AddHostInput,
@@ -54,6 +61,7 @@ import type {
   Review,
   ReviewCommitsInput,
   ReviewDiffInput,
+  ReviewTreeInput,
   ReviewedFile,
   ReviewFileInput,
   ReviewImageInput,
@@ -395,6 +403,13 @@ export interface GitWarrenApi {
     commits(input: ReviewCommitsInput): Promise<ReviewCommits>
     /** The merge-base diff, uncommitted work folded in unless asked otherwise. */
     diff(input: ReviewDiffInput): Promise<ReviewDiff>
+    /**
+     * Every file in the repository at this review's head, changed or not - what
+     * the browse tab folds into a tree. `changes` decides whether the head is a
+     * worktree or a commit, so it must match the diff on screen for the same
+     * reason `file` must.
+     */
+    tree(input: ReviewTreeInput): Promise<ReviewTree>
     /**
      * One file's head-side text, whole. This is what lets the diff show the
      * lines between its hunks; `changes` must match the diff on screen so the

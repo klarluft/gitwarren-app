@@ -25,7 +25,8 @@ import type {
   FileImage,
   RepositoryRefs,
   ReviewCommits,
-  ReviewDiff
+  ReviewDiff,
+  ReviewTree
 } from '@shared/git'
 import type {
   CommentThread,
@@ -151,6 +152,31 @@ export function useReviewDiff(reviewId: number, changes: DiffChanges): ListState
     useSWR<ReviewDiff, unknown>(
       CACHE_KEYS.reviewDiff(reviewId, changes, host),
       () => api.reviews.diff({ id: reviewId, changes }),
+      LIVE_READ_OPTIONS
+    )
+  )
+}
+
+/**
+ * Every file in the repository at this review's head - what the browse tab
+ * folds into a tree.
+ *
+ * Keyed by `changes` like the diff and read on the same terms as it, which is
+ * what keeps the two tabs describing the same head: a file created on this
+ * branch and not committed yet is in the listing when the reviewer is looking
+ * at uncommitted work, and not when they have narrowed to the commits.
+ *
+ * Read on mount rather than on demand, unlike `useReviewFile`. There is exactly
+ * one of these per review and the tab is unusable without it, so deferring it
+ * would only mean the tree arrives a round trip after the screen does.
+ */
+export function useReviewTree(reviewId: number, changes: DiffChanges): ListState<ReviewTree> {
+  const api = useApi()
+  const host = useHost()
+  return toState(
+    useSWR<ReviewTree, unknown>(
+      CACHE_KEYS.reviewTree(reviewId, changes, host),
+      () => api.reviews.tree({ id: reviewId, changes }),
       LIVE_READ_OPTIONS
     )
   )

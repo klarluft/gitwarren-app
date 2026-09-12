@@ -7,7 +7,7 @@
  *
  * The split worth noticing here is between the CRUD half and the read-only git
  * half. `list`/`get`/`create`/`update`/`remove` write durable rows and are
- * exposed to agents over MCP. `commits`/`diff` only read git, and are
+ * exposed to agents over MCP. `commits`/`diff`/`tree` only read git, and are
  * deliberately *not* exposed: an agent with access to the repository can run
  * `git log` and `git diff` itself, and a second, lossier copy of that data
  * behind a tool call would be strictly worse than the real thing. What agents
@@ -22,6 +22,7 @@ import {
   readReviewDiff,
   readReviewFile,
   readReviewImage,
+  readReviewTree,
   resolveCompare,
   resolveReviewFilePath
 } from '../git-compare.js'
@@ -37,11 +38,12 @@ import {
   reviewDiffInputSchema,
   reviewFileInputSchema,
   reviewImageInputSchema,
+  reviewTreeInputSchema,
   updateReviewInputSchema,
   type Review,
   type ReviewWithRepository
 } from '../../shared/schemas.js'
-import type { FileContent, FileImage, ReviewCommits, ReviewDiff } from '../../shared/git.js'
+import type { FileContent, FileImage, ReviewCommits, ReviewDiff, ReviewTree } from '../../shared/git.js'
 
 function toReview(row: ReviewRow): Review {
   return {
@@ -228,6 +230,23 @@ export const reviewsService = {
     const row = requireReview(id)
     const repository = requireRepository(row.repositoryId)
     return readReviewDiff(repository.path, row.baseRef, row.headRef, { changes })
+  },
+
+  /**
+   * Every file in the repository at the review's head, changed or not.
+   *
+   * A read-only git call like `commits` and `diff`, and exposed to the UI for
+   * the same reason they are: a person looking at a review on another machine
+   * has no filesystem to browse. It stays off the MCP surface for the reason
+   * given at the top of this file - an agent with the repository in front of it
+   * has `git ls-files`, and a lossier copy behind a tool call would be worse
+   * than the real thing.
+   */
+  async tree(input: unknown): Promise<ReviewTree> {
+    const { id, changes } = parse(reviewTreeInputSchema, input)
+    const row = requireReview(id)
+    const repository = requireRepository(row.repositoryId)
+    return readReviewTree(repository.path, row.baseRef, row.headRef, { changes })
   },
 
   /**

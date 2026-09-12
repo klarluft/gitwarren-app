@@ -95,7 +95,7 @@ export function ImageDiff({
   )
 }
 
-function ImagePane({
+export function ImagePane({
   reviewId,
   path,
   side,

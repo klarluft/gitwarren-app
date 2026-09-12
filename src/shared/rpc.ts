@@ -20,7 +20,14 @@
  */
 import { AppError, deserializeAppError, type SerializedAppError } from './errors.js'
 import type { McpLaunchInfo } from './api.js'
-import type { FileContent, FileImage, RepositoryRefs, ReviewCommits, ReviewDiff } from './git.js'
+import type {
+  FileContent,
+  FileImage,
+  RepositoryRefs,
+  ReviewCommits,
+  ReviewDiff,
+  ReviewTree
+} from './git.js'
 import type {
   AddHostInput,
   AddRepositoryInput,
@@ -58,6 +65,7 @@ import type {
   Review,
   ReviewCommitsInput,
   ReviewDiffInput,
+  ReviewTreeInput,
   ReviewedFile,
   ReviewFileInput,
   ReviewImageInput,
@@ -404,6 +412,7 @@ export interface RpcMethods {
   'reviews.remove': { params: RemoveReviewInput; result: { id: number } }
   'reviews.commits': { params: ReviewCommitsInput; result: ReviewCommits }
   'reviews.diff': { params: ReviewDiffInput; result: ReviewDiff }
+  'reviews.tree': { params: ReviewTreeInput; result: ReviewTree }
   'reviews.file': { params: ReviewFileInput; result: FileContent }
   'reviews.image': { params: ReviewImageInput; result: FileImage }
   /**
@@ -524,6 +533,7 @@ export const READ_METHODS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
   'reviews.get',
   'reviews.commits',
   'reviews.diff',
+  'reviews.tree',
   'reviews.file',
   'reviews.image',
   'reviews.filePath',

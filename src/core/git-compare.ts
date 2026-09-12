@@ -48,6 +48,7 @@ import type {
   ReviewCommits,
   ReviewCompare,
   ReviewDiff,
+  ReviewTree,
   UpstreamTracking,
   WorkingTreeChanges,
   WorkingTreeFile
@@ -728,6 +729,92 @@ async function readUntrackedFiles(worktreePath: string): Promise<FileDiff[]> {
 // ---------------------------------------------------------------------------
 // Whole-file reads, for expanding a diff's hidden context
 // ---------------------------------------------------------------------------
+
+/**
+ * How many paths a tree listing will carry.
+ *
+ * Chosen against real repositories rather than as a round number: a large
+ * monorepo checkout runs to a few tens of thousands of tracked files, and the
+ * screen folds every one of them into a tree it then has to render. Past this
+ * the listing says it was cut short, and the filter box - which is how anybody
+ * finds a file in a tree that size anyway - is still there.
+ *
+ * Paths are cheap on the wire in a way the diff is not: twenty thousand of them
+ * is under a megabyte, read once when the tab is opened and cached under its own
+ * SWR key for the rest of the visit.
+ */
+const MAX_TREE_PATHS = 20_000
+
+/**
+ * Every file in the repository at the review's head.
+ *
+ * Which *head* is the whole question, and the answer is the same one the diff
+ * gives: with a worktree holding the head branch and anything but a
+ * committed-only view asked for, the head *is* that worktree, so the listing
+ * comes from disk and includes the files the branch has not committed yet. A
+ * reviewer looking at uncommitted work who could not open an uncommitted file
+ * would be looking at half a repository.
+ *
+ * `ls-files` rather than `readdir`: it already applies `.gitignore`, so
+ * `node_modules` and build output stay out of the listing exactly as they stay
+ * out of a commit, and it does it in one process rather than one per directory.
+ * `--cached --others` is tracked files plus untracked-but-not-ignored ones,
+ * which together are "what is in this checkout that anyone would review".
+ *
+ * A deleted-but-not-yet-committed file is listed, because `--cached` reports
+ * what the index holds. That is the honest answer: the file is still part of
+ * this review, and asking for it falls back to the committed blob the same way
+ * an expander does.
+ */
+export async function readReviewTree(
+  repositoryPath: string,
+  baseRef: string,
+  headRef: string,
+  options: ReadDiffOptions
+): Promise<ReviewTree> {
+  const compare = await resolveCompare(repositoryPath, baseRef, headRef)
+  const changes = effectiveChanges(options.changes, compare)
+  const empty = { paths: [], truncated: false }
+
+  const worktree = changes === 'committed' ? null : compare.headWorktree
+  const source = worktree === null ? 'commit' : 'worktree'
+
+  if (worktree === null && !compare.head.sha) {
+    return { ...empty, source, error: compare.error ?? 'The head ref does not resolve to a commit.' }
+  }
+
+  const result =
+    worktree === null
+      ? await runGitRaw(
+          // `-r` recurses into subtrees so the result is files rather than
+          // directory objects; without it a listing stops at the top level.
+          ['-c', 'core.quotePath=false', 'ls-tree', '-r', '--name-only', '-z', compare.head.sha as string, '--'],
+          repositoryPath
+        )
+      : await runGitRaw(
+          ['-c', 'core.quotePath=false', 'ls-files', '-z', '--cached', '--others', '--exclude-standard', '--'],
+          worktree.path
+        )
+
+  if (result.code !== 0) {
+    return { ...empty, source, error: result.stderr.trim() || 'Could not list the files.' }
+  }
+
+  // NUL-separated, so a path with a newline or a quote in it survives whole -
+  // which is also why `core.quotePath` is off above rather than the output
+  // being unescaped here.
+  const all = result.stdout.split('\0').filter((path) => path.length > 0)
+  // `--cached --others` can name the same path twice when a file is both
+  // tracked and reported as other; `ls-files` does not promise a sort either.
+  const paths = [...new Set(all)].sort((left, right) => left.localeCompare(right))
+
+  return {
+    paths: paths.slice(0, MAX_TREE_PATHS),
+    source,
+    truncated: paths.length > MAX_TREE_PATHS,
+    error: null
+  }
+}
 
 /** Past this a file is not worth shipping across IPC to render as context. */
 const MAX_FILE_LINES = 20_000

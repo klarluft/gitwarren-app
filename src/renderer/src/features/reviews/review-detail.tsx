@@ -23,6 +23,7 @@ import {
   ArrowRight,
   CircleDot,
   FileDiff,
+  FolderTree,
   GitCommitHorizontal,
   GitPullRequestArrow,
   MessageSquare,
@@ -42,6 +43,7 @@ import { useRegisterCommands, type Command } from '@/features/commands/command-r
 import { navigate, replace, REVIEW_TABS, type DiffFocus, type ReviewTab } from '@/lib/router'
 import { useReviewComments } from '../comments/use-comments'
 import { RefChip } from './ref-chip'
+import { ReviewBrowseTab } from './review-browse-tab'
 import { ReviewCommitsTab } from './review-commits-tab'
 import { ReviewConversationTab } from './review-conversation-tab'
 import { ReviewFilesTab } from './review-files-tab'
@@ -62,13 +64,15 @@ import type { Review } from '@shared/schemas'
 const TAB_LABELS: Record<ReviewTab, string> = {
   conversation: 'Conversation',
   commits: 'Commits',
-  files: 'Files changed'
+  files: 'Files changed',
+  browse: 'Browse files'
 }
 
 const TAB_ICONS: Record<ReviewTab, typeof MessageSquare> = {
   conversation: MessageSquare,
   commits: GitCommitHorizontal,
-  files: FileDiff
+  files: FileDiff,
+  browse: FolderTree
 }
 
 interface ReviewDetailProps {
@@ -331,6 +335,14 @@ export function ReviewDetail({ reviewId, tab, focus }: ReviewDetailProps) {
             {commits.data && <TabsCount>{commits.data.commits.length}</TabsCount>}
           </TabsTab>
           <TabsTab value="files">Files changed</TabsTab>
+          {/* Last, and named for what it does rather than for what it holds.
+              "Files" would be the same word as the tab next to it for two
+              different things; "Browse files" says which of the two is the one
+              that lets you go and look at something nobody changed. */}
+          <TabsTab value="browse">
+            <FolderTree />
+            Browse files
+          </TabsTab>
         </TabsList>
 
         <TabsPanel value="conversation">
@@ -341,6 +353,9 @@ export function ReviewDetail({ reviewId, tab, focus }: ReviewDetailProps) {
         </TabsPanel>
         <TabsPanel value="files">
           <ReviewFilesTab review={review} focus={focus} />
+        </TabsPanel>
+        <TabsPanel value="browse">
+          <ReviewBrowseTab review={review} focus={focus} />
         </TabsPanel>
       </Tabs>
 

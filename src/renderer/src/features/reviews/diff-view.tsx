@@ -66,6 +66,7 @@ import {
 } from '@shared/diff-gaps'
 import { errorMessage } from '@/lib/errors'
 import { matchOffsets, rowPosition, type DiffSearch } from './diff-search'
+import { useLineSelection, type LineRange } from './line-selection'
 import { imageMediaType } from '@shared/git'
 import type { DiffChanges, DiffHunk, DiffLine, FileChangeStatus, FileDiff } from '@shared/git'
 import type { CommentThread } from '@shared/schemas'
@@ -115,16 +116,6 @@ export function FileStatusIcon({
   return <Icon className={cn('size-4 shrink-0', STATUS_COLOURS[status], className)} />
 }
 
-/**
- * A run of lines on one side of the diff: what a comment covers, and what the
- * reviewer is dragging out before the composer opens. `startLine === line` is
- * an ordinary single-line comment, which is most of them.
- */
-export interface LineRange {
-  side: DiffSide
-  startLine: number
-  line: number
-}
 
 /** A thread together with where it lands in the diff being displayed. */
 export interface AnchoredThread extends CommentThread {
@@ -218,8 +209,13 @@ export function FileDiffCard({
   file: FileDiff
   comments?: DiffComments
   source?: DiffFileSource
-  /** A line in *this* file someone has navigated to; opens the card if folded. */
-  focus?: { side: DiffSide; line: number }
+  /**
+   * Set when this is the file someone has navigated to; opens the card if it is
+   * folded. Only its presence is read here - the line is drawn from `marked`,
+   * and scrolled to by id - so a link that names a file and no line still opens
+   * the card it names.
+   */
+  focus?: { side?: DiffSide; line?: number }
   /** The same line while it is still worth pointing at. */
   marked?: { side: DiffSide; line: number }
   /** Omitted where there is nothing to mark against - a card shown on its own. */
@@ -230,12 +226,10 @@ export function FileDiffCard({
   const lineCount = file.hunks.reduce((total, hunk) => total + hunk.lines.length, 0)
   /** Null until the reviewer opens or closes the card themselves. */
   const [toggled, setToggled] = useState<boolean | null>(null)
-  /** The lines the reviewer is writing a new comment on. */
-  const [composingOn, setComposingOn] = useState<LineRange | null>(null)
-  /** The range being dragged out right now, before the pointer comes up. */
-  const [dragging, setDragging] = useState<LineRange | null>(null)
   /** Head-side line numbers unfolded out of the gaps between the hunks. */
   const [revealed, setRevealed] = useState<ReadonlySet<number>>(() => new Set())
+  const { composingOn, setComposingOn, startSelection, dragOver, selection, isDragging } =
+    useLineSelection()
 
   const isReviewed = reviewed?.isReviewed ?? false
 
@@ -292,89 +286,6 @@ export function FileDiffCard({
     [text]
   )
 
-  /**
-   * Start commenting at a line, or grow the open range to reach it.
-   *
-   * Two gestures, both of which people already know from GitHub: press and
-   * drag the `+` down the gutter, or shift-click a second line. Shift-click
-   * keeps the first line of the existing range as the anchor, so the range
-   * only ever grows away from where the reviewer started.
-   */
-  const startSelection = useCallback(
-    (side: DiffSide, line: number, extend: boolean) => {
-      if (extend && composingOn && composingOn.side === side) {
-        const anchor = composingOn.startLine
-        setComposingOn({ side, startLine: Math.min(anchor, line), line: Math.max(anchor, line) })
-        return
-      }
-      setDragging({ side, startLine: line, line })
-    },
-    [composingOn]
-  )
-
-  const dragOver = useCallback((side: DiffSide, line: number) => {
-    setDragging((current) => {
-      if (!current || current.side !== side || current.line === line) return current
-      // `startLine` stays the line the drag began on; the pointer can be either
-      // side of it, and the range is normalised when the pointer comes up.
-      return { ...current, line }
-    })
-  }, [])
-
-  /**
-   * A drag ends wherever the pointer is released, which is often outside the
-   * button - or outside the card - so the listener goes on the window.
-   *
-   * The *move* is on the window for a different and less obvious reason. Rows
-   * also report `onPointerEnter`, and with a mouse that is enough: the pointer
-   * really does travel across each row and each row really is told. A finger
-   * does not work that way. Touch sets *implicit pointer capture* on whatever
-   * the gesture started on - the `+` button - so for the rest of the drag every
-   * pointer event is delivered to that button and no row is ever entered. The
-   * range simply never grew, which is why dragging out several lines worked on
-   * a desktop and did nothing at all on a phone.
-   *
-   * So the pointer is followed rather than waited for: one listener, hit-test
-   * where it actually is, read the row's own `data-diff-*` off the result. That
-   * is correct for a mouse too - `onPointerEnter` stays because it costs
-   * nothing and keeps the desktop path working if a hit-test ever lands on
-   * something unexpected - and it is the same set of coordinates either way.
-   */
-  useEffect(() => {
-    if (!dragging) return
-
-    const move = (event: PointerEvent): void => {
-      const under = document.elementFromPoint(event.clientX, event.clientY)
-      const row = under?.closest('[data-diff-line]')
-      if (!row) return
-      const side = row.getAttribute('data-diff-side')
-      const line = Number(row.getAttribute('data-diff-line'))
-      if ((side === 'base' || side === 'head') && Number.isInteger(line)) dragOver(side, line)
-    }
-
-    const finish = (): void => {
-      const startLine = Math.min(dragging.startLine, dragging.line)
-      const line = Math.max(dragging.startLine, dragging.line)
-      setDragging(null)
-      setComposingOn((current) =>
-        // Clicking the `+` of a composer that is already open on exactly those
-        // lines closes it again, which is how the button worked before ranges.
-        current && current.side === dragging.side && current.startLine === startLine && current.line === line
-          ? null
-          : { side: dragging.side, startLine, line }
-      )
-    }
-
-    window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', finish)
-    window.addEventListener('pointercancel', finish)
-    return () => {
-      window.removeEventListener('pointermove', move)
-      window.removeEventListener('pointerup', finish)
-      window.removeEventListener('pointercancel', finish)
-    }
-  }, [dragging, dragOver])
-
   // A shared constant rather than a fresh `[]`, so a file with no comments
   // does not hand the memo below a new array identity on every render.
   const threads = comments?.threads ?? NO_THREADS
@@ -425,15 +336,7 @@ export function FileDiffCard({
     onCompose: setComposingOn,
     onSelectStart: startSelection,
     onSelectOver: dragOver,
-    // While the pointer is down the drag wins; after it comes up the composer's
-    // own range is what stays lit.
-    selection: dragging
-      ? {
-          side: dragging.side,
-          startLine: Math.min(dragging.startLine, dragging.line),
-          line: Math.max(dragging.startLine, dragging.line)
-        }
-      : composingOn,
+    selection,
     covered,
     marked: marked ?? null,
     filePath: file.path,
@@ -659,7 +562,7 @@ export function FileDiffCard({
           {/* `@container` makes this element an inline-size container, which is
               what lets a comment inside it be sized to the *visible* width
               rather than to the width of the scrolled code. */}
-          <div className={cn('@container overflow-x-auto', dragging && 'select-none')}>
+          <div className={cn('@container overflow-x-auto', isDragging && 'select-none')}>
             <div className="min-w-max font-mono text-xs leading-5">
               {file.hunks.map((hunk, index) => {
                 const gap = gapByHunk.get(index)
@@ -747,7 +650,7 @@ export function FileDiffCard({
  * far side of the header, because "copy" on its own says nothing about what
  * gets copied - next to the thing it copies, it needs no explaining.
  */
-function CopyPathAction({ path }: { path: string }) {
+export function CopyPathAction({ path }: { path: string }) {
   const [copied, setCopied] = useState(false)
 
   async function copyPath(): Promise<void> {
@@ -803,7 +706,7 @@ function FileActions({
   )
 }
 
-function IconAction({
+export function IconAction({
   label,
   onClick,
   icon
@@ -1023,7 +926,7 @@ function ExpandButton({
   )
 }
 
-interface RowContext {
+export interface RowContext {
   placed: Map<string, AnchoredThread[]>
   comments: DiffComments | undefined
   /** The range the composer is open on, if any. */
@@ -1042,6 +945,15 @@ interface RowContext {
   filePath: string
   /** The find in progress, so a row can pick its own hits out. */
   search: DiffSearch | null
+  /**
+   * Draw one number column instead of two.
+   *
+   * A diff has two sides and therefore two gutters, one of which is blank on
+   * any given row. A *file* has one, and rendering the diff's grid for it
+   * leaves three rems of permanently empty column down the left of everything -
+   * see `file-source-view.tsx`, which is the only caller that sets this.
+   */
+  oneGutter?: boolean
 }
 
 function HunkRows({
@@ -1064,7 +976,7 @@ function HunkRows({
   )
 }
 
-function LineRow({
+export function LineRow({
   line,
   placed,
   comments,
@@ -1076,7 +988,8 @@ function LineRow({
   covered,
   marked,
   filePath,
-  search
+  search,
+  oneGutter = false
 }: { line: DiffLine } & RowContext) {
   // Which side a comment on this row belongs to, and the number it carries
   // there. Shared with the search, so a hit is addressed to the row it is on.
@@ -1110,7 +1023,8 @@ function LineRow({
         data-diff-side={number === null ? undefined : side}
         data-diff-line={number === null ? undefined : number}
         className={cn(
-          'group grid grid-cols-[3rem_3rem_1fr]',
+          'group grid',
+          oneGutter ? 'grid-cols-[3rem_1fr]' : 'grid-cols-[3rem_3rem_1fr]',
           // Backgrounds are mutually exclusive rather than layered: two
           // background utilities on one element are resolved by stylesheet
           // order, not by the order they are written here.
@@ -1128,7 +1042,7 @@ function LineRow({
           inThread && 'shadow-[inset_3px_0_0_0_var(--color-primary)]'
         )}
       >
-        <Gutter value={line.oldNumber} />
+        {!oneGutter && <Gutter value={line.oldNumber} />}
         <div
           className="relative border-r border-border"
           // Extending a drag has to be caught on the row, not on the button:
@@ -1336,7 +1250,7 @@ function LineText({
   return <>{parts}</>
 }
 
-function Gutter({ value }: { value: number | null }) {
+export function Gutter({ value }: { value: number | null }) {
   return (
     <span className="select-none border-r border-border px-2 text-right tabular-nums text-muted-foreground/70">
       {value ?? ''}

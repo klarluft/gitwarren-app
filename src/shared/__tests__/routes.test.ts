@@ -33,6 +33,55 @@ test('local hrefs are the same strings they always were', () => {
   )
 })
 
+test('a browsed file is a location, with or without a line', () => {
+  // The browse tab shows one file at a time, so which file is part of where you
+  // are - it survives a reload and can be pasted to somebody else.
+  const file: Route = {
+    name: 'review',
+    reviewId: 4,
+    tab: 'browse',
+    focus: { filePath: 'src/core/git.ts' }
+  }
+
+  assert.equal(hrefFor(file), '#/reviews/4/browse/src%2Fcore%2Fgit.ts')
+  assert.deepEqual(parseRoute(hrefFor(file)), file)
+
+  // And a line in it, for a link that comes from a comment.
+  const line: Route = {
+    name: 'review',
+    reviewId: 4,
+    tab: 'browse',
+    focus: { filePath: 'src/core/git.ts', side: 'head', line: 12 }
+  }
+
+  assert.equal(hrefFor(line), '#/reviews/4/browse/src%2Fcore%2Fgit.ts/head/12')
+  assert.deepEqual(parseRoute(hrefFor(line)), line)
+})
+
+test('half a focus is no focus', () => {
+  // A bare path is a whole destination, but segments that are present and wrong
+  // mean the link was built by something that got the grammar wrong - so the
+  // reader lands on the tab rather than somewhere approximate.
+  const onlyTheTab = { name: 'review', reviewId: 4, tab: 'browse' }
+
+  assert.deepEqual(parseRoute('#/reviews/4/browse/a.ts/sideways/9'), onlyTheTab)
+  assert.deepEqual(parseRoute('#/reviews/4/browse/a.ts/head/0'), onlyTheTab)
+  assert.deepEqual(parseRoute('#/reviews/4/browse/a.ts/head/oops'), onlyTheTab)
+})
+
+test('a focus path may not address its way out of the repository', () => {
+  // The real guard is in `core/git-compare.ts`, at the read. This one keeps a
+  // hash an agent wrote into a comment from becoming a location at all - and
+  // since browse, a focus path is a file the screen goes and asks for.
+  for (const hash of [
+    '#/reviews/4/browse/..%2F..%2Fetc%2Fpasswd',
+    '#/reviews/4/browse/%2Fetc%2Fpasswd',
+    '#/reviews/4/browse/C%3A%5CWindows'
+  ]) {
+    assert.deepEqual(parseRoute(hash), { name: 'review', reviewId: 4, tab: 'browse' }, hash)
+  }
+})
+
 test('a local route carries no host key at all', () => {
   // Not `host: undefined`: routes are compared for equality in the router and
   // in tests, and a key that is present but empty is not the same object.
