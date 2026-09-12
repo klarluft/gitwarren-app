@@ -45,6 +45,13 @@ protocols:
       - gitwarren
 
 win:
+  # Windows is signed through Azure Artifact Signing, but `azureSignOptions`
+  # is deliberately *not* set here — it is passed by the release workflow
+  # instead. winPackager switches to the Azure signing manager the moment this
+  # key exists and never checks whether credentials are present, so setting it
+  # here would make every unsigned local build fail at the signing step. See
+  # the *Build and publish* step in .github/workflows/release.yml, and the
+  # Windows section of the README.
   target:
     - target: nsis
       arch: [x64, arm64]

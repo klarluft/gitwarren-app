@@ -88,13 +88,16 @@ jobs:
       - run: npm ci
 
       # --- Code signing and notarization (both optional) -------------------
-      # Only the Windows certificate travels under CSC_LINK / CSC_KEY_PASSWORD.
-      # Handing a Windows runner the Apple .p12 makes it try to Authenticode-
-      # sign an .exe with a Developer ID certificate:
+      # Windows does not use CSC_LINK / CSC_KEY_PASSWORD at all. It signs
+      # through Azure Artifact Signing, which holds the private key itself and
+      # is driven by the three AZURE_* credentials below. Nothing
+      # certificate-shaped reaches a Windows runner any more, which retires an
+      # old trap: handed the Apple .p12, the Windows packager tried to
+      # Authenticode-sign an .exe with a Developer ID certificate and died with
       #
       #   ⨯ Cannot extract publisher name from code signing certificate
       #
-      # macOS deliberately does *not* use them. Setting CSC_LINK there sends
+      # macOS deliberately does *not* use CSC_LINK either. Setting it sends
       # electron-builder down its own createKeychain path, which imports the
       # certificate and then runs
       #
@@ -126,8 +129,9 @@ jobs:
       - name: Export the signing secrets that exist
         shell: bash
         env:
-          WINDOWS_CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
-          WINDOWS_CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -145,8 +149,17 @@ jobs:
               emit APPLE_TEAM_ID "$APPLE_TEAM_ID"
               ;;
             Windows)
-              emit CSC_LINK "$WINDOWS_CSC_LINK"
-              emit CSC_KEY_PASSWORD "$WINDOWS_CSC_KEY_PASSWORD"
+              # electron-builder reads these three through Azure's
+              # EnvironmentCredential. WINDOWS_SIGN is what the build step
+              # keys off: with no credentials it stays unset, no
+              # azureSignOptions is passed, and the build produces an
+              # unsigned installer exactly as it did before.
+              if [ -n "$AZURE_CLIENT_ID" ]; then
+                emit AZURE_TENANT_ID "$AZURE_TENANT_ID"
+                emit AZURE_CLIENT_ID "$AZURE_CLIENT_ID"
+                emit AZURE_CLIENT_SECRET "$AZURE_CLIENT_SECRET"
+                emit WINDOWS_SIGN 1
+              fi
               ;;
           esac
 
@@ -237,12 +250,44 @@ jobs:
       # is inert in that case — notarization is only attempted once a real
       # signature has succeeded — and with a certificate but no APPLE_* secrets
       # it logs `skipped macOS notarization` rather than failing the build.
+      #
+      # The Azure signing configuration lives here rather than in
+      # electron-builder.yml deliberately. winPackager picks the Azure signing
+      # manager whenever `win.azureSignOptions` is present and never checks
+      # whether credentials exist, so putting it in the config file would make
+      # every unsigned local Windows build fail at the signing step — the one
+      # property the rest of this pipeline goes out of its way to keep.
+      #
+      # publisherName must equal the certificate's common name exactly
+      # (`CN=Klarluft B.V.`). `verifyUpdateCodeSignature` defaults to true, so
+      # electron-updater checks every downloaded update against this string: a
+      # mismatch installs fine and then silently refuses all auto-updates,
+      # which is worse than shipping unsigned. Read it back with
+      #   az rest --method get --url ".../certificateProfiles/klarluft-public-trust?api-version=2024-09-30-preview"
+      # rather than retyping it.
       - name: Build and publish
+        shell: bash
         env:
           # electron-builder uploads to the repo named in the `publish` block
           # of electron-builder.yml using this token.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run release
+        run: |
+          if [ "${WINDOWS_SIGN:-}" != "1" ]; then
+            npm run release
+            exit 0
+          fi
+
+          # electron-builder is invoked directly here rather than through
+          # `npm run release`, which is the same two commands: the publisher
+          # name contains spaces, and npm's argument forwarding hands them to
+          # cmd.exe on a Windows runner, which mangles the quoting. Keep these
+          # in step with the `release` script in package.json.
+          npm run build
+          npx --no-install electron-builder --publish always \
+            -c.win.azureSignOptions.publisherName="Klarluft B.V." \
+            -c.win.azureSignOptions.endpoint="https://neu.codesigning.azure.net/" \
+            -c.win.azureSignOptions.codeSigningAccountName="klarluft-bv" \
+            -c.win.azureSignOptions.certificateProfileName="klarluft-public-trust"
 
       # Kept for the unsigned-build era: if publishing fails, or a build is
       # being checked before there is a release to attach it to, the

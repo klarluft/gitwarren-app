@@ -1611,9 +1611,9 @@ the cause rather than several minutes in. The secret names are unchanged, and
 Windows packager reads `CSC_LINK` and `CSC_KEY_PASSWORD` too, and handed the
 Apple pair it tries to Authenticode-sign an `.exe` with a Developer ID
 certificate, failing with `Cannot extract publisher name from code signing
-certificate`. A Windows certificate, when there is one, goes in separate
-`WINDOWS_CSC_LINK` and `WINDOWS_CSC_KEY_PASSWORD` secrets, which the workflow
-already reads.
+certificate`. Windows carries no certificate of its own to confuse matters:
+it signs through Azure Artifact Signing, which keeps the private key, so the
+only Windows secrets are the three `AZURE_*` credentials. See *Windows* below.
 
 **On macOS the workflow builds the keychain itself** and never exports
 `CSC_LINK`. Setting it would send electron-builder down its own
@@ -1642,12 +1642,12 @@ actually landed in it, and hands electron-builder `CSC_KEYCHAIN`, which
 `CSC_LINK`/`CSC_KEY_PASSWORD` agreement check, so a badly stored secret still
 surfaces in seconds rather than several minutes in.
 
-The Windows secrets go through `$GITHUB_ENV` rather than a step-level `env:`
+The signing secrets go through `$GITHUB_ENV` rather than a step-level `env:`
 block. An absent secret is not an unset variable in GitHub Actions — it is an
-empty string, which electron-builder resolves as a path relative to the project
-directory, failing with `⨯ /Users/runner/work/<repo>/<repo> not a file`. The
-loop in *Export the signing secrets that exist* skips empty values so the unset
-case stays unset.
+empty string, and a step-level `env:` would override what the export step
+writes. The loop in *Export the signing secrets that exist* skips empty values
+so the unset case stays genuinely unset, which is what lets every credential
+here be optional.
 
 ### How the switches interact
 
@@ -1666,15 +1666,105 @@ reached. `scripts/adhoc-sign.mjs` stands down as soon as `CSC_KEYCHAIN` or
 `CSC_LINK` is set, or a Developer ID identity is in the keychain, so it never
 fights with the real signature.
 
+Windows has one switch rather than three, and it is the presence of
+`AZURE_CLIENT_ID`:
+
+| Azure credentials | Result |
+| --- | --- |
+| absent | unsigned installer, no `azureSignOptions` passed, build succeeds |
+| present | Authenticode-signed and timestamped by Azure Artifact Signing |
+
 ### Windows
 
-Needs a code-signing certificate — since June 2023 an OV certificate must live
-on a hardware token or an HSM, so the practical options are a cloud signing
-service or an EV certificate. Configure it through
-`win.certificateFile`/`certificatePassword`, or a signing hook for a cloud
-provider. Without signing, SmartScreen warns users on first run; updates still
-work, since electron-updater verifies the sha512 from the manifest rather than
-a signature.
+Windows signs through [Azure Artifact
+Signing](https://azure.microsoft.com/en-us/products/artifact-signing) — the
+service Microsoft renamed from Trusted Signing in 2026 — at $9.99/month for up
+to 5,000 signatures.
+
+The alternative was an EV certificate. Since June 2023 an OV code-signing key
+must live on a hardware token or an HSM, which means a courier, a physical
+device, and no clean way to sign from a CI runner. A managed service keeps the
+key on Microsoft's side and authenticates with an ordinary client secret, so a
+GitHub Actions runner can sign without anything being mailed anywhere.
+
+Eligibility used to be the obstacle: the service was limited to US and Canadian
+organizations with three or more years of trading history. At GA in 2026 that
+opened to EU, UK and several other organizations and the history requirement was
+dropped, which is what made this route possible for a Dutch B.V. Individual
+developers are still US/Canada only, so this runs through Klarluft B.V. as an
+organization.
+
+**The resources**, all under contact@klarluft.com:
+
+| Thing | Value |
+| --- | --- |
+| Tenant | `01a162b2-9903-4fcc-ba5b-324524440547` (NL) |
+| Subscription | `da65adba-22ab-436a-9f62-66d82c862188` |
+| Signing account | `klarluft-bv`, resource group `klarluft-signing`, North Europe |
+| Endpoint | `https://neu.codesigning.azure.net/` |
+| Certificate profile | `klarluft-public-trust` (Public Trust) |
+| Certificate subject | `CN=Klarluft B.V., O=Klarluft B.V., L=Rotterdam, S=Zuid-Holland, C=NL` |
+
+**The secrets** are `AZURE_TENANT_ID`, `AZURE_CLIENT_ID` and
+`AZURE_CLIENT_SECRET`, belonging to the `gitwarren-release-signing` app
+registration. It holds the *Artifact Signing Certificate Profile Signer* role
+scoped to the certificate profile rather than to the whole account, so adding a
+second profile later does not silently widen what this credential can sign.
+electron-builder picks the three up through Azure's `EnvironmentCredential`.
+
+**The client secret expires.** It was issued on 12 September 2026 with a
+two-year life, so it lapses around September 2028. The failure mode is a
+release build dying at the signing step with an authentication error and
+nothing in the repository explaining why, so it is worth a calendar entry.
+Rotate it with
+
+```bash
+az ad app credential reset --id <appId> --years 2 --query password -o tsv \
+  | gh secret set AZURE_CLIENT_SECRET
+```
+
+piping it straight into `gh` so the value is never displayed or written to
+disk.
+
+**Certificates last three days.** This is not a misconfiguration — Artifact
+Signing issues short-lived certificates and rotates them continuously. It is
+also why the RFC3161 timestamp is load-bearing rather than optional: the
+timestamp proves the binary was signed while its certificate was valid, so the
+signature stays good long after that certificate expires. Without one every
+build would stop verifying within 72 hours. electron-builder defaults to
+Microsoft's `http://timestamp.acs.microsoft.com`; leave it alone.
+
+**`publisherName` must equal the certificate's common name exactly.**
+`verifyUpdateCodeSignature` defaults to true, so electron-updater checks every
+downloaded update against that string. A mismatch produces an app that installs
+perfectly and then silently refuses every auto-update — worse than shipping
+unsigned, and invisible until users stop receiving releases. Read it back from
+Azure rather than retyping it:
+
+```bash
+az rest --method get --url "https://management.azure.com/subscriptions/da65adba-22ab-436a-9f62-66d82c862188/resourceGroups/klarluft-signing/providers/Microsoft.CodeSigning/codeSigningAccounts/klarluft-bv/certificateProfiles/klarluft-public-trust?api-version=2024-09-30-preview" \
+  --query "properties.certificates[0].subjectName" -o tsv
+```
+
+**The signing configuration is not in `electron-builder.yml`.** It is passed by
+the *Build and publish* step of `release.yml` instead. `winPackager` switches to
+the Azure signing manager the moment `win.azureSignOptions` exists and never
+checks whether credentials are present, so putting it in the config file would
+make every unsigned local Windows build fail at the signing step. Passing it
+from the workflow keeps `npm run package` working on a developer's machine with
+no Azure access at all.
+
+Signing also only runs on a Windows runner: electron-builder drives it through
+the `TrustedSigning` PowerShell module, which it installs into the runner's
+`CurrentUser` scope on first use. The release matrix already builds Windows on
+`windows-latest`, so this costs nothing.
+
+**SmartScreen reputation still has to accrue.** These are OV-class
+certificates, so the *"Windows protected your PC"* warning fades as downloads
+accumulate against the publisher rather than disappearing with the first signed
+release. Only an EV certificate buys immediate clearance. Updates were never
+affected either way — electron-updater verifies the sha512 from the manifest,
+not a signature.
 
 ### Linux
 
@@ -1683,8 +1773,12 @@ AppImage needs no signing.
 ### Releasing before the certificates exist
 
 The release pipeline is complete without any of the above. Every signing secret
-is optional, so tagging a version today produces installers for all three
-platforms; adding the certificates later changes no workflow and no config.
+is optional, so a tag pushed with none of them set still produces installers for
+all three platforms — each platform simply comes out unsigned. That property is
+worth preserving deliberately rather than by accident: it is why the Windows
+signing configuration is passed from the workflow instead of living in
+`electron-builder.yml`, where its mere presence would make an uncredentialled
+build fail.
 
 What each platform costs while unsigned:
 
@@ -1695,8 +1789,10 @@ What each platform costs while unsigned:
 | macOS | Yes, past a manual Gatekeeper override | **No** |
 
 Linux is unaffected — an AppImage is never signed. Windows shows *"Windows
-protected your PC"* until the certificate exists and SmartScreen has built
-reputation against it, but installs and updates work throughout.
+protected your PC"* until SmartScreen has built reputation against the
+publisher, but installs and updates work throughout. Note that signing alone
+does not clear that warning immediately: with an OV-class certificate, which is
+what Artifact Signing issues, reputation accrues over downloads.
 
 macOS is the one that is genuinely degraded, in two ways. Gatekeeper refuses a
 downloaded build that is not notarized, and the user has to allow it explicitly
