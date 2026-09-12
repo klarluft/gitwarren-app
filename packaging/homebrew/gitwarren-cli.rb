@@ -21,7 +21,7 @@
 # calls it. A user types `brew install klarluft/tap/gitwarren-cli` once and then
 # never sees the suffix again.
 class GitwarrenCli < Formula
-  desc "Local-only code review for your git repositories, served on loopback"
+  desc "Code review for your own machines and your own agents, served on loopback"
   homepage "https://github.com/klarluft/gitwarren-app"
   version "__VERSION__"
   license "GPL-3.0-or-later"
@@ -99,7 +99,7 @@ class GitwarrenCli < Formula
     # framed request, so a single round trip exercises all of it.
     output = pipe_output(
       "#{bin}/gitwarren serve --stdio",
-      "{\"id\":1,\"method\":\"repositories.list\"}\n"
+      "{\"id\":1,\"method\":\"repositories.list\"}\n",
     )
     assert_match "\"id\":1", output
   end
