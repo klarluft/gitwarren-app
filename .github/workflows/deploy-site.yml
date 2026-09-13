@@ -41,7 +41,7 @@ jobs:
     steps:
       # Both repositories are public, so the default token is enough here.
       - name: Check out the site
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: klarluft/gitwarren-site
           ref: main
@@ -49,7 +49,7 @@ jobs:
       # The checkout above is the *site*, so this reads gitwarren-site's own
       # .nvmrc — that repository declares the Node its lockfile is written
       # with, and this job simply obeys it. Nothing to keep in sync by hand.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: npm

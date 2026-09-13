@@ -22,7 +22,7 @@ jobs:
     name: Create draft release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Create the draft if it does not exist
         env:
@@ -73,14 +73,14 @@ jobs:
             name: Linux (x64 + arm64)
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
 
       # From .nvmrc, like ci.yml. Host toolchain only — the Node that ships
       # inside the app is Electron's, and install-app-deps rebuilds native
       # modules against Electron's headers rather than this one.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -294,7 +294,7 @@ jobs:
       # installers are still retrievable from the run itself.
       - name: Upload installers as a workflow artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: installers-${{ runner.os }}
           path: |
@@ -339,11 +339,11 @@ jobs:
       id-token: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -402,7 +402,7 @@ jobs:
       # setup-node deliberately: doing it up front also writes an auth
       # placeholder into .npmrc, and `npm ci` then fails against a variable
       # nothing sets.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .nvmrc
           registry-url: 'https://registry.npmjs.org'
@@ -432,7 +432,7 @@ jobs:
 
       - name: Upload as a workflow artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: daemon-tarballs
           path: |
