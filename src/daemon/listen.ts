@@ -175,6 +175,18 @@ function whereTheOwnerIs(owner: DaemonRuntime): string {
 }
 
 /**
+ * What the CLI wants done once the server is up, and not before.
+ *
+ * Both are things a person - never a spawning program - asked for by typing
+ * `gitwarren serve`, and both belong after the bind rather than before it: a
+ * refusal to start should write nothing and open nothing.
+ */
+export interface ListenHooks {
+  /** Called once, with the URL that was just printed. */
+  onListening?: (url: string) => void
+}
+
+/**
  * Bind, publish, and print the one URL that works.
  *
  * Returns false when it could not start, so the CLI entry can exit with something
@@ -182,13 +194,21 @@ function whereTheOwnerIs(owner: DaemonRuntime): string {
  * it: this is a command someone typed, and an exit code on its own is not an
  * answer.
  */
-export function runListen(): boolean {
+export function runListen(hooks: ListenHooks = {}): boolean {
   const owner = readLiveDaemonRuntime()
   if (owner) {
+    // The background service is the likeliest "another gitwarren serve" on a
+    // machine where someone has just typed this, and it is the one the person
+    // cannot see in a terminal - so it gets named, and so does the way to stop
+    // it.
+    const who =
+      owner.owner === 'gui'
+        ? 'the desktop app'
+        : 'another `gitwarren serve`, in a terminal or as the background service ' +
+          '(which `gitwarren service uninstall` stops)'
     console.error(
-      `[gitwarren-serve] this machine's GitWarren is already being served by ` +
-        `${owner.owner === 'gui' ? 'the app' : 'another gitwarren serve'} (pid ${owner.pid}). ` +
-        `A data directory has one owner. Quit that first, or use the one that is running` +
+      `[gitwarren] GitWarren is already running on this machine (pid ${owner.pid}), as ${who}. ` +
+        `Only one can serve a data directory at a time. Quit that first, or use the one that is running` +
         whereTheOwnerIs(owner)
     )
     process.exitCode = 1
@@ -198,7 +218,7 @@ export function runListen(): boolean {
   const webRoot = resolveWebRoot()
   if (!webRoot) {
     console.error(
-      '[gitwarren-serve] no web build found. Run `npm run build:web`, or set ' +
+      '[gitwarren] no web build found. Run `npm run build:web`, or set ' +
         'GITWARREN_WEB_ROOT to the directory holding its index.html.'
     )
     process.exitCode = 1
@@ -237,12 +257,12 @@ export function runListen(): boolean {
   server.on('error', (error: NodeJS.ErrnoException) => {
     if (error.code === 'EADDRINUSE') {
       console.error(
-        `[gitwarren-serve] port ${LINK_SERVER_PORT} is already in use. That port is the one ` +
+        `[gitwarren] port ${LINK_SERVER_PORT} is already in use. That port is the one ` +
           `every GitWarren link names, so serving on a different one would mean serving where ` +
           `nobody is looking. Free it and start again.`
       )
     } else {
-      console.error('[gitwarren-serve] the server failed', error)
+      console.error('[gitwarren] the server failed', error)
     }
     shutdownListen()
     process.exitCode = 1
@@ -260,12 +280,21 @@ export function runListen(): boolean {
     // stderr, like every other diagnostic here: stdout belongs to the protocol
     // in the other carrier and there is no reason for the two to disagree about
     // which stream a human message goes on.
+    //
+    // The three sentences after the URL are the whole of what a person who has
+    // just typed `gitwarren serve` for the first time needs: why the URL looks
+    // like that, how to stop this, and that there is a way not to have to run
+    // it by hand. Each was a question in somebody's first ten minutes.
+    const url = `http://${LINK_SERVER_HOST}:${LINK_SERVER_PORT}/?${TOKEN_PARAM}=${token}`
     console.error(
-      `[gitwarren-serve] GitWarren is at\n\n` +
-        `    http://${LINK_SERVER_HOST}:${LINK_SERVER_PORT}/?${TOKEN_PARAM}=${token}\n\n` +
-        `The token is new each time this starts, and is exchanged for a session cookie the ` +
-        `first time the URL is opened.`
+      `[gitwarren] GitWarren is running at\n\n` +
+        `    ${url}\n\n` +
+        `Open that URL, or run \`gitwarren open\` in another terminal. The token in it is ` +
+        `minted for this launch and becomes a cookie the first time the page loads.\n` +
+        `Press Ctrl-C to stop. To keep GitWarren running in the background instead, ` +
+        `from now and at every login, use \`gitwarren service install\`.`
     )
+    hooks.onListening?.(url)
   })
 
   closeOnExit = () => {

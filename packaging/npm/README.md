@@ -8,33 +8,58 @@ This package is the command line. There is also a desktop app; see
 [gitwarren-app](https://github.com/klarluft/gitwarren-app).
 
 ```
-npx gitwarren serve
+npx gitwarren serve --open
 ```
 
-That serves the review UI on `127.0.0.1:41427` and prints a URL carrying a
-token minted for that launch. Open it, add a repository, pick two refs, and
-review the diff.
+That serves the review UI on `127.0.0.1:41427`, prints a URL carrying a token
+minted for that launch, and opens it. Add a repository, pick two refs, and
+review the diff. Ctrl-C stops it. Needs Node 22 or newer; on a machine without
+Node, the Homebrew formula and the install script in the
+[app repository](https://github.com/klarluft/gitwarren-app#the-gitwarren-command-line)
+bring their own.
 
 ## Commands
 
+**Run it now**
+
 | | |
 | --- | --- |
-| `gitwarren serve` | serve the web view on loopback and print its URL |
-| `gitwarren serve --stdio` | answer GitWarren's protocol on stdin/stdout |
-| `gitwarren open [link]` | open this machine's GitWarren in a browser, carrying the token |
-| `gitwarren service install` | write the agent launcher, and start at login |
-| `gitwarren service uninstall` | remove the login item |
-| `gitwarren service status` | what is registered, and what is running |
+| `gitwarren serve [--open]` | run GitWarren in this terminal and print its URL; `--open` opens it too |
+| `gitwarren open [link]` | open the running GitWarren in your browser, carrying the token |
+
+**Keep it running**
+
+| | |
+| --- | --- |
+| `gitwarren service install` | run GitWarren in the background, from now and at every login |
+| `gitwarren service uninstall` | stop that, and remove the login item |
+| `gitwarren service status` | what is running, and where the data is |
+
+**Let a coding agent in**
+
+| | |
+| --- | --- |
+| `gitwarren agent-setup` | print the one sentence to give an agent so it can reach GitWarren over MCP |
+
+`gitwarren serve --stdio` answers GitWarren's protocol on stdin and stdout; it
+is what a GitWarren on another machine spawns, and nothing a person needs to
+type.
 
 `gitwarren open` takes a `gitwarren://` deep link or the `http://127.0.0.1`
 URL an agent hands out, and lands on that review rather than the home screen.
 
 ## Letting an agent in
 
-`gitwarren service install` writes `~/.gitwarren/bin/gitwarren-mcp`, which is a
-GitWarren MCP server your coding agent can start. Point the agent at that one
-path — it is the same on every machine, and GitWarren keeps it pointing at
-whichever install ran last.
+Every install carries GitWarren's MCP server. What an agent needs is one
+stable command to start it with, and that is `~/.gitwarren/bin/gitwarren-mcp` —
+the same path on every machine, written by `gitwarren serve`, `gitwarren
+agent-setup` and `gitwarren service install` alike, and kept pointing at
+whichever install ran last. `gitwarren agent-setup` prints the sentence to
+paste into the agent.
+
+The MCP server reads the same SQLite file the browser view does, so an agent
+can open and comment on reviews whether or not GitWarren is being served. What
+serving adds is that the links an agent hands you have something to open.
 
 ## Where your data is
 

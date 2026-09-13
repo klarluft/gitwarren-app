@@ -14,11 +14,13 @@ instead of an Electron window — for a machine that will not have the app on it
 or one with no screen at all:
 
 ```bash
-npx gitwarren serve                       # anywhere Node is
-brew install klarluft/tap/gitwarren-cli   # macOS and Linux, brings its own Node
+brew install klarluft/tap/gitwarren-cli               # macOS and Linux, brings its own Node
+curl -fsSL https://gitwarren.com/install.sh | sh      # macOS and Linux, no Homebrew needed
+npx gitwarren serve                                   # anywhere Node 22+ is, including Windows
 ```
 
-See [The `gitwarren` command line](#the-gitwarren-command-line).
+Then `gitwarren serve --open`. See
+[The `gitwarren` command line](#the-gitwarren-command-line).
 
 Code review for your own git repositories, on your own machines. Your machines,
 your agents, no one else's server — and no account.
@@ -1024,17 +1026,23 @@ same database independently, and an agent gets a working `guiUrl` either way.
 
 ## The `gitwarren` command line
 
-The same GitWarren, with a browser tab for a shell. One binary, four
+The same GitWarren, with a browser tab for a shell. One binary, a handful of
 subcommands, and no Electron anywhere in it.
 
 ```bash
-gitwarren serve                 # serve the web view on 127.0.0.1 and print its URL
-gitwarren serve --stdio         # answer GitWarren's protocol on stdin/stdout
-gitwarren open [link]           # open this machine's GitWarren in a browser
-gitwarren service install       # write the launchers, and start at login
-gitwarren service uninstall     # remove the login item
-gitwarren service status        # what is registered, and what is running
-gitwarren agent-setup           # print the sentence that points an agent here
+# Run it now
+gitwarren serve [--open]        # run GitWarren in this terminal and print its URL; Ctrl-C stops it
+gitwarren open [link]           # open the running GitWarren in your browser
+
+# Keep it running
+gitwarren service install       # run GitWarren in the background, from now and at every login
+gitwarren service uninstall     # stop that, and remove the login item
+gitwarren service status        # what is running, and where the data is
+
+# Let a coding agent in
+gitwarren agent-setup           # print the one sentence to give an agent so it can reach this GitWarren
+
+gitwarren serve --stdio         # answer GitWarren's protocol on stdin/stdout (what another machine spawns)
 ```
 
 It exists for two audiences that the app cannot serve. Someone who will not
@@ -1043,17 +1051,46 @@ shared, the shell is not. And a machine with no screen at all — a VPS, a WSL
 distro, a box an agent works on — gets the daemon and the MCP server, which is
 what [Your other machines](#your-other-machines) is built on.
 
-### Three ways to install it
+### Which command you want
+
+Three things a person wants from it, and one command for each. They are
+independent: none of them requires another to have been run first.
+
+- **Use it now.** `gitwarren serve` runs GitWarren in the terminal until Ctrl-C,
+  and prints the URL. `--open` opens it as well; `gitwarren open` in another
+  terminal does the same later.
+- **Have it always there.** `gitwarren service install` registers a login item
+  — a LaunchAgent on macOS, a `systemd --user` unit on Linux, an at-logon task
+  on Windows — and starts it now, so `gitwarren open` and the links an agent
+  hands you always have something to open. `gitwarren service uninstall` undoes
+  it.
+- **Let an agent in.** `gitwarren agent-setup` prints the sentence to paste into
+  Claude Code, Codex or any other MCP client. The MCP server is part of every
+  install and reads the same SQLite file the browser view does, so an agent can
+  open and comment on reviews whether or not GitWarren is being served — what
+  serving adds is that the `guiUrl` an agent hands back opens in a browser.
+
+All three write the same two files, `~/.gitwarren/bin/gitwarren` and
+`~/.gitwarren/bin/gitwarren-mcp`, the first time they run; see
+[`service install`](#service-install) for what they are.
+
+### Four ways to install it
 
 | | |
 | --- | --- |
-| `npx gitwarren` | Uses the Node you already have; `better-sqlite3` arrives as an ordinary dependency. The Windows answer, and about 700 KB. |
-| `brew install klarluft/tap/gitwarren-cli` | Pours the self-contained tarball. Brings its own Node, so nothing on the machine can upgrade out from under the native addon. |
-| The release tarball | `gitwarren-daemon-<v>-<target>.tar.gz`, unpacked anywhere. What GitWarren sends to a remote host over SSH. |
+| `brew install klarluft/tap/gitwarren-cli` | Pours the self-contained tarball. Brings its own Node, so nothing on the machine can upgrade out from under the native addon. macOS and Linux. |
+| `curl -fsSL https://gitwarren.com/install.sh \| sh` | The same tarball, without Homebrew — for a Linux box or a Mac with nothing on it. Unpacks into `~/.gitwarren/daemon/<version>/` and writes `~/.gitwarren/bin/gitwarren`, which is the layout the app itself produces when it installs onto a host over SSH, so either can upgrade what the other installed. Add `~/.gitwarren/bin` to `PATH`. `packaging/install.sh` is the script; `GITWARREN_VERSION` pins a release. |
+| `npx gitwarren` | Uses the Node you already have (22 or newer); `better-sqlite3` arrives as an ordinary dependency. The Windows answer, and about 700 KB. |
+| The release tarball | `gitwarren-daemon-<v>-<target>.tar.gz`, unpacked anywhere and run as `bin/gitwarren`. What the two rows above and the SSH installer all use. |
 
 The formula is `gitwarren-cli` and the cask stays `gitwarren`. The tokens differ
 so `brew install klarluft/tap/gitwarren` keeps meaning the app; the *binary* is
-called `gitwarren` in all three.
+called `gitwarren` in all four.
+
+To remove a Homebrew install, `brew uninstall gitwarren-cli`; a script install,
+`rm -rf ~/.gitwarren`. Run `gitwarren service uninstall` first if a login item
+was registered. Neither touches the reviews, which live in the data directory
+`gitwarren service status` prints.
 
 ### The token, and why nothing is copied
 
@@ -1078,11 +1115,15 @@ Two things, and only the second is about logging in:
    at the paths the rest of GitWarren already names — the Agent Access page
    prints the second as a command to paste, and the app spawns the first over ssh as
    `~/.gitwarren/bin/gitwarren serve --stdio`. Rerunning after an update points
-   them at the install that ran last.
+   them at the install that ran last. `gitwarren serve` and `gitwarren
+   agent-setup` write the same two files when they are missing, the way the app
+   writes the MCP one on every launch, so nobody has to ask for a login item to
+   get an agent working.
 2. **The login item.** A LaunchAgent on macOS, a `systemd --user` unit on Linux,
    an at-logon Scheduled Task on Windows — each running `gitwarren serve
-   --listen`. `--no-login-item` writes the launchers and stops, which is what a
-   headless host wants.
+   --listen`, and each started right away as well as at the next login.
+   `--no-login-item` writes the launchers and stops, which is what a headless
+   host wants and what the SSH installer and `install.sh` ask for.
 
 Nothing restarts a dead daemon, deliberately. `serve --listen` has a refusal it
 is *meant* to exit on — a data directory has one owner, so it stands aside when

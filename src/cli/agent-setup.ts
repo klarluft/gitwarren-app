@@ -12,16 +12,22 @@
  * cannot: whether the launcher is actually on this machine yet, and what to
  * type if it is not.
  *
- * ## It does not install anything
+ * ## It writes the launcher it names
  *
- * `service install` writes the launcher; this prints where it is. Keeping them
- * apart is the same rule `open` follows - a command that reports is not a
- * command that changes the machine, and a user who typed "agent-setup" to read
- * a sentence has not asked for a login item.
+ * The first version of this printed the path and, when nothing was there,
+ * pointed at `gitwarren service install` - on the principle that a command
+ * that reports should not change the machine. That principle sent a person
+ * who had asked "how does my agent reach this" to a command about logging in,
+ * and the sentence it printed named a file that did not exist. Somebody who
+ * runs `agent-setup` wants the agent to work; the launcher is a two-line
+ * script at a path they can read, and the app writes the same file on every
+ * launch without asking. So this writes it too, says so once on stderr when
+ * it did, and still asks for no login item.
  */
 import { existsSync } from 'node:fs'
 import { getMcpLauncherPath } from '../core/mcp-launcher.js'
 import { agentConfigSnippets, agentSetupPrompt } from '../shared/agent-setup.js'
+import { ensureLaunchers } from './launchers.js'
 
 const USAGE = `gitwarren agent-setup [--manual]
 
@@ -62,12 +68,18 @@ export function runAgentSetup(argv: readonly string[]): boolean {
     }
   }
 
-  if (!existsSync(command)) {
+  // Written after the prompt rather than before it, so the sentence on stdout
+  // is the same whether or not this run had anything to write.
+  const launchers = ensureLaunchers()
+  if (launchers.created.includes(command)) {
+    console.error(`\n[gitwarren] wrote ${command}, which the sentence above names.`)
+  } else if (!existsSync(command)) {
     // Not an error: the prompt above is still the right prompt, and it will be
     // true the moment the launcher exists. Worth a line on stderr all the same
     // - an agent handed this today would report a command that is not there.
     console.error(
-      `\n[gitwarren] no launcher at ${command} yet. \`gitwarren service install\` writes it.`
+      `\n[gitwarren] no launcher at ${command} yet, and this run could not write one` +
+        (launchers.refused ? `: ${launchers.refused}` : '.')
     )
   }
 

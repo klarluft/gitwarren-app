@@ -1,6 +1,12 @@
 /**
  * The two generated files in `~/.gitwarren/bin`, written by the CLI.
  *
+ * Three commands write them: `service install`, whose job it is; and `serve`
+ * and `agent-setup`, for which they are a side effect (see `ensureLaunchers`
+ * at the bottom). The app writes the MCP one on every launch, and the CLI
+ * used to write it only when a login item was asked for - which sent a person
+ * who wanted an agent, and not a service, to a command about logging in.
+ *
  * `main/mcp-launch.ts` does the same job for the app, and the duplication is
  * deliberate rather than missed: what the two write is genuinely different -
  * the app names its own Electron binary in Node mode, the CLI names a real
@@ -23,12 +29,12 @@
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { getCliLauncherPath, getLauncherDirectory, getMcpLauncherPath } from '../core/mcp-launcher.js'
 import { cmdQuote, shellQuote } from '../core/shell-quote.js'
-import type { SelfDescription } from './install.js'
+import { describeSelf, type SelfDescription } from './install.js'
 
 const BANNER = (what: string): string[] => [
-  `GitWarren ${what}. Written by \`gitwarren service install\`, so a config or a`,
+  `GitWarren ${what}. Written by the gitwarren command line, so a config or a`,
   'login item that names this path keeps working when the install moves.',
-  'Generated file - run the command again, do not edit this.'
+  'Generated file - rerun `gitwarren service install` to refresh it, do not edit this.'
 ]
 
 /**
@@ -83,7 +89,8 @@ function windowsLauncher(what: string, self: SelfDescription, script: string): s
 }
 
 /**
- * Write one launcher if its contents would change.
+ * Write one launcher if its contents would change. True when the file did not
+ * exist before - the one case worth a sentence to the user.
  *
  * Compared before writing for the reason `ensureMcpLauncher` gives: this is a
  * file in the user's home directory, and churning its mtime for an identical
@@ -94,7 +101,7 @@ function windowsLauncher(what: string, self: SelfDescription, script: string): s
  * its executable bit, and a login item pointing at a non-executable file fails
  * in a way that names neither.
  */
-function write(path: string, contents: string): void {
+function write(path: string, contents: string): boolean {
   let current: string | null = null
   try {
     current = readFileSync(path, 'utf8')
@@ -107,12 +114,15 @@ function write(path: string, contents: string): void {
     writeFileSync(path, contents, 'utf8')
   }
   if (process.platform !== 'win32') chmodSync(path, 0o755)
+  return current === null
 }
 
 export interface WrittenLaunchers {
   cli: string
   /** Null when this install ships no MCP server - see `install.ts`. */
   mcp: string | null
+  /** The launchers that did not exist before this call. */
+  created: string[]
 }
 
 /**
@@ -133,14 +143,48 @@ export function writeLaunchers(self: SelfDescription): WrittenLaunchers {
   }
 
   const posix = process.platform !== 'win32'
+  const created: string[] = []
   const cli = getCliLauncherPath()
-  write(cli, (posix ? posixLauncher : windowsLauncher)('CLI', self, self.script))
+  if (write(cli, (posix ? posixLauncher : windowsLauncher)('CLI', self, self.script))) created.push(cli)
 
   let mcp: string | null = null
   if (self.mcpServer !== null) {
     mcp = getMcpLauncherPath()
-    write(mcp, (posix ? posixLauncher : windowsLauncher)('MCP server', self, self.mcpServer))
+    if (write(mcp, (posix ? posixLauncher : windowsLauncher)('MCP server', self, self.mcpServer)))
+      created.push(mcp)
   }
 
-  return { cli, mcp }
+  return { cli, mcp, created }
+}
+
+/**
+ * The launchers, as a side effect rather than as the point.
+ *
+ * `service install` is the command whose whole job is to write these, and it
+ * throws when it cannot. `gitwarren serve` and `gitwarren agent-setup` write
+ * them the way the app does on every launch - because a person who has just
+ * started GitWarren, or just asked how to point an agent at it, has said all
+ * they need to for `~/.gitwarren/bin/gitwarren-mcp` to exist - and neither of
+ * those may fail over it. A `serve` from a source checkout still has a page to
+ * serve; what it cannot do is name a file a login shell could run again, and
+ * that is a sentence on stderr, not a reason to stop.
+ *
+ * `describeSelf` is called here rather than by the caller so that the throw it
+ * can raise - no migrations folder to name - is caught in the same place as
+ * the checkout refusal. Both mean the same thing to the person reading it.
+ */
+export interface EnsuredLaunchers {
+  /** What was written for the first time, to be said once and not again. */
+  created: string[]
+  /** Why nothing was written, when nothing was. Null on success. */
+  refused: string | null
+}
+
+export function ensureLaunchers(): EnsuredLaunchers {
+  try {
+    const { created } = writeLaunchers(describeSelf())
+    return { created, refused: null }
+  } catch (error) {
+    return { created: [], refused: error instanceof Error ? error.message : String(error) }
+  }
 }
