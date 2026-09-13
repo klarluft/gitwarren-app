@@ -8,6 +8,9 @@
  * warning into an agent.
  */
 import assert from 'node:assert/strict'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, test } from 'node:test'
 import { getMcpLauncherPath } from '../../core/mcp-launcher.js'
 import { agentConfigSnippets, agentSetupPrompt } from '../../shared/agent-setup.js'
@@ -44,15 +47,30 @@ test('stdout is the prompt and only the prompt', () => {
 })
 
 test('a missing launcher is a line on stderr, not a failure', () => {
-  const { ok, out, err } = capture([])
+  // A home directory with nothing in it, so the launcher is missing on every
+  // machine this runs on rather than only on CI - the developer's own Mac has
+  // one, written by the app, and the first version of this test passed there
+  // while failing everywhere else. `homedir()` reads HOME on POSIX and
+  // USERPROFILE on Windows, so both are pointed at it.
+  const home = mkdtempSync(join(tmpdir(), 'gitwarren-agent-setup-'))
+  const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE }
+  process.env.HOME = home
+  process.env.USERPROFILE = home
+  try {
+    const { ok, out, err } = capture([])
 
-  // Whether the launcher exists depends on the machine running the test, so the
-  // assertion is on the pairing rather than on either half: the note appears
-  // exactly when the command it names would be the right thing to type, it says
-  // so on stderr, and it never makes the command fail.
-  assert.equal(ok, true)
-  assert.ok(!out.includes('service install'))
-  assert.equal(err.includes('service install'), err !== '')
+    // Under tsx there is no file a shell could run again, so the command cannot
+    // write the launcher it names - and that is a sentence on stderr naming the
+    // path, never a failure, and never a word on stdout.
+    assert.equal(ok, true)
+    assert.equal(out.trim(), agentSetupPrompt({ command: getMcpLauncherPath() }))
+    assert.ok(err.includes(getMcpLauncherPath()), 'stderr should name the missing launcher')
+    assert.match(err, /could not write one: .*source checkout/)
+  } finally {
+    process.env.HOME = saved.HOME
+    process.env.USERPROFILE = saved.USERPROFILE
+    rmSync(home, { recursive: true, force: true })
+  }
 })
 
 test('--manual prints every by-hand format, verbatim', () => {
