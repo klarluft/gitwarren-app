@@ -22,6 +22,20 @@ npx gitwarren serve                                   # anywhere Node 22+ is, in
 Then `gitwarren serve --open`. See
 [The `gitwarren` command line](#the-gitwarren-command-line).
 
+If you arrive from a coding agent, start there instead. The plugin brings the
+MCP server and a note that teaches the agent when to open a review and how to
+answer your comments:
+
+```bash
+/plugin marketplace add klarluft/gitwarren-app       # Claude Code, then:
+/plugin install gitwarren@gitwarren
+gemini extensions install https://github.com/klarluft/gitwarren-app
+npx skills add klarluft/gitwarren-app                 # the note alone, for any agent
+```
+
+Cursor, Codex, VS Code and Kiro read the same repository from their plugin
+screens. See [Installing it as a plugin](#installing-it-as-a-plugin).
+
 Code review for your own git repositories, on your own machines. Your machines,
 your agents, no one else's server — and no account.
 
@@ -56,7 +70,9 @@ commit, which is exactly when review is most useful.
 Nothing is cached: every branch name, commit and diff on screen is read from git
 at the moment it is shown.
 
-Local AI agents get the same capabilities through an MCP server over stdio.
+Local AI agents get the same capabilities through an MCP server over stdio, and
+a plugin puts it into Claude Code, Codex, Cursor, VS Code and Gemini CLI in one
+line — see [Agent access (MCP)](#agent-access-mcp).
 
 ---
 
@@ -946,8 +962,51 @@ A path that does not resolve is left in the text as written and the comment
 saves anyway, on the same principle the composer already applies to humans: the
 comment is worth more than the link.
 
-### Pointing an agent at it
+### Installing it as a plugin
 
+The repository root is also a plugin, in three formats at once, so one address
+installs GitWarren into whichever agent a person uses:
+
+| Agent | How |
+| --- | --- |
+| Claude Code | `/plugin marketplace add klarluft/gitwarren-app`, then `/plugin install gitwarren@gitwarren` |
+| Codex, Cursor, VS Code, Kiro | The same repository, from each tool's plugin screen, through the shared [Agent Plugins](https://agent-plugins.org) manifest |
+| Gemini CLI | `gemini extensions install https://github.com/klarluft/gitwarren-app` |
+| Any agent, the note alone | `npx skills add klarluft/gitwarren-app` |
+
+What the plugin carries, beyond the server: `skills/gitwarren/SKILL.md`, the
+note that teaches the agent one habit — open a review when a task that changed
+code is done and hand over the link, read the review's comments before the next
+task, reply in the thread and resolve what was fixed — and the rules around it;
+`commands/gitwarren.md`, a `/gitwarren` command that opens the review on demand;
+and `agents/gitwarren-reviewer.md`, a reviewer that reads a change with git and
+leaves its findings as line comments in the review, attributed as
+machine-written, next to yours.
+
+**Which GitWarren answers.** The plugin carries no GitWarren of its own.
+Claude Code's entry runs `packaging/plugin/start.mjs`, which asks whether a
+GitWarren is *listening* on the machine. If one is, it runs the launcher that
+GitWarren wrote, so links open there. If not, it runs `npx gitwarren mcp
+--serve`: the published package, with the review page switched on, so a link
+the agent hands out opens even on a machine with nothing else installed. The
+other formats name that command directly. "Listening" rather than "installed",
+because an installed-but-closed app would leave the agent handing out dead
+links; the starter's header has the reasoning.
+
+`gitwarren mcp` is the server by name, and `--serve` is the page beside it: the
+same `--listen` a person gets from `gitwarren serve`, loopback and token-gated,
+for exactly as long as the agent keeps the server running. It defers to a
+running app or `serve` the way `serve` does, and it exits when the agent's pipe
+closes, so no page outlives the session that started it.
+
+The server is also listed in the [MCP registry](https://registry.modelcontextprotocol.io)
+as `io.github.klarluft/gitwarren`, from `server.json` at the repository root,
+published by the release workflow after the npm package. The directories that
+copy from the registry list it from there.
+
+### Pointing an agent at it by hand
+
+Without the plugin, or for a harness that only speaks MCP:
 **GitWarren shows you the exact configuration for your install** — open the
 *Agent access* page (the card on the home screen, or `g a`) and copy the prompt
 at the top of it. The browser shell has the same page, and on a machine with no

@@ -26,7 +26,7 @@
  */
 import { existsSync } from 'node:fs'
 import { getMcpLauncherPath } from '../core/mcp-launcher.js'
-import { agentConfigSnippets, agentSetupPrompt } from '../shared/agent-setup.js'
+import { PLUGIN_INSTALL, agentConfigSnippets, agentSetupPrompt } from '../shared/agent-setup.js'
 import { ensureLaunchers } from './launchers.js'
 
 const USAGE = `gitwarren agent-setup [--manual]
@@ -67,6 +67,15 @@ export function runAgentSetup(argv: readonly string[]): boolean {
       console.log(snippet.text.trimEnd())
     }
   }
+
+  // stderr, like every status line here, so `| pbcopy` still copies only the
+  // sentence. Said every time rather than only when the launcher is missing:
+  // the plugin is the better answer for a harness that has one, and a person
+  // who found this command may not know it exists.
+  console.error(
+    `\n[gitwarren] In Claude Code the plugin does this and teaches the agent when to review: ` +
+      PLUGIN_INSTALL.claudeCode.join(', then ')
+  )
 
   // Written after the prompt rather than before it, so the sentence on stdout
   // is the same whether or not this run had anything to write.
