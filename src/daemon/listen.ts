@@ -109,7 +109,7 @@ export function resolveWebRoot(): string | null {
  * daemon that named a different path from the app's would hand out an
  * instruction that works on one of them - hence `core/mcp-launcher.ts`.
  */
-function describeInstall(linkPort: number | null): AppInfo {
+function describeInstall(linkPort: number | null, servedFor?: 'agent'): AppInfo {
   // `describeMcpLaunch` rather than built here, because since M4.4 the same
   // answer goes out over `app.mcp` to a GUI on another machine looking at this
   // one's Agent Access page. The daemon does not write the launcher - M3.3's
@@ -125,7 +125,11 @@ function describeInstall(linkPort: number | null): AppInfo {
     dataDirectory: getDataDirectory(),
     databasePath: getDatabasePath(),
     linkPort,
-    mcp
+    mcp,
+    // Spread rather than assigned, so the field is absent - not `undefined` -
+    // in the JSON the other two servers send, which keeps their answers
+    // byte-for-byte what they were.
+    ...(servedFor === undefined ? {} : { servedFor })
   }
 }
 
@@ -191,6 +195,12 @@ export interface ListenHooks {
    * advice for a terminal nobody is sitting at.
    */
   brief?: boolean
+  /**
+   * Told to the page as `AppInfo.servedFor`, so it can say what this process
+   * cannot: that there is a GitWarren to install. `gitwarren mcp --serve` is
+   * the only caller that sets it.
+   */
+  servedFor?: 'agent'
 }
 
 /**
@@ -247,7 +257,7 @@ export function runListen(hooks: ListenHooks = {}): boolean {
     mount: '/',
     staticRoot: webRoot,
     token,
-    appInfo: () => describeInstall(linkPort),
+    appInfo: () => describeInstall(linkPort, hooks.servedFor),
     tailnet: tailnetGate
   })
 

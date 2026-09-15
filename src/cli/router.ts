@@ -229,7 +229,7 @@ function serveBesideMcp(): void {
     return
   }
 
-  if (!runDaemon(['--listen'], { brief: true })) {
+  if (!runDaemon(['--listen'], { brief: true, servedFor: 'agent' })) {
     // `runListen` said why on stderr and set an exit code for a `serve` that
     // could not start. This process is still the MCP server, and it has not
     // failed at that.

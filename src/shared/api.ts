@@ -240,6 +240,16 @@ export interface AppInfo {
   linkPort: number | null
   /** Everything an agent needs to be pointed at this install's MCP server. */
   mcp: McpLaunchInfo
+  /**
+   * Who this page is being served for, when that is worth telling the person.
+   *
+   * Set only by `gitwarren mcp --serve`: the page came up because an agent's
+   * plugin needed one for the links it hands out, not because anybody
+   * installed or ran GitWarren here, and that is the one reader for whom
+   * "there is also a desktop app" is news. Absent from the app and from a
+   * `gitwarren serve` somebody typed. See `renderer/components/desktop-app-hint.tsx`.
+   */
+  servedFor?: 'agent'
 }
 
 /**
