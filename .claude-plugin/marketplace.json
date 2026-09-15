@@ -11,7 +11,7 @@
       "name": "gitwarren",
       "source": "./",
       "description": "Code review on your own machine, for you and your coding agent. The agent opens a review of what it changed and hands you a link; you comment on lines; it replies and fixes. Nothing leaves your computer.",
-      "version": "0.1.11",
+      "version": "0.1.12",
       "author": {
         "name": "Klarluft B.V.",
         "email": "contact@klarluft.com",
