@@ -2,7 +2,7 @@
   "mcpServers": {
     "gitwarren": {
       "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/packaging/plugin/start.mjs"]
+      "args": ["${CLAUDE_PLUGIN_ROOT:-.}/packaging/plugin/start.mjs"]
     }
   }
 }
