@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "gitwarren": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "gitwarren", "mcp", "--serve"]
+    }
+  }
+}

@@ -129,20 +129,38 @@ function findMcpServer(script: string | null): string | null {
   return null
 }
 
+/**
+ * The script this process was started with, or null when it is one `node`
+ * alone could not run again - a `.ts` file under tsx. See the header.
+ */
+function resolveScript(): string | null {
+  const argv1 = process.argv[1]
+  if (argv1 === undefined) return null
+
+  try {
+    const resolved = realpathSync(argv1)
+    // TypeScript is not something `node` runs. See the header.
+    return /\.[cm]?ts$/i.test(resolved) ? null : resolved
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The MCP server bundle that belongs to this install, for `gitwarren mcp`.
+ *
+ * `describeSelf` answers the same question, and also insists on knowing where
+ * the migrations are - a launcher written without them starts nothing, so it
+ * throws. `gitwarren mcp` is about to load the server in this very process,
+ * where the migrations are resolved the ordinary way when the database opens,
+ * so it asks only for the path.
+ */
+export function locateMcpServer(): string | null {
+  return findMcpServer(resolveScript())
+}
+
 /** What this process would have to be told to start itself again. */
 export function describeSelf(): SelfDescription {
-  const argv1 = process.argv[1]
-  let script: string | null = null
-
-  if (argv1 !== undefined) {
-    try {
-      const resolved = realpathSync(argv1)
-      // TypeScript is not something `node` runs. See the header.
-      script = /\.[cm]?ts$/i.test(resolved) ? null : resolved
-    } catch {
-      script = null
-    }
-  }
-
+  const script = resolveScript()
   return { node: realpathSync(process.execPath), script, mcpServer: findMcpServer(script), env: relaunchEnv() }
 }

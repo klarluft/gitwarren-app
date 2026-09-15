@@ -50,6 +50,7 @@ test('--help names every subcommand, uninstall included, grouped by what a perso
     'gitwarren service uninstall',
     'gitwarren service status',
     'gitwarren agent-setup',
+    'gitwarren mcp',
     'gitwarren --version'
   ]) {
     assert.ok(out.includes(command), `usage should mention \`${command}\``)
@@ -74,6 +75,31 @@ test('serve --help is its own usage, and does not start a server', () => {
   assert.ok(out.includes('--open'))
   assert.ok(out.includes('--stdio'))
   assert.ok(out.includes('gitwarren-mcp'))
+})
+
+test('mcp --help is its own usage, and does not start a server', () => {
+  const { ok, out } = capture(['mcp', '--help'])
+
+  assert.equal(ok, true)
+  assert.ok(out.includes('npx gitwarren mcp'))
+  assert.ok(out.includes('gitwarren-mcp'))
+  assert.ok(out.includes('--serve'))
+})
+
+test('mcp takes nothing but --serve: anything else is the usage on stderr, not a server', () => {
+  // A wrong invocation must never reach the server - it would take over stdout
+  // and this test would be talking MCP to a test runner. `--serve` beside an
+  // unknown flag is still wrong: the unknown flag is the problem.
+  for (const argv of [
+    ['mcp', '--listen'],
+    ['mcp', '--serve', '--listen']
+  ]) {
+    const { ok, out, err } = capture(argv)
+
+    assert.equal(ok, false, `${argv.join(' ')} should be refused`)
+    assert.equal(out, '')
+    assert.ok(err.includes('gitwarren mcp'))
+  }
 })
 
 test('a checkout cannot have launchers written, and says so instead of throwing', () => {

@@ -18,7 +18,10 @@
  * those changes, and that is what the comment tools carry.
  *
  * No authentication: this is a local, single-user app, the transport is a pipe
- * owned by the agent the user launched, and nothing listens.
+ * owned by the agent the user launched, and nothing listens. (Since M7 the
+ * *process* hosting this may: `gitwarren mcp --serve` in `cli/router.ts` runs
+ * the review page beside this server for a plugin's agent. That is the daemon's
+ * listener with the daemon's token, and this file is unchanged by it.)
  *
  * Since M6 it does *dial* one thing, and the distinction is worth keeping: after
  * a write, it opens a loopback connection to whichever process owns this data
