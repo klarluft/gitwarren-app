@@ -1255,6 +1255,11 @@ installers, and uploads them plus the manifests to a GitHub release for the
 current tag. The release is created as a **draft** — publish it in the GitHub UI
 when you are ready, and that is the moment clients begin to see the update.
 
+The same workflow publishes the npm package, and after it the server's entry in
+the [MCP registry](https://registry.modelcontextprotocol.io) from `server.json`
+at the repository root, for stable tags only. Both use the job's OIDC token; no
+secret is involved.
+
 Publishing a *stable* release also fans out to two other places, both on the
 `release: published` event: `deploy-site.yml` rebuilds gitwarren.com so its
 download buttons point at the new assets, and `homebrew-tap.yml` asks
