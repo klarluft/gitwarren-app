@@ -19,6 +19,7 @@ import { useRef } from 'react'
 // costs less than the exception would.
 import logo from './assets/logo.png?inline'
 import { ConnectionBanner } from './components/connection-banner'
+import { DesktopAppHint } from './components/desktop-app-hint'
 import { ScrollToTop } from './components/scroll-to-top'
 import { Kbd } from './components/ui/kbd'
 import { TooltipProvider } from './components/ui/tooltip'
@@ -98,6 +99,7 @@ export function App() {
                     machine. See `connection-banner.tsx`. */}
                 <ConnectionBanner />
                 <UpdateBanner />
+                <DesktopAppHint />
               </div>
 
               {/* Above every screen rather than on each of them: whichever one
