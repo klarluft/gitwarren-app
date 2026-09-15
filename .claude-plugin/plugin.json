@@ -1,0 +1,15 @@
+{
+  "name": "gitwarren",
+  "displayName": "GitWarren",
+  "description": "Code review on your own machine, for you and your coding agent. The agent opens a review of what it changed and hands you a link; you comment on lines; it replies and fixes. Nothing leaves your computer.",
+  "version": "0.1.10",
+  "author": {
+    "name": "Klarluft B.V.",
+    "email": "contact@klarluft.com",
+    "url": "https://klarluft.com"
+  },
+  "homepage": "https://gitwarren.com",
+  "repository": "https://github.com/klarluft/gitwarren-app",
+  "license": "GPL-3.0-or-later",
+  "keywords": ["code-review", "git", "diff", "mcp", "local-first"]
+}
