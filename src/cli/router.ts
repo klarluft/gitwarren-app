@@ -23,6 +23,7 @@
  * `--stdio` stays the thing a machine asks for by name - which is what M4
  * spawns over ssh.
  */
+import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { readLiveDaemonRuntime } from '../core/daemon-runtime.js'
 import { runDaemon } from '../daemon/daemon.js'
@@ -177,6 +178,8 @@ function runMcp(argv: readonly string[]): boolean {
     return false
   }
 
+  if (!nativeAddonLoads(server)) return false
+
   // The entry point installed SIGINT and SIGTERM handlers for the commands that
   // hold a listener. The server installs its own, which close its database, and
   // whichever was registered first would exit the process before the other ran.
@@ -192,6 +195,79 @@ function runMcp(argv: readonly string[]): boolean {
   // so that its `require('better-sqlite3')` resolves from where it lives.
   createRequire(server)(server)
   return true
+}
+
+/** What better-sqlite3's prebuilt binary is built against. */
+const NODE_API_NEEDED = 10
+
+/** The same requirement, in the words a person can act on. */
+const NODE_NEEDED = 'Node 22.14 or newer, or Node 24'
+
+/**
+ * Does this Node run the SQLite addon the server is about to load?
+ *
+ * `better-sqlite3` ships one prebuilt binary per platform, built against
+ * Node-API 10, and a Node that is too old for it does not throw: the binary
+ * loads and segfaults the first time a database is opened, which for the MCP
+ * server is the first tool call that reads anything. Nothing in this process
+ * can catch that, and what the agent's user sees is "server failed to
+ * connect", which is where the hour goes. Found on the first machine the
+ * plugin was tried on, whose shell's default Node was 22.12 - Node-API 9 -
+ * while the repository's `.nvmrc` said 24.
+ *
+ * Two checks. The Node-API version first, because it is instant and names the
+ * cause exactly. Then the addon is opened once in a child process, where any
+ * other crash - a build from source under one Node run by another, a broken
+ * download - is an exit signal this process can read and explain. The child
+ * does what the server's first query does: open a database and run one
+ * statement. About a tenth of a second, paid on every start, bought with the
+ * diagnosis it replaces.
+ *
+ * Resolved from the server bundle's own location, so it is the copy the
+ * bundle would load and not one a working directory happens to have.
+ */
+function nativeAddonLoads(server: string): boolean {
+  if (Number(process.versions.napi) < NODE_API_NEEDED) {
+    console.error(
+      `[gitwarren] Node ${process.versions.node} is too old for GitWarren's SQLite module, ` +
+        `which needs ${NODE_NEEDED} (Node-API ${NODE_API_NEEDED}; this one has ` +
+        `${process.versions.napi}). Run this with a newer Node.`
+    )
+    // 1, not the entry point's 2: this is a command that ran and failed, and
+    // has said why, not an argv that named nothing.
+    process.exitCode = 1
+    return false
+  }
+
+  let addon: string
+  try {
+    addon = createRequire(server).resolve('better-sqlite3')
+  } catch {
+    // Not there at all is a different failure, and one the bundle reports in
+    // its own words the moment it loads. Let it.
+    return true
+  }
+
+  const probe = spawnSync(
+    process.execPath,
+    ['-e', "new (require(process.argv[1]))(':memory:').prepare('select 1').get()", addon],
+    { stdio: ['ignore', 'ignore', 'pipe'], timeout: 10_000, encoding: 'utf8' }
+  )
+  if (probe.status === 0) return true
+
+  const how = probe.signal
+    ? `crashed with ${probe.signal}`
+    : probe.error
+      ? `could not be started: ${probe.error.message}`
+      : `exited with ${probe.status}: ${probe.stderr.trim().split('\n').pop() ?? ''}`
+  console.error(
+    `[gitwarren] the SQLite module at ${addon} ${how} under Node ${process.versions.node}. ` +
+      `GitWarren needs ${NODE_NEEDED}. If this Node is newer than that, the install itself is ` +
+      `broken: if it came from npx, remove its gitwarren entry under the npm cache's _npx ` +
+      `directory and run again.`
+  )
+  process.exitCode = 1
+  return false
 }
 
 /**

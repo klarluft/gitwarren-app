@@ -12,6 +12,6 @@
   "type": "module",
   "bin": { "gitwarren": "bin/gitwarren.mjs" },
   "files": ["bin", "lib", "drizzle", "web", "README.md"],
-  "engines": { "node": ">=22" },
+  "engines": { "node": ">=22.14" },
   "dependencies": { "better-sqlite3": "^13.0.3" }
 }
