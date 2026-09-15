@@ -184,6 +184,13 @@ function whereTheOwnerIs(owner: DaemonRuntime): string {
 export interface ListenHooks {
   /** Called once, with the URL that was just printed. */
   onListening?: (url: string) => void
+  /**
+   * Print one line naming the URL instead of the three sentences for a person
+   * who just typed `gitwarren serve`. Set by `gitwarren mcp --serve`, where the
+   * reader is an agent's log: "press Ctrl-C" and "use `service install`" are
+   * advice for a terminal nobody is sitting at.
+   */
+  brief?: boolean
 }
 
 /**
@@ -286,6 +293,11 @@ export function runListen(hooks: ListenHooks = {}): boolean {
     // like that, how to stop this, and that there is a way not to have to run
     // it by hand. Each was a question in somebody's first ten minutes.
     const url = `http://${LINK_SERVER_HOST}:${LINK_SERVER_PORT}/?${TOKEN_PARAM}=${token}`
+    if (hooks.brief) {
+      console.error(`[gitwarren] serving the review page at ${url}`)
+      hooks.onListening?.(url)
+      return
+    }
     console.error(
       `[gitwarren] GitWarren is running at\n\n` +
         `    ${url}\n\n` +

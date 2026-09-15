@@ -24,7 +24,9 @@
  * spawns over ssh.
  */
 import { createRequire } from 'node:module'
+import { readLiveDaemonRuntime } from '../core/daemon-runtime.js'
 import { runDaemon } from '../daemon/daemon.js'
+import { shutdownListen } from '../daemon/listen.js'
 import { runAgentSetup } from './agent-setup.js'
 import { openInBrowser } from './browser.js'
 import { locateMcpServer } from './install.js'
@@ -59,7 +61,7 @@ Keep it running
 Let a coding agent in
   gitwarren agent-setup          print the one sentence to give an agent so it can
                                  reach this GitWarren over MCP
-  gitwarren mcp                  run the MCP server itself, on stdin/stdout - what
+  gitwarren mcp [--serve]        run the MCP server itself, on stdin/stdout - what
                                  \`npx gitwarren mcp\` in an agent's config starts
 
   gitwarren serve --stdio        answer GitWarren's protocol on stdin/stdout (this
@@ -89,7 +91,7 @@ Serving also writes ~/.gitwarren/bin/gitwarren-mcp, the command a coding agent
 starts the MCP server with - see \`gitwarren agent-setup\`.
 `
 
-const MCP_USAGE = `gitwarren mcp
+const MCP_USAGE = `gitwarren mcp [--serve]
 
 Runs GitWarren's MCP server, speaking MCP over stdin and stdout. This is for an
 agent to run, not a person: it is the same server ~/.gitwarren/bin/gitwarren-mcp
@@ -98,6 +100,12 @@ on a machine where GitWarren was never installed.
 
 It reads the same SQLite file the app and \`gitwarren serve\` do, so reviews an
 agent makes this way are there the moment a person opens GitWarren to look.
+
+  --serve   also serve the review page on 127.0.0.1 for as long as the agent
+            keeps this running, unless a GitWarren is already running on this
+            machine - then links open there and this serves nothing. This is
+            what a plugin asks for, so the links its agent hands out open on a
+            machine with nothing else installed.
 `
 
 /**
@@ -155,7 +163,7 @@ function runMcp(argv: readonly string[]): boolean {
     console.log(MCP_USAGE)
     return true
   }
-  if (argv.length > 0) {
+  if (argv.some((argument) => argument !== '--serve')) {
     console.error(MCP_USAGE)
     return false
   }
@@ -172,15 +180,81 @@ function runMcp(argv: readonly string[]): boolean {
   // The entry point installed SIGINT and SIGTERM handlers for the commands that
   // hold a listener. The server installs its own, which close its database, and
   // whichever was registered first would exit the process before the other ran.
-  // The server is the whole process from here on, so it gets to be the one.
+  // The server is the whole process from here on, so it gets to be the one -
+  // with the page's release registered first, below, when there is a page.
   process.removeAllListeners('SIGINT')
   process.removeAllListeners('SIGTERM')
+
+  if (argv.includes('--serve')) serveBesideMcp()
 
   // stdout belongs to the protocol from this line on. Nothing above has printed
   // to it, and nothing after it may. `createRequire` from the bundle's own path
   // so that its `require('better-sqlite3')` resolves from where it lives.
   createRequire(server)(server)
   return true
+}
+
+/**
+ * `--serve`: the review page, in the same process as the MCP server.
+ *
+ * A plugin's agent hands the user a link the moment a review exists, and on a
+ * machine with nothing else installed that link has nothing to open. The rule
+ * that a link may never be dead while the agent is connected is what this
+ * buys: the page lives exactly as long as the MCP server, which lives exactly
+ * as long as the agent's session, so the two cannot disagree about whether
+ * GitWarren is "running".
+ *
+ * It is the same `--listen` a person gets from `gitwarren serve`, loopback only
+ * and behind the same per-launch token, and it defers the same way: a data
+ * directory has one owner, and if the app or a `serve` already holds it, links
+ * open there and this serves nothing. That check is made here rather than left
+ * to `runListen` because its refusal is an exit code, and for this caller an
+ * owner is the good case rather than a failure.
+ *
+ * Every other way of not serving - no web build next to this bundle, a port
+ * held by something that is not GitWarren - is a sentence on stderr and an MCP
+ * server that runs regardless. The page is the extra; the agent's tools are
+ * the point.
+ *
+ * `gitwarren serve` writes the launchers and opens a browser once it is up.
+ * Neither happens here, for the reasons `runMcp` gives.
+ */
+function serveBesideMcp(): void {
+  const owner = readLiveDaemonRuntime()
+  if (owner) {
+    console.error(
+      `[gitwarren] GitWarren is already running on this machine as ` +
+        `${owner.owner === 'gui' ? 'the desktop app' : 'a server'}; links will open there.`
+    )
+    return
+  }
+
+  if (!runDaemon(['--listen'], { brief: true })) {
+    // `runListen` said why on stderr and set an exit code for a `serve` that
+    // could not start. This process is still the MCP server, and it has not
+    // failed at that.
+    process.exitCode = undefined
+    console.error(
+      '[gitwarren] the review page could not be served, so links will not open until a ' +
+        'GitWarren is started on this machine. The MCP server is running regardless.'
+    )
+    return
+  }
+
+  // Registered before the server's own handlers, so the port, the token and
+  // the runtime file are released before they exit the process. Registration
+  // order is execution order.
+  const release = (): void => shutdownListen()
+  process.on('SIGINT', release)
+  process.on('SIGTERM', release)
+
+  // On its own, the MCP server ends when its stdin does only because nothing
+  // else keeps the event loop alive. A listening socket would, and a page that
+  // outlives the agent that started it is a process the user never asked for.
+  process.stdin.once('end', () => {
+    shutdownListen()
+    process.exit(0)
+  })
 }
 
 /**

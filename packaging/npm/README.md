@@ -67,6 +67,12 @@ entry names, and it is what makes either work before you have decided to keep
 GitWarren. It writes no launcher and asks for no login item; it reads the same
 database, so the reviews are there when you do.
 
+`npx gitwarren mcp --serve` also serves the review page, on loopback and for as
+long as the agent keeps the server running, so the links the agent hands out
+open even on a machine with nothing else installed. If GitWarren is already
+running, as the app or as `gitwarren serve`, it serves nothing and the links
+open there instead.
+
 ## Where your data is
 
 One SQLite database in the usual place for your platform —
