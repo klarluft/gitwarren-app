@@ -13,7 +13,7 @@ npx gitwarren serve --open
 
 That serves the review UI on `127.0.0.1:41427`, prints a URL carrying a token
 minted for that launch, and opens it. Add a repository, pick two refs, and
-review the diff. Ctrl-C stops it. Needs Node 22 or newer; on a machine without
+review the diff. Ctrl-C stops it. Needs Node 22.14 or newer; on a machine without
 Node, the Homebrew formula and the install script in the
 [app repository](https://github.com/klarluft/gitwarren-app#the-gitwarren-command-line)
 bring their own.

@@ -47,6 +47,21 @@
  * than escape. `scripts/run-tests.mjs` resolves `tsx` the same way for the same
  * reason. The name is the fallback, with a shell, for a Node installed without
  * its npm.
+ *
+ * ## The Node on the PATH has to be new enough
+ *
+ * `better-sqlite3` ships one prebuilt binary per platform, built against
+ * Node-API 10. Under a Node with Node-API 9 - any 22.x before 22.14 - it loads
+ * fine and segfaults the first time a database is opened, and what Claude
+ * Code shows for that is "server failed to connect" and nothing more. This was
+ * found on the first machine the plugin was tried on: a shell whose default
+ * Node was 22.12, on a repository whose `.nvmrc` said 24.
+ *
+ * Claude Code runs this with whatever `node` is first on the PATH, and this
+ * file cannot pick a different one for it. What it can do is say so, before
+ * spawning anything, in a sentence that names the version it found and the
+ * one it needs. The check is on Node-API rather than on a Node version,
+ * because that is the thing the binary is actually built against.
  */
 import { spawn } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
@@ -93,6 +108,12 @@ function ownerIsListening() {
   }
 }
 
+/** What the SQLite prebuild is built against. See the header. */
+const NODE_API_NEEDED = 10
+
+/** The Node line people are likeliest to be on, and its first good release. */
+const NODE_NEEDED = 'Node 22.14 or newer, or Node 24'
+
 /** The `npx` that belongs to this Node, as a script this Node can run. */
 function npxCli() {
   const bin = dirname(process.execPath)
@@ -114,6 +135,15 @@ function run(command, args, options = {}) {
     process.exit(1)
   })
   child.on('exit', (code, signal) => {
+    if (signal === 'SIGSEGV' || code === 139) {
+      // Said here because the process that crashed cannot say anything, and
+      // "server failed to connect" is all the agent would otherwise show.
+      console.error(
+        `[gitwarren-plugin] GitWarren crashed on start under Node ${process.versions.node}. ` +
+          `Its SQLite module needs ${NODE_NEEDED}; if this Node is newer than that, ` +
+          `the npx cache may hold a broken install - remove its gitwarren entry and start again.`
+      )
+    }
     process.exit(code ?? (signal ? 1 : 0))
   })
 }
@@ -126,6 +156,19 @@ if (ownerIsListening() && existsSync(launcher)) {
   // survive a profile directory with a space in it.
   run(WINDOWS ? `"${launcher}"` : launcher, [], { shell: WINDOWS })
 } else {
+  if (Number(process.versions.napi) < NODE_API_NEEDED) {
+    // Before spawning anything: npx would download the package, and the
+    // server would then crash on its first database read with no words.
+    console.error(
+      `[gitwarren-plugin] Node ${process.versions.node} is too old for GitWarren's SQLite ` +
+        `module, which needs ${NODE_NEEDED} (Node-API ${NODE_API_NEEDED}; this one has ` +
+        `${process.versions.napi}). Claude Code starts this with the first \`node\` on your ` +
+        `PATH - make a newer one the default, for example \`fnm default 24\` or ` +
+        `\`nvm alias default 24\`, then restart Claude Code.`
+    )
+    process.exit(1)
+  }
+
   const args = ['-y', 'gitwarren', 'mcp', '--serve']
   const cli = npxCli()
   if (cli) {

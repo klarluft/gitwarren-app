@@ -16,7 +16,7 @@ or one with no screen at all:
 ```bash
 brew install klarluft/tap/gitwarren-cli               # macOS and Linux, brings its own Node
 curl -fsSL https://gitwarren.com/install.sh | sh      # macOS and Linux, no Homebrew needed
-npx gitwarren serve                                   # anywhere Node 22+ is, including Windows
+npx gitwarren serve                                   # anywhere Node 22.14+ is, including Windows
 ```
 
 Then `gitwarren serve --open`. See
@@ -993,6 +993,18 @@ other formats name that command directly. "Listening" rather than "installed",
 because an installed-but-closed app would leave the agent handing out dead
 links; the starter's header has the reasoning.
 
+**The Node on the PATH has to be 22.14 or newer.** `better-sqlite3` ships a
+prebuilt binary built against Node-API 10, and under an older Node - any 22.x
+before 22.14, which has Node-API 9 - it loads and then segfaults on the first
+database read, which an agent reports as "server failed to connect" and
+nothing more. Claude Code runs the plugin with the first `node` on the PATH,
+so a shell whose default Node is old fails even on a machine that also has a
+new one. The starter checks the Node-API version before spawning anything and
+says which Node it found and which it needs; `gitwarren mcp` checks the same
+and then opens the addon once in a child process before loading the server, so
+any other crash is a sentence rather than a silence. The npm package's
+`engines` says the same minimum.
+
 `gitwarren mcp` is the server by name, and `--serve` is the page beside it: the
 same `--listen` a person gets from `gitwarren serve`, loopback and token-gated,
 for exactly as long as the agent keeps the server running. It defers to a
@@ -1139,7 +1151,7 @@ All three write the same two files, `~/.gitwarren/bin/gitwarren` and
 | --- | --- |
 | `brew install klarluft/tap/gitwarren-cli` | Pours the self-contained tarball. Brings its own Node, so nothing on the machine can upgrade out from under the native addon. macOS and Linux. |
 | `curl -fsSL https://gitwarren.com/install.sh \| sh` | The same tarball, without Homebrew — for a Linux box or a Mac with nothing on it. Unpacks into `~/.gitwarren/daemon/<version>/` and writes `~/.gitwarren/bin/gitwarren`, which is the layout the app itself produces when it installs onto a host over SSH, so either can upgrade what the other installed. Add `~/.gitwarren/bin` to `PATH`. `packaging/install.sh` is the script; `GITWARREN_VERSION` pins a release. |
-| `npx gitwarren` | Uses the Node you already have (22 or newer); `better-sqlite3` arrives as an ordinary dependency. The Windows answer, and about 700 KB. |
+| `npx gitwarren` | Uses the Node you already have (22.14 or newer; the SQLite prebuild needs Node-API 10); `better-sqlite3` arrives as an ordinary dependency. The Windows answer, and about 700 KB. |
 | The release tarball | `gitwarren-daemon-<v>-<target>.tar.gz`, unpacked anywhere and run as `bin/gitwarren`. What the two rows above and the SSH installer all use. |
 
 The formula is `gitwarren-cli` and the cask stays `gitwarren`. The tokens differ
