@@ -23,9 +23,11 @@
  * `--stdio` stays the thing a machine asks for by name - which is what M4
  * spawns over ssh.
  */
+import { createRequire } from 'node:module'
 import { runDaemon } from '../daemon/daemon.js'
 import { runAgentSetup } from './agent-setup.js'
 import { openInBrowser } from './browser.js'
+import { locateMcpServer } from './install.js'
 import { ensureLaunchers } from './launchers.js'
 import { runOpen } from './open.js'
 import { runService } from './service.js'
@@ -57,6 +59,8 @@ Keep it running
 Let a coding agent in
   gitwarren agent-setup          print the one sentence to give an agent so it can
                                  reach this GitWarren over MCP
+  gitwarren mcp                  run the MCP server itself, on stdin/stdout - what
+                                 \`npx gitwarren mcp\` in an agent's config starts
 
   gitwarren serve --stdio        answer GitWarren's protocol on stdin/stdout (this
                                  is what another machine's GitWarren spawns)
@@ -83,6 +87,17 @@ a URL that carries this launch's token. Ctrl-C stops it.
 
 Serving also writes ~/.gitwarren/bin/gitwarren-mcp, the command a coding agent
 starts the MCP server with - see \`gitwarren agent-setup\`.
+`
+
+const MCP_USAGE = `gitwarren mcp
+
+Runs GitWarren's MCP server, speaking MCP over stdin and stdout. This is for an
+agent to run, not a person: it is the same server ~/.gitwarren/bin/gitwarren-mcp
+starts, reachable by name so that an agent's config can say \`npx gitwarren mcp\`
+on a machine where GitWarren was never installed.
+
+It reads the same SQLite file the app and \`gitwarren serve\` do, so reviews an
+agent makes this way are there the moment a person opens GitWarren to look.
 `
 
 /**
@@ -116,6 +131,59 @@ function afterListening(url: string, open: boolean): void {
 }
 
 /**
+ * `gitwarren mcp` - the MCP server, started by name.
+ *
+ * `~/.gitwarren/bin/gitwarren-mcp` is still what an installed GitWarren tells
+ * an agent to run, and this does not replace it. What it adds is a way to start
+ * the same server from a package that was never installed: `npx gitwarren mcp`
+ * works on a machine with nothing of GitWarren on it, which is what a Claude
+ * Code plugin needs and what a registry listing can name.
+ *
+ * The server is loaded into this process rather than spawned. It owns stdin and
+ * stdout from the moment it loads - stdout is the protocol - and a child would
+ * be a second process for the agent's process manager to stop, one it does not
+ * know about. A `require` is the nearest thing Node has to the `exec` the shell
+ * launcher does.
+ *
+ * Nothing is written to `~/.gitwarren/bin` on the way. `serve` and
+ * `agent-setup` write the launchers because a person ran them; this is run by
+ * a program, often out of an npx cache that may be gone tomorrow, and a
+ * launcher pointing there would be worse than none.
+ */
+function runMcp(argv: readonly string[]): boolean {
+  if (argv.includes('--help') || argv.includes('-h')) {
+    console.log(MCP_USAGE)
+    return true
+  }
+  if (argv.length > 0) {
+    console.error(MCP_USAGE)
+    return false
+  }
+
+  const server = locateMcpServer()
+  if (!server) {
+    console.error(
+      '[gitwarren] this install has no MCP server bundle next to it. From a checkout, run ' +
+        '`npm run build:mcp` first, or use `npm run mcp:dev`.'
+    )
+    return false
+  }
+
+  // The entry point installed SIGINT and SIGTERM handlers for the commands that
+  // hold a listener. The server installs its own, which close its database, and
+  // whichever was registered first would exit the process before the other ran.
+  // The server is the whole process from here on, so it gets to be the one.
+  process.removeAllListeners('SIGINT')
+  process.removeAllListeners('SIGTERM')
+
+  // stdout belongs to the protocol from this line on. Nothing above has printed
+  // to it, and nothing after it may. `createRequire` from the bundle's own path
+  // so that its `require('better-sqlite3')` resolves from where it lives.
+  createRequire(server)(server)
+  return true
+}
+
+/**
  * Run one command. False means "argv asked for something that is not a
  * command", which the entry point turns into exit 2 - a caller can act on that,
  * where a command that ran and failed has already set `exitCode` and said
@@ -143,6 +211,9 @@ export function runCli(argv: readonly string[]): boolean {
 
     case 'agent-setup':
       return runAgentSetup(rest)
+
+    case 'mcp':
+      return runMcp(rest)
 
     case '--version':
     case '-v':
