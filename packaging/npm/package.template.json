@@ -8,6 +8,7 @@
   "bugs": "https://github.com/klarluft/gitwarren-app/issues",
   "license": "GPL-3.0-or-later",
   "author": { "name": "Klarluft B.V.", "email": "contact@klarluft.com", "url": "https://klarluft.com" },
+  "mcpName": "io.github.klarluft/gitwarren",
   "type": "module",
   "bin": { "gitwarren": "bin/gitwarren.mjs" },
   "files": ["bin", "lib", "drizzle", "web", "README.md"],

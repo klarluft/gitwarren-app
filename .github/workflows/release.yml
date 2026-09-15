@@ -430,6 +430,34 @@ jobs:
             *)   npm publish ./out/npm ;;
           esac
 
+      # The MCP registry entry, right after the package it points at. The
+      # registry proves ownership two ways at once: the `mcpName` inside the
+      # package npm has just published, and the OIDC token this job already
+      # holds for npm, which the registry accepts for io.github.klarluft/*.
+      # No secret is involved, for the same reason none is above.
+      #
+      # `server.json` at the repository root is the entry; its two version
+      # fields are kept in step with package.json by the `version` script, so
+      # what goes out names the package version that exists.
+      #
+      # Stable tags only. A prerelease is `next` on npm, and the registry has
+      # no such channel: it would list the beta as the server's version.
+      #
+      # The retry is for npm's propagation delay: the registry fetches the
+      # package's manifest to check `mcpName`, and for a minute after
+      # `npm publish` the registry mirror it reads may not have it yet.
+      - name: Publish to the MCP registry
+        if: ${{ !contains(github.event.inputs.tag || github.ref_name, '-') }}
+        run: |
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+          ./mcp-publisher login github-oidc
+          for attempt in 1 2 3 4 5 6; do
+            if ./mcp-publisher publish; then exit 0; fi
+            echo "registry publish attempt $attempt failed; waiting for npm to propagate"
+            sleep 30
+          done
+          exit 1
+
       - name: Upload as a workflow artifact
         if: always()
         uses: actions/upload-artifact@v7

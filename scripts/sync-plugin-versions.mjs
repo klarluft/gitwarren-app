@@ -44,7 +44,18 @@ const manifests = [
     set: (m) => (m.plugins[0].version = version)
   },
   { file: 'plugin.json', get: (m) => m.version, set: (m) => (m.version = version) },
-  { file: 'gemini-extension.json', get: (m) => m.version, set: (m) => (m.version = version) }
+  { file: 'gemini-extension.json', get: (m) => m.version, set: (m) => (m.version = version) },
+  // The MCP registry entry states the version twice: once for the server and
+  // once for the npm package it points at, which must be the same package
+  // version the release workflow has just published.
+  {
+    file: 'server.json',
+    get: (m) => (m.version === m.packages[0].version ? m.version : `${m.version}/${m.packages[0].version}`),
+    set: (m) => {
+      m.version = version
+      m.packages[0].version = version
+    }
+  }
 ]
 
 const check = process.argv.includes('--check')
