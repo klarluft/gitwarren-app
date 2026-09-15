@@ -48,6 +48,24 @@
  * reason. The name is the fallback, with a shell, for a Node installed without
  * its npm.
  *
+ * ## npx must not mistake the user's project for the package
+ *
+ * Claude Code starts this with the user's project as the working directory,
+ * and `npx gitwarren` in a directory whose package.json is *named* gitwarren
+ * resolves to that project rather than to the registry - which has no
+ * executable, so npx stops with "could not determine executable to run".
+ * The one project where that is certain is this repository, which is also
+ * the one its maintainers use the plugin on. Found there, on the second
+ * attempt to use the plugin.
+ *
+ * Two things, either of which is enough. The package is named as
+ * `gitwarren@latest`, which npm reads as a registry request even beside a
+ * local project of that name - a bare name or a pinned version does not.
+ * And npx runs from the system's temporary directory rather than the
+ * project, so there is no local project for it to consider at all. The server
+ * does not care where it runs: the database is at a fixed path, and the
+ * repositories an agent adds are absolute paths.
+ *
  * ## The Node on the PATH has to be new enough
  *
  * `better-sqlite3` ships one prebuilt binary per platform, built against
@@ -65,7 +83,7 @@
  */
 import { spawn } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
 const WINDOWS = process.platform === 'win32'
@@ -169,11 +187,14 @@ if (ownerIsListening() && existsSync(launcher)) {
     process.exit(1)
   }
 
-  const args = ['-y', 'gitwarren', 'mcp', '--serve']
+  const args = ['-y', 'gitwarren@latest', 'mcp', '--serve']
+  // See the header: away from the project, so npx cannot mistake it for the
+  // package.
+  const cwd = tmpdir()
   const cli = npxCli()
   if (cli) {
-    run(process.execPath, [cli, ...args])
+    run(process.execPath, [cli, ...args], { cwd })
   } else {
-    run(WINDOWS ? 'npx.cmd' : 'npx', args, { shell: WINDOWS })
+    run(WINDOWS ? 'npx.cmd' : 'npx', args, { shell: WINDOWS, cwd })
   }
 }

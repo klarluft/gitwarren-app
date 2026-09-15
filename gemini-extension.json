@@ -7,7 +7,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "gitwarren",
+        "gitwarren@latest",
         "mcp",
         "--serve"
       ]
