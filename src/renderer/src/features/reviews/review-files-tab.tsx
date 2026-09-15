@@ -181,6 +181,55 @@ function useMeasuredHeight(): [(node: HTMLDivElement | null) => void, number] {
 const STEP_CHAIN_MS = 800
 
 /**
+ * How long a scroll keeps correcting itself while the page around it settles.
+ *
+ * About a fifth of a second, which is several times longer than the couple of
+ * frames the fold below actually takes - the margin is there for a machine
+ * under load, and costs nothing on one that is not: re-aiming at a card that
+ * has not moved scrolls it to where it already is.
+ */
+const SETTLE_FRAMES = 12
+
+/**
+ * Bring a file's card to the top of the scroller, and keep it there while the
+ * page finishes rearranging itself underneath.
+ *
+ * Ticking a file off folds it shut, and the fold lands a render or two after
+ * the click: the mark is written optimistically, the card hears about it, and
+ * only then does a screenful of diff leave the page. `scrollTop` does not move
+ * when content above it disappears, so a scroll performed on the click aims at
+ * where the next file was *before* all that height went away and the reader is
+ * left as far down the diff as the folded file was tall. That is the whole bug
+ * this exists to fix, and it is why the scroll is re-applied across a handful
+ * of frames rather than performed once.
+ *
+ * Instant rather than smooth, deliberately. An animation aimed at a target that
+ * is still moving is the jitter this is here to remove; landing immediately
+ * also means the layout tells the truth about which file is being read the
+ * moment the next key is pressed. GitHub's own viewed-file jump is instant too.
+ */
+function useSettledScroll(): (id: string) => void {
+  const frame = useRef(0)
+
+  useEffect(() => () => cancelAnimationFrame(frame.current), [])
+
+  return useCallback((id: string) => {
+    cancelAnimationFrame(frame.current)
+    let frames = 0
+
+    const aim = (): void => {
+      // `scroll-mt` on the card is what holds it clear of the sticky find bar,
+      // so `scrollIntoView` applies the offset rather than arithmetic here.
+      document.getElementById(id)?.scrollIntoView({ block: 'start' })
+      frames += 1
+      if (frames < SETTLE_FRAMES) frame.current = requestAnimationFrame(aim)
+    }
+
+    frame.current = requestAnimationFrame(aim)
+  }, [])
+}
+
+/**
  * Place every line comment against the diff that is actually on screen.
  *
  * This runs here rather than in the main process on purpose. The reviewer can
@@ -500,14 +549,45 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
     return stale
   }, [digestByPath, reviewedDigests])
 
+  /**
+   * The file a step or a tick was last aimed at, and when.
+   *
+   * Declared here because both of the things that move the reader through the
+   * diff - stepping with `[` and `]`, and ticking a file off - have to agree
+   * about where the reader is; see `STEP_CHAIN_MS`.
+   */
+  const lastStep = useRef<{ index: number; at: number } | null>(null)
+
+  const scrollToSettled = useSettledScroll()
+
   const markReviewed = useCallback(
     (path: string, next: boolean): void => {
       const digest = digestByPath.get(path)
       // A file that is not in this diff cannot be marked against it.
       if (digest === undefined) return
       void setReviewed(path, next ? digest : null)
+
+      // Ticking a file off folds it shut, and the fold takes its height out
+      // from under the reader - so the mark cannot just be written and left.
+      // The top of the next file is where they were going anyway, and it is
+      // where the same gesture lands on GitHub.
+      //
+      // Clearing a mark gets nothing: the card unfolds downwards from a header
+      // the reader is already looking at, so nothing moves out from under them.
+      if (!next) return
+
+      const index = paths.indexOf(path)
+      if (index === -1) return
+      // The last file has nothing after it, so it aims at itself and the
+      // scroller gives what it can - the end of the diff, which is where the
+      // fold would have left the reader anyway.
+      const target = Math.min(paths.length - 1, index + 1)
+      const to = paths[target]
+      if (to === undefined) return
+      lastStep.current = { index: target, at: Date.now() }
+      scrollToSettled(fileDomId(to))
     },
-    [digestByPath, setReviewed]
+    [digestByPath, setReviewed, paths, scrollToSettled]
   )
 
   /** What the tree shows next to a file: comments still waiting on someone. */
@@ -572,23 +652,15 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
   const marked = useFocusScroll(focus, !isLoading && data !== undefined)
 
   /**
-   * Step through the diff one file at a time.
+   * Which file the reader is on, measured from the layout: the last card whose
+   * top edge has passed the top of the scroller, with everything after it still
+   * below.
    *
-   * Where the reader currently is comes from the layout, read at the moment the
-   * key is pressed, rather than from the observer that drives the file tree's
+   * Measured rather than taken from the observer that drives the file tree's
    * highlight. The observer reports asynchronously and has usually said nothing
    * at all on arrival, which made the first press of `]` scroll to the file
-   * already at the top - that is, do nothing. Measuring instead is one cheap
-   * layout read on a keystroke, and it is never a frame behind.
-   */
-  const lastStep = useRef<{ index: number; at: number } | null>(null)
-
-  /**
-   * The last card whose top edge has passed the top of the scroller is the one
-   * being read; everything after it is still below.
-   *
-   * Shared by stepping and by the reviewed shortcut, so "the file you are on"
-   * means the same thing whichever key is pressed.
+   * already at the top - that is, do nothing. This is one cheap layout read on
+   * a keystroke, and it is never a frame behind.
    */
   const currentFile = useCallback((): number => {
     let current = 0
@@ -603,34 +675,47 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
     return current
   }, [paths])
 
+  /**
+   * The file the reader is on, as far as the keyboard is concerned.
+   *
+   * Shared by stepping and by the reviewed shortcut, so "the file you are on"
+   * means the same thing whichever key is pressed - which it did not, before:
+   * `]` honoured a step that was still scrolling and `v` did not, so `]` then
+   * `v` in quick succession ticked off the file being left behind. See
+   * `STEP_CHAIN_MS`.
+   */
+  const readingIndex = useCallback((): number => {
+    const pending = lastStep.current
+    if (pending !== null && Date.now() - pending.at < STEP_CHAIN_MS) return pending.index
+    return currentFile()
+  }, [currentFile])
+
+  /** Step through the diff one file at a time. */
   const stepFile = useCallback(
     (delta: number): void => {
       if (paths.length === 0) return
 
-      const now = Date.now()
-      const pending = lastStep.current
-      const current =
-        pending !== null && now - pending.at < STEP_CHAIN_MS ? pending.index : currentFile()
-
-      const next = Math.min(paths.length - 1, Math.max(0, current + delta))
-      lastStep.current = { index: next, at: now }
+      const next = Math.min(paths.length - 1, Math.max(0, readingIndex() + delta))
+      lastStep.current = { index: next, at: Date.now() }
       const path = paths[next]
       if (path !== undefined) revealElement(fileDomId(path))
     },
-    [paths, currentFile]
+    [paths, readingIndex]
   )
 
   /**
    * Tick the file being read off, or take the tick back.
    *
    * `v` because that is the key GitHub uses for the same gesture, and muscle
-   * memory is most of the value of a shortcut like this one.
+   * memory is most of the value of a shortcut like this one. Where it lands
+   * afterwards is `markReviewed`'s business, so the key and the checkbox in the
+   * card's header cannot drift apart.
    */
   const toggleCurrentReviewed = useCallback((): void => {
-    const path = paths[currentFile()]
+    const path = paths[readingIndex()]
     if (path === undefined) return
     markReviewed(path, !reviewedPaths.has(path))
-  }, [paths, currentFile, markReviewed, reviewedPaths])
+  }, [paths, readingIndex, markReviewed, reviewedPaths])
 
   const canReadWorktree = data?.workingTree != null
   const nextChanges = nextChangesAfter(changes)
