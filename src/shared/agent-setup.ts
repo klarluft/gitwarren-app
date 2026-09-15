@@ -30,6 +30,30 @@ import type { McpLaunchInfo } from './api.js'
 export const MCP_SERVER_NAME = 'gitwarren'
 
 /**
+ * The plugin, for the harnesses that have one.
+ *
+ * Since M7 the repository root is also a plugin - Claude Code's format, the
+ * Agent Plugins format Codex, Cursor, VS Code and Kiro read, and Gemini CLI's
+ * - so one address installs the server *and* the note that teaches the agent
+ * when to open a review and how to answer comments. The sentence below cannot
+ * carry that note, which is why the plugin leads wherever it exists, and the
+ * sentence stays for every harness that only speaks MCP.
+ *
+ * Kept next to the sentence for the same reason the sentence is here: the
+ * Agent Access page, its browser twin, `gitwarren agent-setup` and the README
+ * all say these lines, and they must not drift.
+ */
+export const PLUGIN_REPOSITORY = 'klarluft/gitwarren-app'
+
+export const PLUGIN_INSTALL = {
+  /** Two commands, typed into Claude Code itself. */
+  claudeCode: [`/plugin marketplace add ${PLUGIN_REPOSITORY}`, '/plugin install gitwarren@gitwarren'],
+  geminiCli: `gemini extensions install https://github.com/${PLUGIN_REPOSITORY}`,
+  /** The note alone, into whichever agents the person uses. */
+  skills: `npx skills add ${PLUGIN_REPOSITORY}`
+} as const
+
+/**
  * The sentence, written *to* the agent rather than about it.
  *
  * It names the command, says what protocol comes out of it, and asks for a call

@@ -1,9 +1,15 @@
 /**
  * Agent Access - the one screen whose job is to be pasted somewhere else.
  *
- * It leads with a sentence. Not a JSON snippet, not a picker of harnesses, not
- * a wizard: one paragraph that names a command and asks the agent to register
- * it and then call it. An agent knows its own configuration format - which
+ * Since M7 it leads with the plugin, for the harnesses that have one, and then
+ * with a sentence for every harness that only speaks MCP. The plugin is first
+ * because it carries something the sentence cannot: the note that teaches the
+ * agent when to open a review and how to answer comments. Two lines typed
+ * into Claude Code, one for Gemini CLI, the repository's address for the rest.
+ *
+ * The sentence is still the universal answer. Not a JSON snippet, not a picker
+ * of harnesses, not a wizard: one paragraph that names a command and asks the
+ * agent to register it and then call it. An agent knows its own configuration format - which
  * file, which key, whether it needs a reload - better than this page can, and
  * it knows it for harnesses that did not exist when this was written. The one
  * thing it cannot know is the command, and `~/.gitwarren/bin/gitwarren-mcp` is
@@ -65,6 +71,7 @@ import { useApi, useHost, useHostScope } from '@/lib/host-scope'
 import { navigate } from '@/lib/router'
 import { LINK_SERVER_PORT } from '@shared/link-port'
 import {
+  PLUGIN_INSTALL,
   agentConfigSnippets,
   agentSetupPrompt,
   type AgentConfigSnippet
@@ -125,6 +132,59 @@ function withCode(text: string): React.ReactNode[] {
     ) : (
       <span key={index}>{part}</span>
     )
+  )
+}
+
+/**
+ * The plugin, first. See the header for why it leads.
+ *
+ * The Claude Code lines get the copy button because they are the ones a person
+ * types; Gemini's is one line and the rest is an address, so those are prose.
+ * `host` only changes who the lines are typed into: an agent on that machine
+ * installs the plugin the same way, and the plugin then finds that machine's
+ * GitWarren by itself.
+ */
+function PluginCard({ host }: { host: string | undefined }) {
+  const claudeRef = useRef<HTMLPreElement>(null)
+  const claude = PLUGIN_INSTALL.claudeCode.join('\n')
+
+  return (
+    <Card className="p-4">
+      <p className="text-sm font-medium">
+        {host === undefined ? 'Install the plugin' : 'Install the plugin in an agent on that machine'}
+      </p>
+      <p className="mt-0.5 text-xs text-muted-foreground">
+        The same server, plus a note that teaches the agent when to open a review and how to
+        answer your comments. In Claude Code, two lines:
+      </p>
+      <div className="relative mt-3">
+        <pre
+          ref={claudeRef}
+          data-selectable
+          className="overflow-auto rounded-md bg-muted p-3 pr-12 font-mono text-[11px] leading-relaxed"
+        >
+          {claude}
+        </pre>
+        <CopyButton
+          label="Copy the Claude Code plugin install"
+          text={claude}
+          source={claudeRef}
+          className="absolute right-1.5 top-1.5"
+        />
+      </div>
+      <p className="mt-3 text-xs text-muted-foreground [overflow-wrap:anywhere]">
+        Gemini CLI:{' '}
+        <code data-selectable className="font-mono">
+          {PLUGIN_INSTALL.geminiCli}
+        </code>
+        . Cursor, Codex, VS Code and Kiro read the same repository from their plugin screens. For
+        any agent, the note alone:{' '}
+        <code data-selectable className="font-mono">
+          {PLUGIN_INSTALL.skills}
+        </code>
+        .
+      </p>
+    </Card>
   )
 }
 
@@ -222,7 +282,7 @@ export function AgentAccessPage() {
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
           {host === undefined
-            ? 'Give an AI agent one sentence and it will configure itself to read and write these reviews over MCP.'
+            ? 'Install the plugin in your agent, or give it one sentence and it will configure itself to read and write these reviews over MCP.'
             : // Named as a place the agent already is, because that is the thing
               // to get right: this command is for a session running on that
               // machine, and pasting it into an agent here would configure a
@@ -232,16 +292,17 @@ export function AgentAccessPage() {
         </p>
       </div>
 
-      {/* The lead. Everything else on the page is a footnote to it. */}
+      <PluginCard host={host} />
+
+      {/* The universal answer, for every harness the plugin does not reach. */}
       <Card className="p-4">
         <p className="text-sm font-medium">
           {host === undefined
-            ? 'Paste this into whichever agent you use'
-            : 'Paste this into an agent on that machine'}
+            ? 'Or paste this into whichever agent you use'
+            : 'Or paste this into an agent on that machine'}
         </p>
         <p className="mt-0.5 text-xs text-muted-foreground">
-          Claude Code, Codex, Cursor, Gemini CLI — anything that speaks MCP. It will work out
-          where its own configuration goes.
+          Anything that speaks MCP. It will work out where its own configuration goes.
         </p>
 
         <p

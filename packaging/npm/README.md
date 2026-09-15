@@ -50,6 +50,13 @@ URL an agent hands out, and lands on that review rather than the home screen.
 
 ## Letting an agent in
 
+The quickest way is the plugin, which brings the server and a note that teaches
+the agent when to open a review. In Claude Code, `/plugin marketplace add
+klarluft/gitwarren-app` then `/plugin install gitwarren@gitwarren`; in Gemini
+CLI, `gemini extensions install https://github.com/klarluft/gitwarren-app`;
+Cursor, Codex, VS Code and Kiro read the same repository from their plugin
+screens. The plugin finds this install by itself.
+
 Every install carries GitWarren's MCP server. What an agent needs is one
 stable command to start it with, and that is `~/.gitwarren/bin/gitwarren-mcp` —
 the same path on every machine, written by `gitwarren serve`, `gitwarren
