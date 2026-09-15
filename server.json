@@ -3,7 +3,7 @@
   "name": "io.github.klarluft/gitwarren",
   "title": "GitWarren",
   "description": "Code review on your own machine, for you and your coding agent. Nothing leaves your computer.",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "websiteUrl": "https://gitwarren.com",
   "repository": {
     "url": "https://github.com/klarluft/gitwarren-app",
@@ -13,7 +13,7 @@
     {
       "registryType": "npm",
       "identifier": "gitwarren",
-      "version": "0.1.12",
+      "version": "0.1.13",
       "runtimeHint": "npx",
       "packageArguments": [
         {
