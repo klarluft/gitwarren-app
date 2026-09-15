@@ -48,7 +48,8 @@
     "release": "npm run build && electron-builder --publish always",
     "postinstall": "electron-builder install-app-deps",
     "build:web": "vite build --config vite.web.config.ts",
-    "listen:dev": "tsx src/cli/gitwarren.ts serve --listen"
+    "listen:dev": "tsx src/cli/gitwarren.ts serve --listen",
+    "version": "node scripts/sync-plugin-versions.mjs && git add .claude-plugin/plugin.json .claude-plugin/marketplace.json plugin.json gemini-extension.json"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",

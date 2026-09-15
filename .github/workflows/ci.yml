@@ -97,6 +97,11 @@ jobs:
 
       - run: npm run lint
 
+      # The plugin manifests at the repository root each carry a version they
+      # cannot read from package.json. `npm version` keeps them in step through
+      # the `version` script; this catches a hand-edited number before it ships.
+      - run: node scripts/sync-plugin-versions.mjs --check
+
       # `npm run build` runs typecheck itself, so this step is a few seconds of
       # duplicated `tsc`. It is kept anyway, because a step named `typecheck` is
       # a type error that names itself in the checks list rather than one found
