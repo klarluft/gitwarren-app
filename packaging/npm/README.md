@@ -61,6 +61,18 @@ The MCP server reads the same SQLite file the browser view does, so an agent
 can open and comment on reviews whether or not GitWarren is being served. What
 serving adds is that the links an agent hands you have something to open.
 
+On a machine where nothing has been installed, the same server starts by name:
+`npx gitwarren mcp`. That is the command a Claude Code plugin or an MCP registry
+entry names, and it is what makes either work before you have decided to keep
+GitWarren. It writes no launcher and asks for no login item; it reads the same
+database, so the reviews are there when you do.
+
+`npx gitwarren mcp --serve` also serves the review page, on loopback and for as
+long as the agent keeps the server running, so the links the agent hands out
+open even on a machine with nothing else installed. If GitWarren is already
+running, as the app or as `gitwarren serve`, it serves nothing and the links
+open there instead.
+
 ## Where your data is
 
 One SQLite database in the usual place for your platform —
