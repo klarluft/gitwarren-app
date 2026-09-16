@@ -978,7 +978,8 @@ What the plugin carries, beyond the server: `skills/gitwarren/SKILL.md`, the
 note that teaches the agent one habit — open a review when a task that changed
 code is done and hand over the link, read the review's comments before the next
 task, reply in the thread and resolve what was fixed — and the rules around it;
-`commands/gitwarren.md`, a `/gitwarren` command that opens the review on demand;
+`commands/review.md`, a `/gitwarren:review` command that opens the review on
+demand;
 and `agents/gitwarren-reviewer.md`, a reviewer that reads a change with git and
 leaves its findings as line comments in the review, attributed as
 machine-written, next to yours.
