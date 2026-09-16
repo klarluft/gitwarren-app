@@ -36,6 +36,8 @@
 import type { CommentLocation } from '../core/services/comments.js'
 import { readLiveDaemonRuntime } from '../core/daemon-runtime.js'
 import { getInstanceId } from '../core/instance.js'
+import { readWebToken } from '../core/web/token.js'
+import { TOKEN_PARAM } from '../shared/web.js'
 import { loopbackFragmentFor } from '../shared/deep-link.js'
 import { linkServerOrigin } from '../shared/link-port.js'
 import { hrefFor, type ReviewRoute } from '../shared/routes.js'
@@ -79,7 +81,10 @@ export const GUI_URL_NOTE =
   'The link works whether or not GitWarren is running right now, so hand it over without ' +
   'checking anything. If the user says it will not open - the browser reports that the ' +
   'connection was refused - then GitWarren is not running on their machine, and starting it ' +
-  'makes the same link work.'
+  'makes the same link work. When the page is served by `gitwarren serve` or by a plugin rather ' +
+  'than by the app, the link also carries that launch\'s token, which the page exchanges for a ' +
+  'cookie; a link minted before a restart says it needs a token, and the newest link is the one ' +
+  'that works.'
 
 /** With the link attached. Kept as a type so the tool payloads stay honest. */
 export type WithGuiUrl<T> = T & { guiUrl: string; webUrl?: string }
@@ -118,12 +123,36 @@ export function guiLinker(): GuiLinker {
   // serving anything is a link that cannot work, and the whole rule is that it
   // is added *when a host listens*. `guiUrl` is unaffected, because loopback
   // depends on nothing.
-  const webRoot = readLiveDaemonRuntime()?.webRoot ?? null
+  const owner = readLiveDaemonRuntime()
+  const webRoot = owner?.webRoot ?? null
+
+  // The token, when the page at the other end of the link is behind one.
+  //
+  // The app's link page is inert and needs no token: it hands the browser a
+  // `gitwarren://` button and nothing else. A daemon serves the web view
+  // itself, at `/`, behind the per-launch token from `core/web/token.ts`, and
+  // a link without it lands on "this GitWarren needs its token". A person who
+  // typed `gitwarren serve` has the token on their terminal; the person an
+  // agent's plugin is serving has it in a log they will never read. So when a
+  // daemon owns this data directory, the link carries the token. The handler
+  // exchanges it for the session cookie and takes it back out of the address
+  // bar, and the route survives in the fragment. Read fresh per linker for
+  // the reason `webRoot` is: the daemon may have restarted since the last
+  // call, and with it the token.
+  //
+  // Safe to put in a link for the reason the file it comes from is 0600: the
+  // server listens on loopback only, so the token is worth nothing to anyone
+  // who is not already on this machine as this user, who could read the file.
+  // What it costs is the token appearing in the agent's transcript, which is
+  // that same user's file. A daemon that could not bind the port has no page
+  // behind the link, so it gets no token either.
+  const token = owner?.owner === 'daemon' && owner.linkPort !== null ? readWebToken() : null
+  const query = token === null ? '' : `?${TOKEN_PARAM}=${encodeURIComponent(token)}`
 
   const link = (route: ReviewRoute): string =>
     // The route rides in the fragment, which the browser never sends. The
     // server is not told which review this is for and has no use for it.
-    `${linkServerOrigin()}/#${loopbackFragmentFor(instanceId, route)}`
+    `${linkServerOrigin()}/${query}#${loopbackFragmentFor(instanceId, route)}`
 
   /**
    * The same review, as a browser on the tailnet reaches it.
