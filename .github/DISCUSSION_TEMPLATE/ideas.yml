@@ -1,0 +1,47 @@
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Features start here rather than as an issue, so the shape can be agreed
+        before anyone writes code. Once an idea is settled it becomes an issue
+        and is ready to be picked up.
+
+        Two constraints will not bend, and an idea that needs either one broken
+        is out of scope — see
+        [CONTRIBUTING.md](https://github.com/klarluft/gitwarren-app/blob/main/CONTRIBUTING.md):
+        GitWarren runs on machines you own (no server, no account, no telemetry,
+        nothing relayed through anybody else), and it reads git rather than
+        reimplementing or writing to it.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is awkward today
+      description: >
+        The situation you keep hitting, before any solution. This is the part
+        that decides whether the idea lands.
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you would like GitWarren to do
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: How you work around it now
+      description: Including the possibility that you simply leave the app.
+
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Scope check
+      options:
+        - label: This works without a server, an account or anything leaving the user's own machines.
+          required: true
+        - label: This does not need GitWarren to write to the user's git repositories.
+          required: true

@@ -1,0 +1,44 @@
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ask anything about running GitWarren. Answers here stay searchable, so a
+        question that felt obvious to you usually helps someone later.
+
+        If GitWarren is clearly doing the wrong thing and you can say when,
+        [open a bug report](https://github.com/klarluft/gitwarren-app/issues/new/choose)
+        instead.
+
+  - type: textarea
+    id: question
+    attributes:
+      label: What are you trying to do
+      description: >
+        The goal, not only the error — the repository, the machine it lives on,
+        and what you expected GitWarren to show you.
+    validations:
+      required: true
+
+  - type: textarea
+    id: tried
+    attributes:
+      label: What you have tried
+      description: Commands you ran, settings you changed, what each one did.
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: How are you running it
+      options:
+        - Desktop app
+        - "`gitwarren serve` (browser)"
+        - Agent plugin / MCP server
+        - Not running it yet
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: GitWarren version
+      placeholder: "0.1.14"

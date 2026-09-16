@@ -7,10 +7,19 @@ ones that arrive without warning.
 
 ## Before you write code
 
-**Open an issue first for anything non-trivial.** A bug fix or a typo can go
-straight to a pull request. A new feature, a dependency, a schema change, or a
-refactor that touches more than a couple of files should start as an issue so we
-can agree on the shape before you spend time on it.
+**Start a discussion first for anything non-trivial.** A bug fix or a typo can
+go straight to a pull request. A new feature, a dependency, a schema change, or
+a refactor that touches more than a couple of files should start in
+[Ideas](https://github.com/klarluft/gitwarren-app/discussions/categories/ideas)
+so we can agree on the shape before you spend time on it. Agreed ideas are
+turned into issues, and an issue here means the shape is settled and the work is
+ready to be picked up.
+
+If you are not sure whether what you are seeing is a bug,
+[Q&A](https://github.com/klarluft/gitwarren-app/discussions/categories/q-a) is
+the place to ask — it costs nothing and the answer stays searchable. Bugs you
+can already describe go straight to
+[issues](https://github.com/klarluft/gitwarren-app/issues/new/choose).
 
 Two things are deliberate design constraints rather than gaps, and changes that
 break them will not be merged:
@@ -26,8 +35,8 @@ break them will not be merged:
   repositories.
 
 The [Known limitations](README.md#known-limitations) section of the README lists
-things that are already understood to be missing. Those are fair game, and an
-issue confirming you are picking one up avoids duplicated effort.
+things that are already understood to be missing. Those are fair game, and a
+comment saying you are picking one up avoids duplicated effort.
 
 ## The Contributor License Agreement
 

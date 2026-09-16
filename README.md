@@ -2118,10 +2118,13 @@ these two are unrelated and both need updating if the branding moves.
 
 ## Contributing
 
-Contributions are welcome. Open an issue first for anything larger than a bug
-fix — see [CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow, the
-two design constraints that changes need to respect, and what a good pull
-request looks like here.
+Contributions are welcome. Anything larger than a bug fix starts as a discussion
+in
+[Ideas](https://github.com/klarluft/gitwarren-app/discussions/categories/ideas),
+so the shape can be agreed before you spend time on it; once it is settled it
+becomes an issue. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development
+workflow, the two design constraints that changes need to respect, and what a
+good pull request looks like here.
 
 Before a first contribution can be merged you will be asked to sign the
 [Contributor License Agreement](CLA.md). A bot handles it on your pull request;
@@ -2135,9 +2138,17 @@ work and can use it elsewhere however you like.
 
 ## Support and privacy
 
-Questions and bug reports go to
-[GitHub issues](https://github.com/klarluft/gitwarren-app/issues); anything you
-would rather not post publicly, to **contact@klarluft.com**.
+Questions, ideas and setups worth copying go to
+[Discussions](https://github.com/klarluft/gitwarren-app/discussions) —
+[Q&A](https://github.com/klarluft/gitwarren-app/discussions/categories/q-a) if
+you are stuck on something,
+[Ideas](https://github.com/klarluft/gitwarren-app/discussions/categories/ideas)
+for a feature, and
+[Show and tell](https://github.com/klarluft/gitwarren-app/discussions/categories/show-and-tell)
+for an agent or remote-machine arrangement other people should steal. Bugs you
+can describe — what GitWarren does, and when — go to
+[issues](https://github.com/klarluft/gitwarren-app/issues). Anything you would
+rather not post publicly goes to **contact@klarluft.com**.
 
 GitWarren keeps everything on your machine: reviews live in one SQLite file in
 your application-data directory, the diff is read from your git worktree, and
