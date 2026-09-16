@@ -140,6 +140,26 @@ Migrations are shipped as real `.sql` files and read from disk at runtime, so th
 generated files must be committed — see
 [Database migrations](README.md#database-migrations).
 
+If you touched the plugin — the manifests at the repository root, or `skills/`,
+`commands/`, `agents/`, `packaging/plugin/start.mjs` — there is a CI step the
+four commands above do not cover:
+
+```bash
+node scripts/sync-plugin-versions.mjs --check
+```
+
+Five manifests each carry their own `version`, and none can point at
+`package.json` instead, so CI fails when one drifts. `npm version` runs the
+writing half of that script and commits the result, so a release keeps them in
+step on its own; the check is there for the hand-edited case. Which tool reads
+which file is in [Project layout](README.md#project-layout), and the install
+lines are in [Installing it as a plugin](README.md#installing-it-as-a-plugin).
+
+A change to `skills/gitwarren/SKILL.md` is a change to how every agent that
+installs GitWarren behaves, so treat it as behaviour rather than as prose: say
+in the pull request which habit you changed and what you saw an agent do
+differently.
+
 ## Pull request expectations
 
 - **One concern per pull request.** A fix and a refactor in the same diff is two
