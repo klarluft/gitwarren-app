@@ -732,6 +732,26 @@ link opens *that* machine's review instead — the host segment travels with it,
 so this install's review 4 is never reachable by a link that meant another
 machine's.
 
+When the page at that address is served by a daemon rather than by the app —
+`gitwarren serve`, or the plugin's `gitwarren mcp --serve` — the link also
+carries that launch's token:
+
+```
+http://127.0.0.1:41427/?token=<token>#h=<instance-id>/review/4/conversation
+```
+
+The web view is behind the token (see
+[The token, and why nothing is copied](#the-token-and-why-nothing-is-copied)),
+and a link without it lands on a page saying so. A person who typed `serve` has
+the token on their terminal; the person an agent's plugin is serving has it in
+a log they will never read. So the MCP server reads it from the same 0600 file
+`gitwarren open` does and puts it in the link. The handler exchanges it for the
+session cookie and takes it back out of the address bar, and the route survives
+in the fragment. The app's own link page needs no token, so links minted while
+the app owns the port are unchanged. A link from before a daemon restart
+carries a token that no longer exists, and the newest link is the one that
+works.
+
 The link is a chain of three hops, and each one is load-bearing:
 
 ```

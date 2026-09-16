@@ -32,7 +32,7 @@
  * the user pointed at GitWarren, or by a page that merely knows the port.
  */
 import { randomBytes, timingSafeEqual } from 'node:crypto'
-import { chmodSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { ensureDataDirectory, getDataDirectory } from '../paths.js'
 
@@ -76,6 +76,21 @@ export function publishWebToken(token: string): void {
     chmodSync(path, 0o600)
   } catch (error) {
     console.error('[web] could not publish the session token', error)
+  }
+}
+
+/**
+ * The published token, for a process on this machine that has to reach the
+ * owner the way `gitwarren open` does - the MCP server's poke, and since M7
+ * the links it mints. Null when there is nothing to read: no owner, or one
+ * that is mid-start or mid-quit. Every caller treats null as "then not".
+ */
+export function readWebToken(): string | null {
+  try {
+    const token = readFileSync(getWebTokenPath(), 'utf8').trim()
+    return token.length > 0 ? token : null
+  } catch {
+    return null
   }
 }
 

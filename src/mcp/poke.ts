@@ -35,10 +35,9 @@
  * next poll. The remedy is not a second mechanism: it is turning on "Reachable
  * on your tailnet", which gives that machine an owner and a socket to push down.
  */
-import { readFileSync } from 'node:fs'
 import { request as httpRequest } from 'node:http'
 import { readLiveDaemonRuntime } from '../core/daemon-runtime.js'
-import { getWebTokenPath } from '../core/web/token.js'
+import { readWebToken } from '../core/web/token.js'
 import { LINK_SERVER_HOST } from '../shared/link-port.js'
 import type { RpcEventName } from '../shared/rpc.js'
 import { TOKEN_HEADER, WEB_PATHS } from '../shared/web.js'
@@ -64,19 +63,14 @@ const POKE_TIMEOUT_MS = 1_000
  * that worked.
  */
 export function pokeOwner(event: RpcEventName): void {
-  let owner: ReturnType<typeof readLiveDaemonRuntime>
-  let token: string
-  try {
-    owner = readLiveDaemonRuntime()
-    // No owner is the common case rather than an error: the GUI is not running,
-    // or this daemon was spawned over a pipe and owns nothing.
-    if (!owner || owner.linkPort === null) return
-    token = readFileSync(getWebTokenPath(), 'utf8').trim()
-  } catch {
-    // An unreadable token file means the owner is mid-start or mid-quit. There
-    // is nothing to report and nobody to report it to.
-    return
-  }
+  const owner = readLiveDaemonRuntime()
+  // No owner is the common case rather than an error: the GUI is not running,
+  // or this daemon was spawned over a pipe and owns nothing.
+  if (!owner || owner.linkPort === null) return
+  // An unreadable token file means the owner is mid-start or mid-quit. There
+  // is nothing to report and nobody to report it to.
+  const token = readWebToken()
+  if (token === null) return
 
   const body = JSON.stringify({ event })
   const outgoing = httpRequest({
