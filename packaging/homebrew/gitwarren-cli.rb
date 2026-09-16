@@ -95,6 +95,16 @@ class GitwarrenCli < Formula
       sentence to give the agent. Reviews live in one SQLite file, and the MCP
       server reads it whether or not GitWarren is being served.
 
+      Updating is `brew upgrade gitwarren-cli`, and `gitwarren update --check`
+      will tell you when there is one. Before `brew uninstall gitwarren-cli`, run
+
+        gitwarren uninstall
+
+      which takes the login item and the two files in ~/.gitwarren/bin with it -
+      brew does not know about either, and a launcher left pointing into a Cellar
+      that is gone is how an agent ends up reporting that it cannot connect.
+      `gitwarren doctor` says whether that has already happened.
+
       `gitwarren --help` lists everything. The desktop app is a separate package:
 
         brew install --cask klarluft/tap/gitwarren

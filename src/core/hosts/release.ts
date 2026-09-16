@@ -98,6 +98,22 @@ export function targetFromUname(output: string): DaemonTarget {
   )
 }
 
+/**
+ * The same question about the machine this is running on, for `gitwarren
+ * update`.
+ *
+ * Phrased as a `uname` and handed to the function above rather than mapping
+ * `process.arch` separately, so there is one table and one error message. The
+ * error is the interesting case: a `gitwarren` running on Windows, or on a
+ * riscv box, is a real install that simply has no tarball to move to, and it
+ * should hear the same sentence a host does.
+ */
+export function targetForThisMachine(): DaemonTarget {
+  const kernel = process.platform === 'darwin' ? 'Darwin' : process.platform === 'linux' ? 'Linux' : process.platform
+  const machine = process.arch === 'x64' ? 'x86_64' : process.arch
+  return targetFromUname(`${kernel} ${machine}`)
+}
+
 export function tarballName(version: string, target: DaemonTarget): string {
   return `gitwarren-daemon-${version}-${target}.tar.gz`
 }

@@ -26,10 +26,11 @@
  *
  * `gitwarren` itself has no such competitor: the app has no CLI to offer.
  */
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { getCliLauncherPath, getLauncherDirectory, getMcpLauncherPath } from '../core/mcp-launcher.js'
-import { cmdQuote, shellQuote } from '../core/shell-quote.js'
+import { cmdQuote, cmdUnquote, shellQuote, shellUnquote } from '../core/shell-quote.js'
 import { describeSelf, type SelfDescription } from './install.js'
+import { isInside, type InstallLayout } from './layout.js'
 
 const BANNER = (what: string): string[] => [
   `GitWarren ${what}. Written by the gitwarren command line, so a config or a`,
@@ -187,4 +188,183 @@ export function ensureLaunchers(): EnsuredLaunchers {
   } catch (error) {
     return { created: [], refused: error instanceof Error ? error.message : String(error) }
   }
+}
+
+/**
+ * ## Reading a launcher back
+ *
+ * Everything above writes. What follows reads, and it exists because of the
+ * one failure this design has always been able to produce and never able to
+ * see: `~/.gitwarren/bin/gitwarren-mcp` has one path per machine and two
+ * programs that write it, and *neither of them removes it*. Uninstall the
+ * Homebrew formula and the launcher stays, pointing into a Cellar that is
+ * gone. What the user sees then is their agent reporting "MCP server failed to
+ * connect", with nothing anywhere naming the cause.
+ *
+ * The fix is not a registry of what was installed - that is a second file to
+ * go stale. It is to treat the launcher as what it already is: a statement of
+ * which install answers on this machine, written in a format we control. Parse
+ * it, and `doctor` can say the target is missing, `uninstall` can remove the
+ * launchers that name the install it is removing, and - the part that matters
+ * most - both can leave alone a launcher that names somebody else's.
+ *
+ * The app's `main/mcp-launch.ts` writes this file too, in three forms of its
+ * own. All of them are recognised here, because "the desktop app's launcher"
+ * is precisely the answer `uninstall` needs in order not to delete it.
+ */
+
+/** Both writers' banners say this, on a line of their own. */
+const GENERATED_MARKER = 'Generated file'
+
+export interface LauncherContents {
+  /** The program the launcher runs: a `node`, an Electron binary, an AppImage. */
+  interpreter: string
+  /** The script it hands over, when it hands over one. */
+  script: string | null
+  /**
+   * The file that has to exist for this launcher to work.
+   *
+   * The script, except for the AppImage form the app writes, where there is no
+   * script until the image mounts itself and the `.AppImage` is the only path
+   * that is true between launches. See `main/mcp-launch.ts`.
+   */
+  target: string
+}
+
+/** The quoted paths on a line, in order. `cmd` has no escapes; `sh` does. */
+function quotedPaths(line: string, windows: boolean): string[] {
+  const spans = line.match(windows ? /"[^"]*"/g : /"(?:\\.|[^"\\])*"/g) ?? []
+  const unquote = windows ? cmdUnquote : shellUnquote
+  return spans.map(unquote).filter((value): value is string => value !== null)
+}
+
+/**
+ * What a launcher runs, or null when this is not a file GitWarren wrote.
+ *
+ * Null is the important return. A user is entitled to put their own script at
+ * this path - it is a directory they own, and the whole point of it is that it
+ * is theirs to inspect - and a command that deletes or rewrites a file it
+ * cannot parse would be taking that back. So the banner is required before a
+ * single byte is interpreted, and anything unrecognised is left exactly where
+ * it is and reported.
+ */
+export function readLauncherContents(path: string): LauncherContents | null {
+  let text: string
+  try {
+    text = readFileSync(path, 'utf8')
+  } catch {
+    return null
+  }
+
+  // The banner as a block rather than line by line: the two writers put
+  // "GitWarren" and "Generated file" on the same line and on different ones,
+  // and what identifies the file is that its header says both.
+  const lines = text.split(/\r?\n/)
+  const header = lines.slice(0, 6).join('\n')
+  if (!header.includes('GitWarren') || !header.includes(GENERATED_MARKER)) return null
+
+  const windows = lines[0]?.startsWith('@echo off') ?? false
+  // The line that runs something: `exec …` for both shell forms, and for `cmd`
+  // the one before `exit /b`, which is the only one with two quoted paths on it.
+  const runner = windows
+    ? lines.find((line) => /%\*\s*$/.test(line))
+    : lines.find((line) => /(^|\s)exec\s/.test(line))
+  if (runner === undefined) return null
+
+  const paths = quotedPaths(runner, windows)
+  const interpreter = paths[0]
+  if (interpreter === undefined) return null
+
+  // `-e 'require(…)'` and no second path: the AppImage form, whose one durable
+  // path is the image itself.
+  const script = paths[1] ?? null
+  return { interpreter, script, target: script ?? interpreter }
+}
+
+export type LauncherState =
+  /** No file at all. */
+  | 'missing'
+  /** A file GitWarren did not write. Never touched, always reported. */
+  | 'foreign'
+  /** Points into the install these commands are acting on. */
+  | 'this-install'
+  /** Points at another GitWarren that is present - commonly the desktop app. */
+  | 'other-install'
+  /** Points at a file that is not there any more. This is the one that breaks agents. */
+  | 'dangling'
+
+export interface LauncherReport {
+  which: 'cli' | 'mcp'
+  path: string
+  state: LauncherState
+  /** What it points at, when we could read it. */
+  target: string | null
+}
+
+/**
+ * Whose launcher this is, in the only terms that make a delete safe.
+ *
+ * A managed install owns anything under `~/.gitwarren/daemon`, not only its own
+ * version directory: `uninstall` removes that whole tree, so a launcher left
+ * over from the version before is about to dangle and is ours to take with it.
+ * Every other kind owns exactly its own prefix, and a checkout owns nothing -
+ * `prefix` is null there, which makes every launcher somebody else's and is
+ * the right answer for a command run out of a git worktree.
+ */
+function stateOf(target: string, layout: InstallLayout): LauncherState {
+  if (!existsSync(target)) return 'dangling'
+
+  const owned =
+    (layout.prefix !== null && isInside(target, layout.prefix)) ||
+    (layout.kind === 'managed' && isInside(target, layout.daemonRoot))
+
+  return owned ? 'this-install' : 'other-install'
+}
+
+export function inspectLauncher(
+  which: 'cli' | 'mcp',
+  path: string,
+  layout: InstallLayout
+): LauncherReport {
+  if (!existsSync(path)) return { which, path, state: 'missing', target: null }
+
+  const contents = readLauncherContents(path)
+  if (contents === null) return { which, path, state: 'foreign', target: null }
+
+  return { which, path, state: stateOf(contents.target, layout), target: contents.target }
+}
+
+/** Both of them, which is what every caller actually wants. */
+export function inspectLaunchers(layout: InstallLayout): LauncherReport[] {
+  return [
+    inspectLauncher('cli', getCliLauncherPath(), layout),
+    inspectLauncher('mcp', getMcpLauncherPath(), layout)
+  ]
+}
+
+/**
+ * Remove the launchers that name the install being removed, and nothing else.
+ *
+ * `dangling` is included on purpose. A launcher pointing at a file that is
+ * already gone works for nobody, and leaving it behind is how the next install
+ * inherits a broken agent config; `doctor --fix` offers to repoint one instead,
+ * which is the right move while an install is still there to point it at.
+ */
+export function removeOwnedLaunchers(layout: InstallLayout): {
+  removed: string[]
+  kept: LauncherReport[]
+} {
+  const removed: string[] = []
+  const kept: LauncherReport[] = []
+
+  for (const report of inspectLaunchers(layout)) {
+    if (report.state === 'this-install' || report.state === 'dangling') {
+      rmSync(report.path, { force: true })
+      removed.push(report.path)
+    } else if (report.state !== 'missing') {
+      kept.push(report)
+    }
+  }
+
+  return { removed, kept }
 }

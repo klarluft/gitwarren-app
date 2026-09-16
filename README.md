@@ -1168,6 +1168,11 @@ gitwarren service status        # what is running, and where the data is
 # Let a coding agent in
 gitwarren agent-setup           # print the one sentence to give an agent so it can reach this GitWarren
 
+# Keep it current, or remove it
+gitwarren update                # move to the newest release (--check only says whether there is one)
+gitwarren doctor                # check every path GitWarren asks another program to run; --fix repoints stale ones
+gitwarren uninstall             # remove GitWarren from this machine; reviews stay unless --data says otherwise
+
 gitwarren serve --stdio         # answer GitWarren's protocol on stdin/stdout (what another machine spawns)
 ```
 
@@ -1213,10 +1218,60 @@ The formula is `gitwarren-cli` and the cask stays `gitwarren`. The tokens differ
 so `brew install klarluft/tap/gitwarren` keeps meaning the app; the *binary* is
 called `gitwarren` in all four.
 
-To remove a Homebrew install, `brew uninstall gitwarren-cli`; a script install,
-`rm -rf ~/.gitwarren`. Run `gitwarren service uninstall` first if a login item
-was registered. Neither touches the reviews, which live in the data directory
-`gitwarren service status` prints.
+### Updating, and removing it again
+
+```bash
+gitwarren update            # move to the newest release
+gitwarren update --check    # only say what is installed and what is newest
+gitwarren doctor            # is every path GitWarren hands out still pointing at something?
+gitwarren uninstall         # remove it; add --data to take the reviews too
+```
+
+**One of the four installs is ours to replace, and `update` says so about the
+other three.** An install under `~/.gitwarren/daemon/<version>/` — what
+`install.sh` writes, and what the app installs onto another machine over SSH —
+is versioned, has a stable launcher in front of it and no package manager with
+an opinion about it, so `gitwarren update` does the whole thing: downloads the
+release, checks it against the sha256 the release published in its own Homebrew
+formula, unpacks beside the destination and renames into place, has the *new*
+binary write the launchers (which is also the proof that it runs here),
+restarts the background service if one is running, and deletes the version it
+replaced. A Homebrew, npm or npx copy belongs to its package manager; `update`
+names `brew upgrade gitwarren-cli` rather than writing over a Cellar, and
+`--check` still tells that user a new release exists. See `src/cli/layout.ts`,
+which is the file that decides which case this is.
+
+Two things `update` does that re-running `install.sh` does not, and did not:
+the background daemon that is *already running* is restarted, rather than
+serving the old code until the next login; and the version it replaced is
+removed, rather than left in `~/.gitwarren/daemon` forever at ~45 MB a time.
+
+**`uninstall` removes only what it can attribute to this install.** The login
+item, the launchers in `~/.gitwarren/bin` that name *this* install, and
+`~/.gitwarren/daemon` when GitWarren put it there. It prints the plan and asks
+before doing any of it — `--yes` to skip the question, and `--yes` is required
+when nothing is attached to the terminal. Reviews are kept unless `--data` is
+given. A launcher belonging to another GitWarren — commonly the desktop app,
+which writes `gitwarren-mcp` too — is named and left alone, because removing it
+would take agent access away from an install the user never touched.
+Afterwards it lists the agent configs that may still name the launcher, which
+is the one part of this no command can do for you.
+
+**`doctor` is for the failure with no symptom on this machine.** A launcher
+whose target is gone — after `brew uninstall`, after an AppImage is deleted,
+after a checkout is rebuilt elsewhere — still sits there, and the only thing
+anyone sees is their agent reporting *MCP server failed to connect*, in another
+product, with nothing naming the cause. `gitwarren doctor` reads every path
+GitWarren asks another program to run, marks the broken ones with `!` and exits
+non-zero so a script can be what notices; `--fix` rewrites a stale launcher to
+name this install. It never deletes: a file at a launcher path that GitWarren
+did not write is reported and left where it is.
+
+`gitwarren service uninstall` remains the smaller command — it stops the
+background GitWarren and removes the login item, and leaves everything else. To
+remove a Homebrew install the command is still `brew uninstall gitwarren-cli`;
+run `gitwarren uninstall` first and it will take the launchers and the login
+item with it, which `brew` does not know about.
 
 ### The token, and why nothing is copied
 

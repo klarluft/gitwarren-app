@@ -32,4 +32,14 @@ process.on('SIGTERM', shutdown)
 // which a caller can act on, not "gitwarren fell over". A command that refused
 // for a reason of its own has already said which by setting `exitCode`, and
 // that answer is more specific than this one.
-if (!runCli(process.argv.slice(2))) process.exit(process.exitCode === undefined ? 2 : 1)
+function finish(ok: boolean): void {
+  if (!ok) process.exit(process.exitCode === undefined ? 2 : 1)
+}
+
+// `update` and `uninstall` answer with a promise - one downloads and the other
+// asks a question. Nothing is awaited at the top level here: an `await` would
+// make this module asynchronous, and the signal handlers registered above have
+// to be in place before anything runs, not after a microtask.
+const result = runCli(process.argv.slice(2))
+if (typeof result === 'boolean') finish(result)
+else void result.then(finish)

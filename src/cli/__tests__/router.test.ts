@@ -34,7 +34,11 @@ function capture(argv: readonly string[]): { ok: boolean; out: string; err: stri
   console.error = (line: string) => {
     err += `${line}\n`
   }
+  // Every command captured here is one that answers without awaiting
+  // anything. `update` and `uninstall` answer with a promise, and a test that
+  // silently treated one as truthy would assert nothing at all.
   const ok = runCli(argv)
+  if (typeof ok !== 'boolean') throw new Error(`\`${argv.join(' ')}\` answered with a promise`)
   return { ok, out, err }
 }
 
@@ -51,11 +55,19 @@ test('--help names every subcommand, uninstall included, grouped by what a perso
     'gitwarren service status',
     'gitwarren agent-setup',
     'gitwarren mcp',
+    'gitwarren update',
+    'gitwarren doctor',
+    'gitwarren uninstall',
     'gitwarren --version'
   ]) {
     assert.ok(out.includes(command), `usage should mention \`${command}\``)
   }
-  for (const heading of ['Run it now', 'Keep it running', 'Let a coding agent in']) {
+  for (const heading of [
+    'Run it now',
+    'Keep it running',
+    'Let a coding agent in',
+    'Keep it current, or remove it'
+  ]) {
     assert.ok(out.includes(heading), `usage should have the heading "${heading}"`)
   }
 })
@@ -100,6 +112,33 @@ test('mcp takes nothing but --serve: anything else is the usage on stderr, not a
     assert.equal(out, '')
     assert.ok(err.includes('gitwarren mcp'))
   }
+})
+
+test('update and uninstall refuse a bad flag before they await anything', () => {
+  // Both answer with a promise, and both parse argv first: a typo has to be
+  // the usage and an exit code, not a download or a question. `capture`
+  // throws on a promise, which is what makes this an assertion at all.
+  for (const argv of [
+    ['update', '--latest'],
+    ['update', '--version'],
+    ['uninstall', '--everything']
+  ]) {
+    const { ok, out, err } = capture(argv)
+
+    assert.equal(ok, false, `${argv.join(' ')} should be refused`)
+    assert.equal(out, '')
+    assert.ok(err.includes(`gitwarren ${argv[0]}`))
+  }
+})
+
+test('each new command has its own usage, and --help does not do the thing', () => {
+  assert.match(capture(['update', '--help']).out, /--check/)
+  assert.match(capture(['doctor', '--help']).out, /--fix/)
+  assert.match(capture(['uninstall', '--help']).out, /--data/)
+
+  // The one distinction the two uninstalls have to keep clear: which command
+  // removes the login item and which removes GitWarren.
+  assert.match(capture(['uninstall', '--help']).out, /service uninstall/)
 })
 
 test('a checkout cannot have launchers written, and says so instead of throwing', () => {
