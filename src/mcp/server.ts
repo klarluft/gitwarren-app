@@ -91,7 +91,16 @@ import {
   updateReviewInputSchema
 } from '../shared/schemas.js'
 
-const VERSION = '0.1.0'
+/**
+ * Stamped by `vite.mcp.config.ts` from package.json; absent under tsx, where
+ * `npm run mcp:dev` runs this file with no build in front of it, so the
+ * define does not exist and the fallback says so rather than lying. The same
+ * arrangement as `daemon/listen.ts`, and for the same reason: this string is
+ * what the handshake reports, and what every directory then displays.
+ */
+declare const __APP_VERSION__: string
+
+const VERSION = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : '0.0.0-dev'
 
 /**
  * How to put a screenshot in a comment, shown rather than described.
