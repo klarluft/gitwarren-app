@@ -3,7 +3,7 @@
     "gitwarren": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "gitwarren", "mcp", "--serve"]
+      "args": ["-y", "gitwarren@latest", "mcp", "--serve"]
     }
   }
 }
