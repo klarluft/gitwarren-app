@@ -1,5 +1,16 @@
+import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { defineConfig } from 'vite'
+
+/**
+ * The app's version, inlined, for the same reason `vite.daemon.config.ts`
+ * does it: the server says its version in the MCP handshake, and every
+ * directory that lists it - the registry, Glama, the marketplaces - shows
+ * that number. It sat at a hand-typed "0.1.0" through fourteen releases, and
+ * nothing in the build could have noticed. Reading package.json at build time
+ * is the one moment the two are guaranteed to agree.
+ */
+const { version } = JSON.parse(readFileSync(resolve('package.json'), 'utf8')) as { version: string }
 
 /**
  * Build for the MCP stdio server.
@@ -15,6 +26,9 @@ import { defineConfig } from 'vite'
  * only the native addon to resolve from disk.
  */
 export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(version)
+  },
   resolve: {
     alias: {
       '@core': resolve('src/core'),
