@@ -1,6 +1,7 @@
 ---
 name: gitwarren
 description: Code review with GitWarren, the review app on the user's own machine. Use it when you finish a task that changed code (open a review and hand over the link), before you start the next task in that repository (read the user's comments on the last one), when the user asks what you changed, and whenever the user mentions a review, review comments, or GitWarren.
+user-invocable: false
 ---
 
 # GitWarren
@@ -54,6 +55,9 @@ with its link. Do this without being asked; it is how the user sees your work.
 
 **When the user asks what you changed**, give the review link and one
 sentence. Do not paste a diff when a link will do.
+
+**When the user runs `/gitwarren:review`**, do the first habit above right
+then, whatever else is going on, and answer with one sentence and the link.
 
 ## The first link in a session
 
