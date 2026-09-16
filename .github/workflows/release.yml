@@ -430,34 +430,6 @@ jobs:
             *)   npm publish ./out/npm ;;
           esac
 
-      # The MCP registry entry, right after the package it points at. The
-      # registry proves ownership two ways at once: the `mcpName` inside the
-      # package npm has just published, and the OIDC token this job already
-      # holds for npm, which the registry accepts for io.github.klarluft/*.
-      # No secret is involved, for the same reason none is above.
-      #
-      # `server.json` at the repository root is the entry; its two version
-      # fields are kept in step with package.json by the `version` script, so
-      # what goes out names the package version that exists.
-      #
-      # Stable tags only. A prerelease is `next` on npm, and the registry has
-      # no such channel: it would list the beta as the server's version.
-      #
-      # The retry is for npm's propagation delay: the registry fetches the
-      # package's manifest to check `mcpName`, and for a minute after
-      # `npm publish` the registry mirror it reads may not have it yet.
-      - name: Publish to the MCP registry
-        if: ${{ !contains(github.event.inputs.tag || github.ref_name, '-') }}
-        run: |
-          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
-          ./mcp-publisher login github-oidc
-          for attempt in 1 2 3 4 5 6; do
-            if ./mcp-publisher publish; then exit 0; fi
-            echo "registry publish attempt $attempt failed; waiting for npm to propagate"
-            sleep 30
-          done
-          exit 1
-
       - name: Upload as a workflow artifact
         if: always()
         uses: actions/upload-artifact@v7
@@ -468,3 +440,74 @@ jobs:
             out/daemon-tarball/gitwarren-cli.rb
           if-no-files-found: ignore
           retention-days: 14
+
+  # The MCP registry entry, in a job of its own.
+  #
+  # The registry proves ownership two ways at once: the `mcpName` inside the
+  # package npm has just published, and the OIDC token this workflow already
+  # holds for npm, which the registry accepts for io.github.klarluft/*. No
+  # secret is involved, for the same reason none is in the job above.
+  #
+  # Its own job rather than one more step of `daemon`, because of how it fails.
+  # The registry checks npm for the version `server.json` names before it
+  # accepts the entry, and npm can take minutes to answer for a version it has
+  # just been handed: 0.1.14 was refused for the whole three minutes the step
+  # then waited, and was there the moment anyone looked afterwards. A failure
+  # like that wants "re-run failed jobs", and as a step of `daemon` that would
+  # re-run `npm publish` first, which refuses a version it already has. As a
+  # job, a re-run is this and nothing else.
+  #
+  # `server.json` at the repository root is the entry; its two version fields
+  # are kept in step with package.json by the `version` script, so what goes
+  # out names the package version that exists.
+  #
+  # Stable tags only. A prerelease is `next` on npm, and the registry has no
+  # such channel: it would list the beta as the server's version.
+  registry:
+    name: MCP registry entry
+    needs: daemon
+    if: ${{ !contains(github.event.inputs.tag || github.ref_name, '-') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+
+      # Wait for npm to admit the version before asking the registry to look
+      # for it. Fifteen minutes is far past anything seen; running out is a
+      # plain failure with the version in it, not a "wait and retry" that has
+      # to be dug out of the registry's error text.
+      - name: Wait for npm to serve the version
+        run: |
+          VERSION=$(node -p "require('./server.json').version")
+          for attempt in $(seq 1 30); do
+            if npm view "gitwarren@$VERSION" version >/dev/null 2>&1; then
+              echo "npm serves gitwarren@$VERSION"
+              exit 0
+            fi
+            echo "gitwarren@$VERSION is not on npm yet (attempt $attempt of 30); waiting 30s"
+            sleep 30
+          done
+          echo "gave up waiting for gitwarren@$VERSION to appear on npm"
+          exit 1
+
+      # The registry reads npm through its own path, which may lag the one the
+      # step above asked, so the publish itself still retries, more slowly.
+      - name: Publish to the MCP registry
+        run: |
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+          ./mcp-publisher login github-oidc
+          for attempt in 1 2 3 4 5; do
+            if ./mcp-publisher publish; then exit 0; fi
+            echo "registry publish attempt $attempt of 5 failed; waiting 60s"
+            sleep 60
+          done
+          exit 1
