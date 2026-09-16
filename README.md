@@ -87,6 +87,7 @@ line — see [Agent access (MCP)](#agent-access-mcp).
 - [Data storage](#data-storage)
 - [Database migrations](#database-migrations)
 - [Agent access (MCP)](#agent-access-mcp)
+- [Installing it as a plugin](#installing-it-as-a-plugin)
 - [The `gitwarren` command line](#the-gitwarren-command-line)
 - [Your other machines](#your-other-machines)
 - [Linking the user back into the app](#linking-the-user-back-into-the-app)
@@ -551,6 +552,38 @@ recut from it rather than from each other:
 | --- | --- | --- |
 | `build/icon.png` | 1024px, artwork inset to 860px | electron-builder renders the `.icns`, `.ico` and Linux icons from it; `main/index.ts` also hands it to `BrowserWindow` so Linux windows have an icon at all. The inset is the padding the macOS icon grid expects — without it the Dock icon sits noticeably larger than its neighbours. |
 | `src/renderer/src/assets/logo.png` | 128px, no padding | The app header, and the image at the top of this README. |
+
+The repository root is also the plugin, so the manifests that install GitWarren
+into an agent sit beside the source rather than under it. Three plugin formats
+and a registry entry, because no two families of tool read the same manifest:
+
+| File | Read by |
+| --- | --- |
+| `.claude-plugin/marketplace.json` | Claude Code, as the marketplace `/plugin marketplace add klarluft/gitwarren-app` adds — this repository, listing exactly one plugin: itself. |
+| `.claude-plugin/plugin.json` | Claude Code, as that plugin's manifest. |
+| `.mcp.json` | Claude Code, for the server the plugin carries. Names `packaging/plugin/start.mjs` through `${CLAUDE_PLUGIN_ROOT}`. |
+| `plugin.json` | Codex, Cursor, VS Code and Kiro, through the shared [Agent Plugins](https://agent-plugins.org) manifest. |
+| `mcp.json` | The server entry beside it, for those same tools. Names `npx -y gitwarren mcp --serve` — the published package rather than a path, since they install from the repository without leaving a checkout behind to point at. |
+| `gemini-extension.json` | Gemini CLI, for `gemini extensions install`. Carries its own copy of that same command. |
+| `server.json` | The [MCP registry](https://registry.modelcontextprotocol.io), as `io.github.klarluft/gitwarren`. Published by the release workflow, after the npm package. |
+
+What those manifests point at is the plugin itself — three files a person
+notices, and one that does the starting:
+
+| Path | What |
+| --- | --- |
+| `skills/gitwarren/SKILL.md` | The note that teaches the agent one habit — open a review when a task that changed code is done, hand over the link, read the comments before the next task. Also what `npx skills add klarluft/gitwarren-app` installs on its own. |
+| `commands/gitwarren.md` | `/gitwarren`, which opens the review on demand. |
+| `agents/gitwarren-reviewer.md` | The reviewer that reads a change with git and leaves its findings as line comments, attributed as machine-written. |
+| `packaging/plugin/start.mjs` | The starter behind `.mcp.json`: the launcher of a GitWarren that is *listening* on this machine if there is one, `npx gitwarren mcp --serve` if there is not. Its header has the reasoning. |
+
+Each of those manifests insists on carrying its own `version`, and none can
+point at `package.json` instead, so `scripts/sync-plugin-versions.mjs` copies
+the number into all five. It runs from the `version` script on `npm version`,
+and `--check` is the CI gate for the hand-edited case.
+
+[Installing it as a plugin](#installing-it-as-a-plugin) has the install lines
+and the rest of the reasoning.
 
 ---
 
