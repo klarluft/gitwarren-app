@@ -98,6 +98,7 @@ line — see [Agent access (MCP)](#agent-access-mcp).
 - [Social preview](#social-preview)
 - [Known limitations](#known-limitations)
 - [Contributing](#contributing)
+- [Support and privacy](#support-and-privacy)
 - [License](#license)
 
 ---
@@ -2131,6 +2132,18 @@ having to track down every past contributor. You keep full ownership of your
 work and can use it elsewhere however you like.
 
 ---
+
+## Support and privacy
+
+Questions and bug reports go to
+[GitHub issues](https://github.com/klarluft/gitwarren-app/issues); anything you
+would rather not post publicly, to **contact@klarluft.com**.
+
+GitWarren keeps everything on your machine: reviews live in one SQLite file in
+your application-data directory, the diff is read from your git worktree, and
+there is no account and no telemetry. The desktop app's one outbound request is
+the auto-update check against this repository's GitHub Releases. The website's
+[privacy policy](https://gitwarren.com/privacy/) covers gitwarren.com itself.
 
 ## License
 

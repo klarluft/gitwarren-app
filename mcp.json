@@ -1,9 +1,15 @@
 {
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
   "mcpServers": {
     "gitwarren": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "gitwarren@latest", "mcp", "--serve"]
+      "args": [
+        "-y",
+        "gitwarren@latest",
+        "mcp",
+        "--serve"
+      ]
     }
   }
 }
