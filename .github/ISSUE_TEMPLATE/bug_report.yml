@@ -1,0 +1,94 @@
+name: Bug report
+description: Something GitWarren does is wrong, and you can describe when it happens.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        If you are not sure it is a bug, or you are stuck rather than blocked by
+        a defect, [Q&A](https://github.com/klarluft/gitwarren-app/discussions/categories/q-a)
+        is the better place — questions answered there stay searchable for the
+        next person.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you got instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: >
+        Starting from a fresh GitWarren if you can. A repository state that
+        triggers it — a branch, a worktree, uncommitted changes — is the most
+        useful thing you can include.
+      placeholder: |
+        1. Add a repository at …
+        2. Open a review comparing … against …
+        3. …
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: How are you running it
+      options:
+        - Desktop app
+        - "`gitwarren serve` (browser)"
+        - Agent plugin / MCP server
+        - More than one of these
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: GitWarren version
+      description: >
+        In the app, Settings shows it. On the command line, `gitwarren --version`.
+      placeholder: "0.1.14"
+    validations:
+      required: true
+
+  - type: input
+    id: platform
+    attributes:
+      label: Operating system
+      placeholder: "macOS 15.5 · Windows 11 · Ubuntu 24.04 · WSL2 (Ubuntu) on Windows 11"
+    validations:
+      required: true
+
+  - type: input
+    id: node
+    attributes:
+      label: Node version
+      description: >
+        Only if you are using the command line or the MCP server — `node --version`.
+        The one on your PATH is the one that matters; GitWarren needs 22.14 or newer.
+      placeholder: "v24.20.0"
+
+  - type: dropdown
+    id: location
+    attributes:
+      label: Where is the repository being reviewed
+      options:
+        - On this machine
+        - On another machine over SSH
+        - In a WSL distro, from the Windows app
+        - On another machine over a tailnet
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Errors or logs
+      description: >
+        Anything the app or the command printed. For the MCP server, whatever
+        your agent showed when the connection failed. Pasted screenshots are fine.
+      render: text

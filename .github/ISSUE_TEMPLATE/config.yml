@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Ask a question
+    url: https://github.com/klarluft/gitwarren-app/discussions/categories/q-a
+    about: Not sure whether something is a bug, or stuck getting GitWarren to see a repository, a remote machine or an agent — ask here, and the answer stays searchable for the next person.
+  - name: Suggest a feature
+    url: https://github.com/klarluft/gitwarren-app/discussions/categories/ideas
+    about: Ideas start as a discussion, so the shape can be agreed before anyone writes code. Once we agree on one, it becomes an issue.
+  - name: Show what you built
+    url: https://github.com/klarluft/gitwarren-app/discussions/categories/show-and-tell
+    about: An agent setup, a remote-machine arrangement, a screenshot of GitWarren reviewing something interesting.
+  - name: Report something privately
+    url: mailto:contact@klarluft.com
+    about: Security reports, or anything you would rather not post publicly.
