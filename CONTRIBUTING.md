@@ -85,6 +85,32 @@ The tests create throwaway git repositories in a temp directory and point the
 app at a temp data directory via `GITWARREN_DATA_DIR`, so they never touch your
 real database.
 
+### If you changed how something looks
+
+None of those four can see the screen. `scripts/capture-demo.mjs` drives the
+running app over the Chrome DevTools Protocol and writes PNGs you can look at —
+an exact viewport at 2×, containing nothing but the app:
+
+```bash
+bash scripts/make-demo-repos.sh
+GITWARREN_DATA_DIR=/tmp/gw-demo npx tsx scripts/seed-demo.ts
+npx electron-vite build
+GITWARREN_DATA_DIR=/tmp/gw-demo ./node_modules/.bin/electron . \
+  --user-data-dir=/tmp/gw-demo-electron --remote-debugging-port=9222 &
+SHOT_DIR=screenshots-out node scripts/capture-demo.mjs
+```
+
+`--user-data-dir` is what stops the second instance quitting into the GitWarren
+you already have open, and the script's header explains why it also rewrites
+`~/.gitwarren/bin/gitwarren-mcp` — run `gitwarren agent-setup` afterwards to
+point that back at your real install.
+
+The shot list in that script is aimed at the marketing images; add a screen to
+it while you are looking at yours, or copy the loop. It is a *looking* tool,
+not a regression suite: nothing is compared against a baseline, because a
+committed baseline of a UI under active design is a file somebody re-blesses
+every time they move a border.
+
 ### What CI runs
 
 `.github/workflows/ci.yml` runs those four, plus one daemon tarball build, on

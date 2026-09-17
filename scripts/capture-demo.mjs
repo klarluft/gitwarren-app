@@ -8,11 +8,33 @@
  * gives an exact viewport, a guaranteed 2x pixel ratio, and a frame that
  * contains nothing but the app.
  *
- * Start the app with a debugging port first:
+ * The whole run, from nothing:
  *
+ *   bash scripts/make-demo-repos.sh
+ *   GITWARREN_DATA_DIR=/tmp/gw-demo npx tsx scripts/seed-demo.ts
  *   npx electron-vite build
- *   GITWARREN_DATA_DIR=/tmp/gw-demo ./node_modules/.bin/electron . --remote-debugging-port=9222
+ *   GITWARREN_DATA_DIR=/tmp/gw-demo ./node_modules/.bin/electron . \
+ *     --user-data-dir=/tmp/gw-demo-electron --remote-debugging-port=9222 &
  *   node scripts/capture-demo.mjs
+ *
+ * ## Two things that bite when GitWarren is already running
+ *
+ * **`--user-data-dir` is not optional.** `src/main/index.ts` takes Electron's
+ * single-instance lock, and that lock is keyed on the user data directory
+ * rather than on `GITWARREN_DATA_DIR`. Without a directory of its own the
+ * second instance quits immediately and hands focus to the one already
+ * running - so the debugging port never opens, and the developer's real window
+ * pops up instead. The port this app binds for links is also already taken,
+ * which is harmless: it warns and carries on.
+ *
+ * **It rewrites `~/.gitwarren/bin/gitwarren-mcp`.** Starting the app from a
+ * checkout points that launcher at the checkout, by design - the app keeps it
+ * current so an agent config naming that path survives an update. Run this from
+ * a worktree and then delete the worktree, and an agent's MCP server is left
+ * naming a directory that is gone. Put it back with the install you actually
+ * use:
+ *
+ *   gitwarren agent-setup
  */
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'

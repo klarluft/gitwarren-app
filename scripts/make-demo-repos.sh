@@ -36,7 +36,18 @@ BASE=f41b379
 # conversation that happened over a couple of days rather than one that
 # happened while the script ran.
 DAY_AGO=$(( $(date +%s) - 24 * 60 * 60 ))
-stamp() { date -r "$(( DAY_AGO - $1 * 60 * 60 ))" '+%Y-%m-%dT%H:%M:%S'; }
+
+# BSD `date` turns an epoch into a date with `-r`; GNU `date` reads `-r` as "the
+# mtime of this file" and fails with "No such file or directory", which is what
+# this script did on Linux for its whole life - nothing runs it in CI, and it
+# was only ever run from a Mac. Tried in that order rather than branched on
+# `uname`, because what decides it is which `date` is first on PATH, and a Mac
+# with coreutils installed has the GNU one.
+stamp() {
+  local epoch=$(( DAY_AGO - $1 * 60 * 60 ))
+  date -r "$epoch" '+%Y-%m-%dT%H:%M:%S' 2>/dev/null ||
+    date -d "@$epoch" '+%Y-%m-%dT%H:%M:%S'
+}
 commit() {
   # $1 hours before "yesterday", $2 message
   local at

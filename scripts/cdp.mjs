@@ -5,9 +5,11 @@
  * request/response pairing plus a place to hang event handlers, which is all
  * the screenshot and video scripts ask of the protocol.
  *
- * Start the app with a debugging port first:
+ * Start the app with a debugging port first. `--user-data-dir` matters whenever
+ * a GitWarren is already running - see the longer note in `capture-demo.mjs`:
  *
- *   GITWARREN_DATA_DIR=/tmp/gw-demo ./node_modules/.bin/electron . --remote-debugging-port=9222
+ *   GITWARREN_DATA_DIR=/tmp/gw-demo ./node_modules/.bin/electron . \
+ *     --user-data-dir=/tmp/gw-demo-electron --remote-debugging-port=9222
  */
 export class Cdp {
   #socket
