@@ -142,7 +142,7 @@ function useDestinations(): PaletteItem[] {
       id: `review:${review.id}`,
       label: review.title,
       group: 'Reviews',
-      hint: repositoryNames.get(review.repositoryId) ?? `${review.headRef} → ${review.baseRef}`,
+      hint: repositoryNames.get(review.repositoryId) ?? `${review.baseRef} ← ${review.headRef}`,
       // A review is as often remembered by its branch as by its title, and the
       // repository it lives in is the other thing anyone would type.
       keywords: `${review.headRef} ${review.baseRef} ${review.status} ${

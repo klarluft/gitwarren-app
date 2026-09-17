@@ -6,14 +6,14 @@
  * an effect writing state back.
  *
  * The endpoints default to "the trunk, and whatever you are working on" -
- * `defaultBranch` into `currentBranch` - which is the review the user almost
+ * base `defaultBranch`, compare `currentBranch` - which is the review the user almost
  * always wants and saves them two menu visits. When those are the same branch
  * that default stands: a ref against itself is a review of the uncommitted work
  * on it, which is exactly what someone sitting on the trunk with a dirty tree
  * is after.
  */
 import { useState, type FormEvent } from 'react'
-import { ArrowRight, CircleDot, Loader2 } from 'lucide-react'
+import { ArrowLeft, CircleDot, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -196,7 +196,7 @@ function ReviewForm({ repositoryId, review, onDone, onCreated }: ReviewFormProps
                 />
               </Field>
 
-              <ArrowRight className="mb-2.5 size-4 shrink-0 text-muted-foreground" />
+              <ArrowLeft className="mb-2.5 size-4 shrink-0 text-muted-foreground" />
 
               <Field className="min-w-0 flex-1">
                 <FieldLabel htmlFor="review-head">Compare</FieldLabel>
