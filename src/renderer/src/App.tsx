@@ -43,15 +43,31 @@ import { cn } from './lib/utils'
 /**
  * How much of the window a review is allowed to use.
  *
- * The diff gets the room and the reading tabs do not, because they want
- * different things. A diff is code plus two gutters plus a file tree, and on a
- * narrow column every second line wraps or scrolls sideways; prose and comment
- * threads stretched across a wide monitor are simply hard to read. The ceiling
- * on the diff is there for the same reason - past about this width a line of
- * code has more empty space after it than characters in it.
+ * The tabs that show **code** get the room and the ones that show **prose** do
+ * not, because they want opposite things. Code is a monospaced line plus a
+ * gutter or two plus a file list beside it, and on a narrow column every second
+ * line wraps or scrolls sideways; comment threads and descriptions stretched
+ * across a wide monitor are simply hard to read. The ceiling on the wide ones
+ * is there for that same reason from the other side - past about this width a
+ * line of code has more empty space after it than characters in it.
+ *
+ * Browse files is on the wide side, and it is worth saying why it was not.
+ * This function was written when there were three tabs, so the split it
+ * describes - "the diff, and the reading tabs" - was a true description of the
+ * app and `else` meant conversation and commits. The browse tab arrived five
+ * days later and landed in that `else` by inheritance rather than by anyone
+ * deciding it belonged there, which made it 736px narrower than the files tab
+ * for no reason a reader could have found. It is one file of code with a file
+ * tree beside it: structurally the files tab with one file instead of many, and
+ * nothing like a comment thread.
+ *
+ * The question to ask of the next tab is therefore *code or prose*, not
+ * *is it the diff*.
  */
+const WIDE_TABS = new Set<ReviewTab>(['files', 'browse'])
+
 function reviewWidth(tab: ReviewTab): string {
-  return tab === 'files' ? 'max-w-[110rem]' : 'max-w-5xl'
+  return WIDE_TABS.has(tab) ? 'max-w-[110rem]' : 'max-w-5xl'
 }
 
 export function App() {
