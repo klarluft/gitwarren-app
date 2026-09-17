@@ -20,7 +20,6 @@ import {
   AlertCircle,
   ArrowDownFromLine,
   ArrowLeft,
-  ArrowRight,
   CircleDot,
   FileDiff,
   FolderTree,
@@ -255,14 +254,14 @@ export function ReviewDetail({ reviewId, tab, focus }: ReviewDetailProps) {
             </div>
 
             <p className="mt-1.5 flex flex-wrap items-center gap-1.5 font-mono text-xs text-muted-foreground">
-              {/* A ref against itself is one endpoint, not two: "main → main"
+              {/* A ref against itself is one endpoint, not two: "main ← main"
                   reads like a mistake, when it is a review of what has not been
                   committed on main yet. */}
               {!selfReview && (
                 <>
                   <RefChip name={review.baseRef} role="base ref" />
                   <UpstreamDrift endpoint={commits.data?.base} role="base" />
-                  <ArrowRight className="size-3" />
+                  <ArrowLeft className="size-3" />
                 </>
               )}
               <RefChip name={review.headRef} role={selfReview ? 'ref' : 'compare ref'} />

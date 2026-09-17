@@ -3,7 +3,7 @@
  * states kept together so it is visible that all of them are handled.
  */
 import { useMemo, useState } from 'react'
-import { AlertCircle, ArrowRight, Filter, GitPullRequestArrow, Plus, RefreshCw } from 'lucide-react'
+import { AlertCircle, ArrowLeft, Filter, GitPullRequestArrow, Plus, RefreshCw } from 'lucide-react'
 import { Breakable } from '@/components/breakable'
 import { Badge } from '@/components/ui/badge'
 import { Tooltip } from '@/components/ui/tooltip'
@@ -215,7 +215,7 @@ function ReviewCard({ review }: { review: Review }) {
               <span className="min-w-0 break-words">
                 <Breakable text={review.baseRef} />
               </span>
-              <ArrowRight className="size-3 shrink-0" />
+              <ArrowLeft className="size-3 shrink-0" />
             </>
           )}
           <span className="min-w-0 break-words">
