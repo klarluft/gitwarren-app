@@ -13,26 +13,21 @@
  * laid out.
  *
  * **Filtering.** A flat, ranked list of matches - a fuzzy file finder, the way
- * every editor does it. Deliberately *not* a filtered tree: once you are typing
- * `revfiles` you are not navigating a hierarchy any more, you are naming a
- * file, and the directory rows in between are noise you have to scroll past.
- * Flat also keeps the keystroke cheap, because nothing is re-folded per key.
+ * every editor does it. The ranking is `file-filter.ts` and the row is
+ * `MatchedFilePath`: the file's *name* first, in the reader's colour, with its
+ * directory dimmed behind it and the characters the query hit marked in both.
+ * A result list that leads with the directory puts forty identical characters
+ * in front of the only part that distinguishes one row from the next, and the
+ * deeper the file the worse it gets - see the note on `MatchedFilePath`.
  */
 import { useCallback, useMemo, useState } from 'react'
-import { ChevronDown, ChevronRight, FileCode, Search, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, FileCode } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { fuzzyMatch } from '@/lib/fuzzy'
-import { FilePath } from './file-path'
+import { plural } from '@/lib/format'
+import { FilterBox } from './filter-box'
+import { filterPaths } from './file-filter'
+import { FilePath, MatchedFilePath } from './file-path'
 import { buildPathTree, type PathNode } from './path-tree'
-
-/**
- * How many matches a filter shows.
- *
- * Nobody scrolls to the hundredth-best fuzzy match; they type another letter.
- * The cap is what keeps a one-character query over a twenty-thousand-file
- * repository from rendering twenty thousand rows on the way to being narrowed.
- */
-const MAX_MATCHES = 200
 
 export interface RepositoryFilesTreeProps {
   paths: string[]
@@ -95,44 +90,21 @@ export function RepositoryFilesTree({
     []
   )
 
-  const matches = useMemo(() => {
-    const needle = query.trim()
-    if (needle === '') return null
-
-    const scored: { path: string; score: number }[] = []
-    for (const path of paths) {
-      const hit = fuzzyMatch(needle, path)
-      if (hit !== null) scored.push({ path, score: hit.score })
-    }
-    scored.sort((left, right) => right.score - left.score || left.path.localeCompare(right.path))
-    return { shown: scored.slice(0, MAX_MATCHES).map((entry) => entry.path), total: scored.length }
-  }, [paths, query])
+  const matches = useMemo(
+    () => (query.trim() === '' ? null : filterPaths(paths, query)),
+    [paths, query]
+  )
 
   const rowProps = { selectedPath, onSelect, changedPaths, unresolvedByFile }
 
   return (
     <div className="flex min-h-0 flex-col">
-      <div className="sticky top-0 z-10 flex items-center gap-1.5 border-b border-border bg-card px-2 py-1.5">
-        <Search className="size-3.5 shrink-0 text-muted-foreground" />
-        <input
-          type="search"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Filter files"
-          aria-label="Filter files in this repository"
-          className="min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground"
-        />
-        {query !== '' && (
-          <button
-            type="button"
-            onClick={() => setQuery('')}
-            aria-label="Clear the filter"
-            className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-          >
-            <X className="size-3.5" />
-          </button>
-        )}
-      </div>
+      <FilterBox
+        value={query}
+        onChange={setQuery}
+        placeholder="Filter files"
+        label="Filter files in this repository"
+      />
 
       {matches === null ? (
         <nav aria-label="Repository files" className="flex flex-col gap-px py-1 text-xs">
@@ -151,14 +123,13 @@ export function RepositoryFilesTree({
         <p className="px-3 py-4 text-xs text-muted-foreground">No file matches that.</p>
       ) : (
         <nav aria-label="Matching files" className="flex flex-col gap-px py-1 text-xs">
-          {matches.shown.map((path) => (
-            // The whole path on a match row, not just the name: in a flat list
-            // the directory is the only thing telling two `index.ts` apart.
-            <FileRow key={path} path={path} label={path} {...rowProps} />
+          {matches.shown.map((match) => (
+            <FileRow key={match.path} path={match.path} indices={match.indices} {...rowProps} />
           ))}
           {matches.total > matches.shown.length && (
             <p className="px-3 py-2 text-[0.6875rem] text-muted-foreground">
-              {matches.total - matches.shown.length} more match. Keep typing to narrow it.
+              {plural(matches.total - matches.shown.length, 'more match', 'more matches')}. Keep
+              typing to narrow it.
             </p>
           )}
         </nav>
@@ -184,7 +155,7 @@ function TreeRows({
   const indent = { paddingLeft: `${Math.min(depth, 6) * 0.75 + 0.25}rem` }
 
   if (node.kind === 'file') {
-    return <FileRow path={node.path} label={node.name} indent={indent} {...rowProps} />
+    return <FileRow path={node.path} name={node.name} indent={indent} {...rowProps} />
   }
 
   const open = isOpen(node.path)
@@ -222,7 +193,8 @@ function TreeRows({
 
 function FileRow({
   path,
-  label,
+  name,
+  indices,
   indent,
   selectedPath,
   onSelect,
@@ -230,8 +202,10 @@ function FileRow({
   unresolvedByFile
 }: {
   path: string
-  /** The file's name in the tree, its whole path in a filter result. */
-  label: string
+  /** Set on a tree row, where the directories are the rows above this one. */
+  name?: string
+  /** Set on a filter row: which characters of `path` the query hit. */
+  indices?: number[]
   indent?: { paddingLeft: string }
 } & Omit<RepositoryFilesTreeProps, 'paths'>) {
   const unresolved = unresolvedByFile.get(path) ?? 0
@@ -260,11 +234,15 @@ function FileRow({
       />
       <span
         className={cn(
-          'min-w-0 flex-1 break-all font-mono text-[0.6875rem]',
+          'min-w-0 flex-1 break-words font-mono text-[0.6875rem]',
           isChanged && !isSelected && 'text-foreground'
         )}
       >
-        {label}
+        {name === undefined ? (
+          <MatchedFilePath path={path} indices={indices ?? []} />
+        ) : (
+          name
+        )}
       </span>
       {unresolved > 0 && (
         <span

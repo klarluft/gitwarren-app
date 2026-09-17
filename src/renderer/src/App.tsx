@@ -120,7 +120,12 @@ export function App() {
                 <RepositoryDetail repositoryId={route.repositoryId} />
               )}
               {route.name === 'review' && (
-                <ReviewDetail reviewId={route.reviewId} tab={route.tab} focus={route.focus} />
+                <ReviewDetail
+                  reviewId={route.reviewId}
+                  tab={route.tab}
+                  focus={route.focus}
+                  search={route.search}
+                />
               )}
             </main>
 

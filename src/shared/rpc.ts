@@ -26,6 +26,7 @@ import type {
   RepositoryRefs,
   ReviewCommits,
   ReviewDiff,
+  ReviewSearch,
   ReviewTree
 } from './git.js'
 import type {
@@ -65,6 +66,7 @@ import type {
   Review,
   ReviewCommitsInput,
   ReviewDiffInput,
+  ReviewSearchInput,
   ReviewTreeInput,
   ReviewedFile,
   ReviewFileInput,
@@ -413,6 +415,8 @@ export interface RpcMethods {
   'reviews.commits': { params: ReviewCommitsInput; result: ReviewCommits }
   'reviews.diff': { params: ReviewDiffInput; result: ReviewDiff }
   'reviews.tree': { params: ReviewTreeInput; result: ReviewTree }
+  /** Find in files, over the same head the tree read lists. */
+  'reviews.search': { params: ReviewSearchInput; result: ReviewSearch }
   'reviews.file': { params: ReviewFileInput; result: FileContent }
   'reviews.image': { params: ReviewImageInput; result: FileImage }
   /**
@@ -534,6 +538,7 @@ export const READ_METHODS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
   'reviews.commits',
   'reviews.diff',
   'reviews.tree',
+  'reviews.search',
   'reviews.file',
   'reviews.image',
   'reviews.filePath',

@@ -34,6 +34,7 @@ import { cn } from '@/lib/utils'
 import { CommentThreadCard } from '../comments/comment-thread-card'
 import { CopyPathAction, IconAction, LineRow, type DiffComments, type RowContext } from './diff-view'
 import { FilePath } from './file-path'
+import type { DiffSearch } from './diff-search'
 import { ImagePane } from './image-diff'
 import { useLineSelection } from './line-selection'
 import { useReviewFile } from './use-reviews'
@@ -69,6 +70,13 @@ export interface FileSourceCardProps {
   isChanged: boolean
   /** A line arrived at from a link, marked while the reader finds it. */
   marked?: { side: 'base' | 'head'; line: number }
+  /**
+   * A word to pick out of the text, when the file was opened from a search.
+   *
+   * The same shape a diff card takes, drawn by the same `LineRow`, so a hit
+   * looks the same whether it was found in the diff or in the repository.
+   */
+  search?: DiffSearch
   editorLabel?: string | null
   onOpenInEditor?: (path: string, line: number) => void
 }
@@ -81,6 +89,7 @@ export function FileSourceCard({
   comments,
   isChanged,
   marked,
+  search,
   editorLabel,
   onOpenInEditor
 }: FileSourceCardProps) {
@@ -170,7 +179,7 @@ export function FileSourceCard({
     covered,
     marked: marked ?? null,
     filePath: path,
-    search: null,
+    search: search ?? null,
     // A file has one set of line numbers; the diff's second gutter would be a
     // column of nothing down the whole document.
     oneGutter: true

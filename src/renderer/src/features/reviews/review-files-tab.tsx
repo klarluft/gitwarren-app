@@ -53,10 +53,11 @@ import { useStoredFlag, useStoredPreference } from '@/lib/preferences'
 import { revealElement } from '@/lib/reveal'
 import { cn } from '@/lib/utils'
 import { useRegisterCommands, type Command } from '@/features/commands/command-registry'
-import { replace, type DiffFocus } from '@/lib/router'
+import { navigate, replace, type DiffFocus } from '@/lib/router'
 import { CommentThreadCard } from '../comments/comment-thread-card'
 import { useCommentMutations, useReviewComments } from '../comments/use-comments'
 import { ChangedFilesTree } from './changed-files-tree'
+import { SidebarColumn } from './sidebar-column'
 import { DiffFindBar, useDiffFind } from './diff-find-bar'
 import { CompareErrorCard, NoWorktreeNotice, WorkingTreeBanner } from './compare-notices'
 import { fileDomId, lineDomId } from './dom-ids'
@@ -494,6 +495,21 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
   const activePath = useActiveFile(paths)
   const find = useDiffFind(files)
   const [bindFindBar, findBarHeight] = useMeasuredHeight()
+
+  /**
+   * Take the find bar's query to the whole repository.
+   *
+   * `navigate` rather than the `replace` every other move between these tabs
+   * uses, and the difference is what this move is. Switching tabs is choosing a
+   * view of the review; this is a *detour* - you are reading a diff, you go and
+   * look something up, and the thing you want most afterwards is to be back
+   * where you were. That is what the back button is, so it gets an entry.
+   */
+  const searchRepository = useCallback(
+    (query: string) =>
+      navigate({ name: 'review', reviewId: review.id, tab: 'browse', search: query, ...scope }),
+    [review.id, scope]
+  )
 
   /**
    * Where a sticky thing in this tab parks, and how far below the top of the
@@ -977,7 +993,9 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
         </div>
       </div>
 
-      {find.open && <DiffFindBar ref={bindFindBar} find={find} />}
+      {find.open && (
+        <DiffFindBar ref={bindFindBar} find={find} onSearchRepository={searchRepository} />
+      )}
 
       {changes !== 'committed' && data.workingTree?.isDirty && (
         <WorkingTreeBanner workingTree={data.workingTree} />
@@ -1106,19 +1124,16 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
         <div className="flex items-start gap-4" style={stickyStyle}>
           {listOpen && (
             // Two shapes, one element. Wide: a sticky sidebar that keeps its
-            // own place while the diff scrolls past it, wider still where there
-            // is room, because every column the tree gains is a file name that
-            // fits on one line instead of wrapping onto two. Narrow: the whole
-            // width, in the flow, scrolling with the page - there is no diff
-            // beside it to stay level with, and a 224px column of wrapped names
-            // is not a file list anybody can read.
-            <aside
-              className={cn(
-                'rounded-lg border border-border bg-card/50 px-1',
-                narrow
-                  ? 'w-full'
-                  : 'sticky top-[var(--diff-scroll-top,0.5rem)] max-h-[calc(100dvh-6rem)] w-56 shrink-0 overflow-y-auto xl:w-64 2xl:w-72'
-              )}
+            // own place while the diff scrolls past it, as wide as the reader
+            // has dragged it, because every column the tree gains is a file
+            // name that fits on one line instead of wrapping onto two. Narrow:
+            // the whole width, in the flow, scrolling with the page - there is
+            // no diff beside it to stay level with, and a 224px column of
+            // wrapped names is not a file list anybody can read.
+            <SidebarColumn
+              storageKey="files-tree-width"
+              narrow={narrow}
+              label="the changed-file list"
             >
               <ChangedFilesTree
                 files={data.files}
@@ -1128,7 +1143,7 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
                 changedSincePaths={changedSincePaths}
                 onSelect={selectFile}
               />
-            </aside>
+            </SidebarColumn>
           )}
 
           {/* Hidden rather than unmounted on the narrow layout: going to the

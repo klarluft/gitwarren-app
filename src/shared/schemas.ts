@@ -494,6 +494,29 @@ export const reviewTreeInputSchema = z.object({
 })
 
 /**
+ * A content search over the repository at the review's head - find in files.
+ *
+ * `changes` is here for the same reason it is on the tree read, and it has to
+ * carry the same value: a search that looked at the commits while the file list
+ * beside it is showing the worktree would find hits in a version of the file
+ * the reader cannot open.
+ *
+ * `include` and `exclude` are comma-separated globs, as typed. They are turned
+ * into git pathspecs in `core/git-search.ts` rather than validated into a
+ * dialect here, because there is nothing to reject: a pattern that matches
+ * nothing is a search with no results, which is an answer and not an error.
+ */
+export const reviewSearchInputSchema = z.object({
+  id: reviewIdSchema,
+  changes: diffChangesSchema,
+  query: z.string().max(1024),
+  isRegex: z.boolean().optional().default(false),
+  matchCase: z.boolean().optional().default(false),
+  include: z.string().max(1024).optional().default(''),
+  exclude: z.string().max(1024).optional().default('')
+})
+
+/**
  * One file of a review, read whole so the diff can be expanded past its hunks.
  * `changes` has to match the diff on screen, or the expanded context would come
  * from a different version of the file than the hunks around it.
@@ -551,6 +574,7 @@ export type RemoveReviewInput = z.input<typeof removeReviewInputSchema>
 export type ReviewCommitsInput = z.input<typeof reviewCommitsInputSchema>
 export type ReviewDiffInput = z.input<typeof reviewDiffInputSchema>
 export type ReviewTreeInput = z.input<typeof reviewTreeInputSchema>
+export type ReviewSearchInput = z.input<typeof reviewSearchInputSchema>
 export type ReviewFileInput = z.input<typeof reviewFileInputSchema>
 export type ReviewImageInput = z.input<typeof reviewImageInputSchema>
 export type OpenReviewFileInput = z.input<typeof openReviewFileInputSchema>

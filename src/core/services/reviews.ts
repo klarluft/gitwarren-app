@@ -26,6 +26,7 @@ import {
   resolveCompare,
   resolveReviewFilePath
 } from '../git-compare.js'
+import { searchReviewFiles } from '../git-search.js'
 import { AppError } from '../../shared/errors.js'
 import { parseWithSchema as parse } from '../../shared/validation.js'
 import {
@@ -38,12 +39,20 @@ import {
   reviewDiffInputSchema,
   reviewFileInputSchema,
   reviewImageInputSchema,
+  reviewSearchInputSchema,
   reviewTreeInputSchema,
   updateReviewInputSchema,
   type Review,
   type ReviewWithRepository
 } from '../../shared/schemas.js'
-import type { FileContent, FileImage, ReviewCommits, ReviewDiff, ReviewTree } from '../../shared/git.js'
+import type {
+  FileContent,
+  FileImage,
+  ReviewCommits,
+  ReviewDiff,
+  ReviewSearch,
+  ReviewTree
+} from '../../shared/git.js'
 
 function toReview(row: ReviewRow): Review {
   return {
@@ -247,6 +256,21 @@ export const reviewsService = {
     const row = requireReview(id)
     const repository = requireRepository(row.repositoryId)
     return readReviewTree(repository.path, row.baseRef, row.headRef, { changes })
+  },
+
+  /**
+   * Find in files, over the repository at the review's head.
+   *
+   * Off the MCP surface for the same reason `tree` is, and more plainly: an
+   * agent already has `git grep` - or its own indexer - against the checkout it
+   * is standing in. This exists for the person looking at a review on another
+   * machine, who has no shell there and no filesystem to search.
+   */
+  async search(input: unknown): Promise<ReviewSearch> {
+    const { id, ...options } = parse(reviewSearchInputSchema, input)
+    const row = requireReview(id)
+    const repository = requireRepository(row.repositoryId)
+    return searchReviewFiles(repository.path, row.baseRef, row.headRef, options)
   },
 
   /**

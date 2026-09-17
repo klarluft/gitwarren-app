@@ -55,3 +55,30 @@ export function useStoredFlag(key: string, fallback: boolean): [boolean, (value:
   const [stored, store] = useStoredPreference(key, fallback ? 'on' : 'off')
   return [stored === 'on', useCallback((next: boolean) => store(next ? 'on' : 'off'), [store])]
 }
+
+/**
+ * The same, for a measurement - a column width someone dragged.
+ *
+ * Null rather than a number is the useful part of the signature: it is the
+ * difference between "narrower than the default" and "never touched it", and
+ * only the second may be answered by the stylesheet. A sidebar that has not
+ * been resized keeps its responsive width and grows with the window; one that
+ * has is the width the person chose, on every window they open it in.
+ *
+ * A stored value that is not a number at all - storage shared with an older
+ * build, or edited by hand - reads as null, which lands on the same default.
+ */
+export function useStoredNumber(
+  key: string,
+  fallback: number | null
+): [number | null, (value: number | null) => void] {
+  const [stored, store] = useStoredPreference(key, fallback === null ? null : String(fallback))
+  const value = stored === null ? null : Number(stored)
+
+  return [
+    // `Number('')` is 0, so "finite" alone would turn a blank entry into a
+    // column no pixels wide. Nothing stored here is ever usefully zero.
+    value !== null && Number.isFinite(value) && value > 0 ? value : null,
+    useCallback((next: number | null) => store(next === null ? null : String(next)), [store])
+  ]
+}

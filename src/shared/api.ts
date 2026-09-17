@@ -23,6 +23,7 @@ import type {
   RepositoryRefs,
   ReviewCommits,
   ReviewDiff,
+  ReviewSearch,
   ReviewTree
 } from './git.js'
 import type { AttachmentIngestParams, BridgeCarrier, ReviewOpen, RpcMethod } from './rpc.js'
@@ -61,6 +62,7 @@ import type {
   Review,
   ReviewCommitsInput,
   ReviewDiffInput,
+  ReviewSearchInput,
   ReviewTreeInput,
   ReviewedFile,
   ReviewFileInput,
@@ -420,6 +422,17 @@ export interface GitWarrenApi {
      * reason `file` must.
      */
     tree(input: ReviewTreeInput): Promise<ReviewTree>
+    /**
+     * Find in files: every line of the repository at this head that matches,
+     * narrowed by include and exclude globs.
+     *
+     * Beside `tree` rather than folded into it because they answer the two
+     * halves of "where is that": the listing finds a file by its *name*, and
+     * this finds one by what is *in* it. `changes` means what it means on the
+     * listing, and a caller must pass the same value to both - see the note on
+     * `reviewSearchInputSchema`.
+     */
+    search(input: ReviewSearchInput): Promise<ReviewSearch>
     /**
      * One file's head-side text, whole. This is what lets the diff show the
      * lines between its hunks; `changes` must match the diff on screen so the

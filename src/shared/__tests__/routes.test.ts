@@ -221,3 +221,77 @@ test('the Hosts screen is a location, and never one on another install', () => {
 test('a stale link deeper than the hosts page still lands on it', () => {
   assert.deepEqual(parseRoute('#/hosts/4'), { name: 'hosts' })
 })
+
+// ---------------------------------------------------------------------------
+// The browse tab's content search
+// ---------------------------------------------------------------------------
+
+test('a search is a location, and a file being read is not part of it', () => {
+  const searching: Route = { name: 'review', reviewId: 4, tab: 'browse', search: 'resolveAnchor' }
+  assert.equal(hrefFor(searching), '#/reviews/4/browse?q=resolveAnchor')
+  assert.deepEqual(parseRoute(hrefFor(searching)), searching)
+
+  // Both at once: the panel is open beside a file the reader opened from it.
+  const both: Route = {
+    name: 'review',
+    reviewId: 4,
+    tab: 'browse',
+    focus: { filePath: 'src/core/git.ts', side: 'head', line: 12 },
+    search: 'runGit'
+  }
+  assert.equal(hrefFor(both), '#/reviews/4/browse/src%2Fcore%2Fgit.ts/head/12?q=runGit')
+  assert.deepEqual(parseRoute(hrefFor(both)), both)
+})
+
+test('an open but empty search is a different place from no search at all', () => {
+  // This is what "search in files" navigates to from the other tabs: the panel
+  // showing, with nothing typed into it.
+  const empty: Route = { name: 'review', reviewId: 4, tab: 'browse', search: '' }
+  assert.equal(hrefFor(empty), '#/reviews/4/browse?q=')
+  assert.deepEqual(parseRoute('#/reviews/4/browse?q='), empty)
+
+  assert.deepEqual(parseRoute('#/reviews/4/browse'), {
+    name: 'review',
+    reviewId: 4,
+    tab: 'browse'
+  })
+})
+
+test('a query keeps whatever was typed into it, punctuation and all', () => {
+  for (const query of ['src/app.ts', 'a & b', 'q=1#2', '100%', 'a+b', ' spaced ']) {
+    const route: Route = { name: 'review', reviewId: 4, tab: 'browse', search: query }
+    assert.deepEqual(parseRoute(hrefFor(route)), route, query)
+  }
+})
+
+test('a slash in the query is not a path segment', () => {
+  // Split before anything else is parsed, or `?q=a/b` would push `b` into the
+  // focus and open a file called `b`.
+  assert.deepEqual(parseRoute('#/reviews/4/browse?q=src/core'), {
+    name: 'review',
+    reviewId: 4,
+    tab: 'browse',
+    search: 'src/core'
+  })
+})
+
+test('a search travels with the host, like everything else about a location', () => {
+  const route: Route = {
+    name: 'review',
+    reviewId: 4,
+    tab: 'browse',
+    search: 'widget',
+    host: HOST
+  }
+  assert.equal(hrefFor(route), `#/h/${HOST}/reviews/4/browse?q=widget`)
+  assert.deepEqual(parseRoute(hrefFor(route)), route)
+})
+
+test('a query string on any other location is ignored rather than honoured', () => {
+  // Nothing but the browse tab reads it, and a stray `?q=` on a repository link
+  // must not become a route that renders differently from the one without it.
+  assert.deepEqual(parseRoute('#/repositories/7?q=widget'), {
+    name: 'repository',
+    repositoryId: 7
+  })
+})

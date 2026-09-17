@@ -587,7 +587,7 @@ export interface ReadDiffOptions {
  * disagreed the expanded context would come from a different version of the
  * file than the hunks it sits between.
  */
-function effectiveChanges(
+export function effectiveChanges(
   requested: DiffChanges,
   compare: Pick<ReviewCompare, 'headWorktree' | 'workingTree'>
 ): DiffChanges {

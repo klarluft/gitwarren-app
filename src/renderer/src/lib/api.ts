@@ -204,6 +204,7 @@ function buildApi(host: string | undefined): GitWarrenApi {
       commits: (input) => ask('reviews.commits', input, host),
       diff: (input) => ask('reviews.diff', input, host),
       tree: (input) => ask('reviews.tree', input, host),
+      search: (input) => ask('reviews.search', input, host),
       file: (input) => ask('reviews.file', input, host),
       image: (input) => ask('reviews.image', input, host),
       reviewedFiles: (input) => ask('reviews.reviewedFiles', input, host),
@@ -355,6 +356,28 @@ export const CACHE_KEYS = {
   reviewTree: (reviewId: number, changes: DiffChanges, host?: string) =>
     scoped(`review-tree:${reviewId}:${changes}`, host),
   /**
+   * One find-in-files run.
+   *
+   * Every input the search takes is in the key, which is what makes going back
+   * to a query - by the back button, or by narrowing the include box and
+   * widening it again - free rather than another `git grep`. The query is last
+   * because it is the part that changes on every keystroke, so a reader
+   * scanning these in the devtools sees the settings line up.
+   */
+  reviewSearch: (
+    reviewId: number,
+    changes: DiffChanges,
+    options: { isRegex: boolean; matchCase: boolean; include: string; exclude: string },
+    query: string,
+    host?: string
+  ) =>
+    scoped(
+      `review-search:${reviewId}:${changes}:${options.isRegex ? 're' : 'lit'}:${
+        options.matchCase ? 'case' : 'any'
+      }:${options.include}:${options.exclude}:${query}`,
+      host
+    ),
+  /**
    * Keyed by the same setting as the diff: expanded context read from another
    * version of the file would not line up with the hunks it sits between.
    */
@@ -405,6 +428,7 @@ export const CACHE_PREFIXES = {
   reviewCommits: 'review-commits:',
   reviewDiff: 'review-diff:',
   reviewTree: 'review-tree:',
+  reviewSearch: 'review-search:',
   reviewFile: 'review-file:',
   reviewImage: 'review-image:'
 } as const
