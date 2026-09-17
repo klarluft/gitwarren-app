@@ -20,7 +20,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type Ref
 } from 'react'
-import { ChevronDown, ChevronUp, Search, X } from 'lucide-react'
+import { ChevronDown, ChevronUp, FolderSearch, Search, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { plural } from '@/lib/format'
@@ -183,9 +183,20 @@ export function useDiffFind(files: readonly FileDiff[]): DiffFind {
 
 export function DiffFindBar({
   find,
+  onSearchRepository,
   ref
 }: {
   find: DiffFind
+  /**
+   * Take this query to the whole repository - Browse files' find in files.
+   *
+   * The step a reviewer takes constantly and had no way to take: you search the
+   * diff for a function, find the two lines that call it, and now you want the
+   * one that *defines* it, which this patch does not contain. The bar already
+   * holds the word, so handing it over is one button rather than retyping it
+   * into another tab.
+   */
+  onSearchRepository?: (query: string) => void
   /** So the tab can measure how much room the bar takes at the top of the scroller. */
   ref?: Ref<HTMLDivElement>
 }) {
@@ -250,6 +261,19 @@ export function DiffFindBar({
       </span>
 
       <div className="flex shrink-0 items-center">
+        {onSearchRepository !== undefined && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-7"
+            onClick={() => onSearchRepository(query)}
+            disabled={query.trim() === ''}
+            title="Search every file in the repository for this"
+            aria-label="Search every file in the repository for this"
+          >
+            <FolderSearch />
+          </Button>
+        )}
         <Button
           variant="ghost"
           size="icon"

@@ -26,6 +26,7 @@ import type {
   RepositoryRefs,
   ReviewCommits,
   ReviewDiff,
+  ReviewSearch,
   ReviewTree
 } from '@shared/git'
 import type {
@@ -177,6 +178,49 @@ export function useReviewTree(reviewId: number, changes: DiffChanges): ListState
     useSWR<ReviewTree, unknown>(
       CACHE_KEYS.reviewTree(reviewId, changes, host),
       () => api.reviews.tree({ id: reviewId, changes }),
+      LIVE_READ_OPTIONS
+    )
+  )
+}
+
+/** Everything a find-in-files run takes, apart from which review it is about. */
+export interface SearchRequest {
+  query: string
+  isRegex: boolean
+  matchCase: boolean
+  include: string
+  exclude: string
+}
+
+/**
+ * Find in files, over the same head `useReviewTree` lists.
+ *
+ * Nothing is read until there is something to look for: an empty query gets a
+ * null key, so opening the search panel does not spawn a `git grep` over the
+ * repository before the reader has typed anything. Every other input is in the
+ * key rather than in the fetcher's closure, which is what lets a reader flick
+ * the case switch back and forth without paying for the same search twice.
+ *
+ * A search is a live git read like the diff, so it is not revalidated on focus
+ * or on a timer; the panel carries a refresh of its own. Coming back to a query
+ * shows what it found last time, immediately, which is the right trade for a
+ * result list somebody is working their way down.
+ */
+export function useReviewSearch(
+  reviewId: number,
+  changes: DiffChanges,
+  request: SearchRequest
+): ListState<ReviewSearch> {
+  const api = useApi()
+  const host = useHost()
+  const { query, ...options } = request
+
+  return toState(
+    useSWR<ReviewSearch, unknown>(
+      query === ''
+        ? null
+        : CACHE_KEYS.reviewSearch(reviewId, changes, options, query, host),
+      () => api.reviews.search({ id: reviewId, changes, query, ...options }),
       LIVE_READ_OPTIONS
     )
   )

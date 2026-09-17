@@ -398,6 +398,20 @@ function contract(carrier: Carrier): void {
     // head branch lives in a linked worktree.
     const absolute = await carrier.call('reviews.filePath', { id: reviewId, path: 'a.txt' })
     assert.equal(absolute, join(checkout, 'a.txt'))
+
+    // Find in files goes over the same wire as the rest of them, defaults and
+    // all: the panel sends a query and nothing else on a first search.
+    const found = await carrier.call('reviews.search', {
+      id: reviewId,
+      changes: 'committed',
+      query: 'TWO'
+    })
+    assert.equal(found.error, null)
+    assert.deepEqual(
+      found.files.map((file) => file.path),
+      ['a.txt']
+    )
+    assert.deepEqual(found.files[0]?.lines, [{ line: 2, text: 'TWO', clipped: false }])
   })
 
   test(`[${carrier.name}] repositories answer through the dispatcher as they do through a service`, async () => {

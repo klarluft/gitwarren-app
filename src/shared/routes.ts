@@ -87,7 +87,33 @@ export type Route =
    */
   | { name: 'hosts'; host?: undefined }
   | ({ name: 'repository'; repositoryId: number } & HostScoped)
-  | ({ name: 'review'; reviewId: number; tab: ReviewTab; focus?: DiffFocus } & HostScoped)
+  | ({
+      name: 'review'
+      reviewId: number
+      tab: ReviewTab
+      focus?: DiffFocus
+      /**
+       * What the browse tab is searching the repository's contents for.
+       *
+       * In the location for the same reason `focus` is: a search is a place.
+       * `#/reviews/4/browse?q=resolveAnchor` survives a reload, the back button
+       * walks out of it, and it is a link that can be pasted to a colleague or
+       * written into a comment by an agent - which is also what lets Files
+       * changed hand a word to this tab with nothing but a `navigate`.
+       *
+       * A *query string* rather than another path segment, because it is not
+       * part of the hierarchy: a search and a file being read are independent,
+       * both can be on at once, and `browse/<path>/<query>` would be a grammar
+       * where one of them cannot be said without the other.
+       *
+       * Deliberately only the query. How the search is run - case, regular
+       * expressions, which files are included - is a preference of the person
+       * running it, kept in `localStorage`; a link carrying those would push
+       * the sender's habits into the recipient's window. See
+       * `file-search-panel.tsx`.
+       */
+      search?: string
+    } & HostScoped)
 
 /** The review screen - the only route anything links *into* from outside. */
 export type ReviewRoute = Extract<Route, { name: 'review' }>
@@ -111,6 +137,30 @@ const AGENT_SEGMENT = 'agent'
 
 /** The Hosts screen. Never preceded by a host segment - see `Route`. */
 const HOSTS_SEGMENT = 'hosts'
+
+/** What a content search is called in the hash. Short; it is typed by hand. */
+const QUERY_PARAM = 'q'
+
+/**
+ * Take a `?...` off the end of a hash, if there is one.
+ *
+ * Split before anything else is parsed, so a `/` inside a query value - a
+ * search for `src/app` - cannot become a path segment. `URLSearchParams` does
+ * the decoding, which is what makes a query containing `&`, `#` or `%` survive
+ * the round trip through `hrefFor` unchanged.
+ */
+function takeQuery(hash: string): { path: string; search?: string } {
+  const at = hash.indexOf('?')
+  if (at === -1) return { path: hash }
+
+  const value = new URLSearchParams(hash.slice(at + 1)).get(QUERY_PARAM)
+  const path = hash.slice(0, at)
+  // `?q=` with nothing after it is a real location and not the same as no `q`
+  // at all: it is the search panel, open, with nothing typed into it yet. That
+  // is what "search in files" navigates to from the other tabs, and what the
+  // panel's own close button navigates away from.
+  return value === null ? { path } : { path, search: value }
+}
 
 /**
  * `#/h/<instance>`, or nothing at all for a local route.
@@ -136,12 +186,19 @@ export function hrefFor(route: Route): string {
     case 'repository':
       return `#/${prefix}repositories/${route.repositoryId}`
     case 'review': {
-      const base = `#/${prefix}reviews/${route.reviewId}/${route.tab}`
-      if (!route.focus) return base
-      // The path is encoded whole, slashes included, so it stays one segment.
-      const { filePath, side, line } = route.focus
-      const at = side === undefined || line === undefined ? '' : `/${side}/${line}`
-      return `${base}/${encodeURIComponent(filePath)}${at}`
+      let href = `#/${prefix}reviews/${route.reviewId}/${route.tab}`
+      if (route.focus) {
+        // The path is encoded whole, slashes included, so it stays one segment.
+        const { filePath, side, line } = route.focus
+        const at = side === undefined || line === undefined ? '' : `/${side}/${line}`
+        href += `/${encodeURIComponent(filePath)}${at}`
+      }
+      // `?q=` is written for an empty search too: see `takeQuery` on why the
+      // open-but-empty panel is a location of its own.
+      if (route.search !== undefined) {
+        href += `?${QUERY_PARAM}=${encodeURIComponent(route.search)}`
+      }
+      return href
     }
   }
 }
@@ -225,7 +282,8 @@ function takeHost(segments: string[]): { host?: string; rest: string[] } {
 }
 
 export function parseRoute(hash: string): Route {
-  const all = hash.replace(/^#\/?/, '').split('/').filter(Boolean)
+  const { path, search } = takeQuery(hash)
+  const all = path.replace(/^#\/?/, '').split('/').filter(Boolean)
   const { host, rest: segments } = takeHost(all)
 
   // Spread rather than assign, so a local route has no `host` key at all rather
@@ -258,9 +316,13 @@ export function parseRoute(hash: string): Route {
       // still perfectly viewable without one.
       const tab = isReviewTab(segments[2]) ? segments[2] : 'conversation'
       const focus = parseFocus(segments.slice(3))
+      // Spread rather than assigned, like `scope` above: a route with no search
+      // has no `search` key at all, so two routes that mean the same place
+      // compare equal.
+      const searching = search === undefined ? {} : { search }
       return focus
-        ? { name: 'review', reviewId, tab, focus, ...scope }
-        : { name: 'review', reviewId, tab, ...scope }
+        ? { name: 'review', reviewId, tab, focus, ...searching, ...scope }
+        : { name: 'review', reviewId, tab, ...searching, ...scope }
     }
   }
 

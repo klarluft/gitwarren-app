@@ -193,6 +193,49 @@ export interface ReviewTree {
 }
 
 /**
+ * One line of one file that a content search matched.
+ *
+ * The line and not the match. Where on the line the hit is is worked out in the
+ * renderer by `matchOffsets` - the same function that marks the find bar's hits
+ * in the diff - so the result row and the file it opens can never disagree
+ * about what was found. See `core/git-search.ts`.
+ */
+export interface SearchLine {
+  /** 1-based, on the version of the file that was searched. */
+  line: number
+  /** The line's text, clipped when the line is enormous. */
+  text: string
+  /** True when `text` is only the start of the line. */
+  clipped: boolean
+}
+
+/** One file's hits, in the order they appear in it. */
+export interface SearchFileMatches {
+  path: string
+  lines: SearchLine[]
+}
+
+/**
+ * What a search of a review's repository found.
+ *
+ * Counts are of what is *in* `files` rather than of what exists, and
+ * `truncated` is how the difference is admitted. A search that says "2,000
+ * lines" and means "at least 2,000" would be a number nobody could act on.
+ */
+export interface ReviewSearch {
+  files: SearchFileMatches[]
+  /** Matching lines carried back, across every file. */
+  lineCount: number
+  fileCount: number
+  /** Which head was searched - see `ReviewTree.source`, same rule. */
+  source: 'worktree' | 'commit'
+  /** True when the ceiling was reached and there are more hits than these. */
+  truncated: boolean
+  /** Set when the search could not be run at all - a bad pattern, usually. */
+  error: string | null
+}
+
+/**
  * Image formats a diff previews rather than writing off as "binary".
  *
  * Raster only, and deliberately so. SVG is text, so it already gets a real line

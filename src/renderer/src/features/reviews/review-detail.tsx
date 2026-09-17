@@ -27,6 +27,7 @@ import {
   GitPullRequestArrow,
   MessageSquare,
   Pencil,
+  Search,
   Trash2
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -43,7 +44,7 @@ import { UnknownHostCard } from '@/features/hosts/unknown-host-card'
 import { navigate, replace, REVIEW_TABS, type DiffFocus, type ReviewTab } from '@/lib/router'
 import { useReviewComments } from '../comments/use-comments'
 import { RefChip } from './ref-chip'
-import { ReviewBrowseTab } from './review-browse-tab'
+import { ReviewBrowseTab, SEARCH_KEYS } from './review-browse-tab'
 import { ReviewCommitsTab } from './review-commits-tab'
 import { ReviewConversationTab } from './review-conversation-tab'
 import { ReviewFilesTab } from './review-files-tab'
@@ -80,9 +81,11 @@ interface ReviewDetailProps {
   tab: ReviewTab
   /** A line of the diff to scroll to, when arriving from a conversation thread. */
   focus?: DiffFocus
+  /** What the browse tab is searching the repository for - see `Route`. */
+  search?: string
 }
 
-export function ReviewDetail({ reviewId, tab, focus }: ReviewDetailProps) {
+export function ReviewDetail({ reviewId, tab, focus, search }: ReviewDetailProps) {
   // Every link out of this screen has to carry the host, or a reviewer three
   // clicks into a machine's diff is walked back to their own repositories by a
   // breadcrumb.
@@ -137,6 +140,44 @@ export function ReviewDetail({ reviewId, tab, focus }: ReviewDetailProps) {
                 })
               ),
               {
+                /**
+                 * Find in files, from wherever you are in the review.
+                 *
+                 * Registered here rather than in the browse tab because the
+                 * moment you want it is almost never while you are already
+                 * there: it is halfway down a diff, at a call to a function you
+                 * have not read. So it is a review-wide command that goes to
+                 * the tab *and* opens the panel - the browse tab needs no local
+                 * state to receive it, because "the search is open" is part of
+                 * the location (see `Route.search`).
+                 *
+                 * `mod+shift+f` is the key every editor uses for this, sitting
+                 * one modifier away from the `mod+f` that searches the diff -
+                 * which is the relationship the two actually have.
+                 *
+                 * It carries the focus and any search already running, so that
+                 * pressing it a second time - or while reading a file it found
+                 * - opens nothing new and closes nothing. A shortcut that
+                 * cleared the query it was about to be used on would be worse
+                 * than no shortcut.
+                 */
+                id: 'review:search-files',
+                label: 'Search in files',
+                group: 'Review',
+                keys: SEARCH_KEYS,
+                keywords: 'find grep contents text browse repository',
+                icon: Search,
+                run: () =>
+                  replace({
+                    name: 'review',
+                    reviewId,
+                    tab: 'browse',
+                    ...(focus === undefined ? {} : { focus }),
+                    search: search ?? '',
+                    ...scope
+                  })
+              },
+              {
                 id: 'review:edit',
                 label: 'Edit review',
                 group: 'Review',
@@ -177,7 +218,7 @@ export function ReviewDetail({ reviewId, tab, focus }: ReviewDetailProps) {
                 run: () => setRemoving(review)
               }
             ],
-      [review, reviewId, scope, tab, statusBusy, toggleStatus]
+      [review, reviewId, scope, tab, focus, search, statusBusy, toggleStatus]
     )
   )
 
@@ -374,7 +415,7 @@ export function ReviewDetail({ reviewId, tab, focus }: ReviewDetailProps) {
           <ReviewFilesTab review={review} focus={focus} />
         </TabsPanel>
         <TabsPanel value="browse">
-          <ReviewBrowseTab review={review} focus={focus} />
+          <ReviewBrowseTab review={review} focus={focus} search={search} />
         </TabsPanel>
       </Tabs>
 

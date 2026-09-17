@@ -39,27 +39,48 @@
  * answer anybody wants from a file browser.
  */
 import { useCallback, useMemo } from 'react'
-import { AlertCircle, FolderTree, ListTree, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { AlertCircle, FolderTree, ListTree, PanelLeftClose, PanelLeftOpen, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { errorMessage, isDisconnection } from '@/lib/errors'
 import { plural } from '@/lib/format'
+import { formatStep } from '@/lib/keys'
 import { useHost, useApi } from '@/lib/host-scope'
 import { useHostScope } from '@/lib/host-scope'
 import { useNarrow } from '@/lib/narrow'
 import { useStoredFlag, useStoredPreference } from '@/lib/preferences'
 import { replace, type DiffFocus } from '@/lib/router'
-import { cn } from '@/lib/utils'
 import { useCommentMutations, useReviewComments } from '../comments/use-comments'
+import { FileSearchPanel } from './file-search-panel'
 import { FileSourceCard } from './file-source-view'
 import { RepositoryFilesTree } from './repository-files-tree'
+import { SidebarColumn } from './sidebar-column'
 import { DEFAULT_DIFF_CHANGES, useEditors, useReviewDiff, useReviewTree } from './use-reviews'
 import { isInlineAnchor } from '@shared/comment-anchors'
 import { remotelyOpenable } from '@shared/editors'
 import type { Review } from '@shared/schemas'
 
-export function ReviewBrowseTab({ review, focus }: { review: Review; focus?: DiffFocus }) {
+/**
+ * The key that opens this tab's search, from anywhere in the review.
+ *
+ * Declared here and bound in `review-detail.tsx`, because the command belongs
+ * to the whole review - you reach for it while reading a diff - but the thing
+ * it opens is this tab. One spelling, so the button's tooltip and the key that
+ * actually fires cannot drift.
+ */
+export const SEARCH_KEYS = 'mod+shift+f'
+
+export function ReviewBrowseTab({
+  review,
+  focus,
+  search
+}: {
+  review: Review
+  focus?: DiffFocus
+  /** The content search, from the route. Undefined means the file list. */
+  search?: string
+}) {
   const api = useApi()
   const host = useHost()
   const scope = useHostScope()
@@ -78,13 +99,58 @@ export function ReviewBrowseTab({ review, focus }: { review: Review; focus?: Dif
   const localEditors = useEditors()
 
   const selectedPath = focus?.filePath ?? null
+  /** Whether the sidebar is showing the search rather than the file list. */
+  const searching = search !== undefined
+
+  /**
+   * Go somewhere in this tab, keeping whatever the reader has not changed.
+   *
+   * Everything this tab does is a move within one location - open a file, jump
+   * to a line, type another letter into the search - so each of them is a
+   * `replace` of the same route with one part of it different. Written once,
+   * because the failure mode of writing it four times is the one where opening
+   * a search result closes the search that found it.
+   */
+  const go = useCallback(
+    (to: { focus?: DiffFocus; search?: string }) => {
+      const nextFocus = 'focus' in to ? to.focus : focus
+      const nextSearch = 'search' in to ? to.search : search
+      replace({
+        name: 'review',
+        reviewId: review.id,
+        tab: 'browse',
+        ...(nextFocus === undefined ? {} : { focus: nextFocus }),
+        ...(nextSearch === undefined ? {} : { search: nextSearch }),
+        ...scope
+      })
+    },
+    [review.id, scope, focus, search]
+  )
 
   const selectFile = useCallback(
-    (path: string) => {
-      replace({ name: 'review', reviewId: review.id, tab: 'browse', focus: { filePath: path }, ...scope })
-    },
-    [review.id, scope]
+    (path: string) => go({ focus: { filePath: path } }),
+    [go]
   )
+
+  /**
+   * Open a file at the line a search result names.
+   *
+   * `head` because a file browser has one side - `file-source-view.tsx` numbers
+   * every row on the head side, and a marked line addressed to the other one
+   * would land nowhere.
+   */
+  const openAtLine = useCallback(
+    (path: string, line: number) => go({ focus: { filePath: path, side: 'head', line } }),
+    [go]
+  )
+
+  /**
+   * Stable across a render that changed nothing about the location, which is
+   * what the panel's settle timer is waiting on: an inline arrow here would be
+   * a new function on every render, and the panel would restart its countdown
+   * every time anything else on the screen moved.
+   */
+  const setSearch = useCallback((next: string) => go({ search: next }), [go])
 
   const changedPaths = useMemo(
     () => new Set((diff.data?.files ?? []).map((file) => file.path)),
@@ -176,6 +242,26 @@ export function ReviewBrowseTab({ review, focus }: { review: Review; focus?: Dif
           {listOpen ? <PanelLeftClose /> : <PanelLeftOpen />}
           {listOpen ? 'Hide files' : 'Show files'}
         </Button>
+        {/* Opens the sidebar as well as switching it: "search in files" while
+            the list is hidden has to put something on screen, or the button
+            does nothing that can be seen. */}
+        <Button
+          variant={searching ? 'secondary' : 'outline'}
+          size="sm"
+          onClick={() => {
+            if (searching && listOpen) {
+              go({ search: undefined })
+              return
+            }
+            if (!treeOpen) setTreeOpen(true)
+            if (!searching) go({ search: '' })
+          }}
+          aria-pressed={searching}
+          title={`Search the contents of every file (${formatStep(SEARCH_KEYS)})`}
+        >
+          <Search />
+          Search in files
+        </Button>
         <p className="text-xs text-muted-foreground">
           {plural(paths.length, 'file')} at <span className="font-mono">{review.headRef}</span>
           {tree.data?.truncated === true && ' (listing cut short)'}
@@ -193,22 +279,26 @@ export function ReviewBrowseTab({ review, focus }: { review: Review; focus?: Dif
           the file beside it scrolls; a stretched column would never stick. */}
       <div className="flex items-start gap-4">
         {listOpen && (
-          <aside
-            className={cn(
-              'rounded-lg border border-border bg-card/50',
-              narrow
-                ? 'w-full'
-                : 'sticky top-2 max-h-[calc(100dvh-6rem)] w-56 shrink-0 overflow-y-auto xl:w-64 2xl:w-72'
+          <SidebarColumn storageKey="browse-tree-width" narrow={narrow} label="the file list">
+            {searching ? (
+              <FileSearchPanel
+                reviewId={review.id}
+                changes={changes}
+                query={search}
+                onQueryChange={setSearch}
+                onOpen={openAtLine}
+                selectedPath={selectedPath}
+              />
+            ) : (
+              <RepositoryFilesTree
+                paths={paths}
+                selectedPath={selectedPath}
+                onSelect={selectFile}
+                changedPaths={changedPaths}
+                unresolvedByFile={unresolvedByFile}
+              />
             )}
-          >
-            <RepositoryFilesTree
-              paths={paths}
-              selectedPath={selectedPath}
-              onSelect={selectFile}
-              changedPaths={changedPaths}
-              unresolvedByFile={unresolvedByFile}
-            />
-          </aside>
+          </SidebarColumn>
         )}
 
         {/* On a narrow window the list is the screen *instead of* the file, so
@@ -221,10 +311,20 @@ export function ReviewBrowseTab({ review, focus }: { review: Review; focus?: Dif
                 <div className="rounded-full bg-muted p-3 text-muted-foreground">
                   <FolderTree className="size-6" />
                 </div>
-                <h3 className="font-medium">Pick a file</h3>
+                <h3 className="font-medium">{searching ? 'Pick a result' : 'Pick a file'}</h3>
                 <p className="mx-auto max-w-sm text-sm text-muted-foreground">
-                  Every file in the repository is here, not only the ones this branch changed. Open
-                  one to read it — and to comment on any line of it, in this review.
+                  {searching ? (
+                    <>
+                      Search the contents of every file in the repository at this review’s head.
+                      Open a result to read the file around it — and to comment on any line of it,
+                      in this review.
+                    </>
+                  ) : (
+                    <>
+                      Every file in the repository is here, not only the ones this branch changed.
+                      Open one to read it — and to comment on any line of it, in this review.
+                    </>
+                  )}
                 </p>
               </Card>
             ) : (
@@ -239,6 +339,17 @@ export function ReviewBrowseTab({ review, focus }: { review: Review; focus?: Dif
                 threads={threadsByFile.get(selectedPath) ?? []}
                 comments={{ reviewId: review.id, mutations, changes }}
                 isChanged={changedPaths.has(selectedPath)}
+                /**
+                 * The word that was searched for, marked in the file the
+                 * result opened - the diff's find bar, arriving at the other
+                 * end of the jump. Without it a reader lands on line 412 of an
+                 * unfamiliar file and has to find the match again by eye.
+                 *
+                 * Literal, because the route carries the query and not how it
+                 * was run: a regular-expression search opens its file unmarked
+                 * rather than marked in the wrong places.
+                 */
+                search={search === undefined || search === '' ? undefined : { query: search, active: null }}
                 marked={
                   focus?.side !== undefined && focus.line !== undefined
                     ? { side: focus.side, line: focus.line }

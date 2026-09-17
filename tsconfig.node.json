@@ -43,6 +43,8 @@
     "src/renderer/src/lib/__tests__/format.test.ts",
     "src/renderer/src/features/reviews/diff-search.ts",
     "src/renderer/src/features/reviews/__tests__/diff-search.test.ts",
+    "src/renderer/src/features/reviews/file-filter.ts",
+    "src/renderer/src/features/reviews/__tests__/file-filter.test.ts",
     "src/web/loopback-fragment.ts",
     "src/web/__tests__/loopback-fragment.test.ts",
     "src/web/wire.ts",

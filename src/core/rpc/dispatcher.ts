@@ -198,6 +198,7 @@ const handlers: {
   'reviews.commits': (params) => reviewsService.commits(params),
   'reviews.diff': (params) => reviewsService.diff(params),
   'reviews.tree': (params) => reviewsService.tree(params),
+  'reviews.search': (params) => reviewsService.search(params),
   'reviews.file': (params) => reviewsService.file(params),
   'reviews.image': (params) => reviewsService.image(params),
   'reviews.filePath': (params) => reviewsService.absolutePath(params),
