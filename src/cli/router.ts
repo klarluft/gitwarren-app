@@ -30,10 +30,13 @@ import { runDaemon } from '../daemon/daemon.js'
 import { shutdownListen } from '../daemon/listen.js'
 import { runAgentSetup } from './agent-setup.js'
 import { openInBrowser } from './browser.js'
+import { runDoctor } from './doctor.js'
 import { locateMcpServer } from './install.js'
 import { ensureLaunchers } from './launchers.js'
 import { runOpen } from './open.js'
 import { runService } from './service.js'
+import { runUninstall } from './uninstall.js'
+import { runUpdate } from './update.js'
 
 /** Stamped by `vite.daemon.config.ts`; absent under `tsx`, like in `listen.ts`. */
 declare const __APP_VERSION__: string
@@ -58,6 +61,14 @@ Keep it running
                                  every login
   gitwarren service uninstall    stop that, and remove the login item
   gitwarren service status       what is running, and where the data is
+
+Keep it current, or remove it
+  gitwarren update               move to the newest release (--check only says
+                                 whether there is one)
+  gitwarren doctor               check every path GitWarren asks another program
+                                 to run, and --fix the ones that have gone stale
+  gitwarren uninstall            remove GitWarren from this machine. Reviews are
+                                 kept unless --data says otherwise
 
 Let a coding agent in
   gitwarren agent-setup          print the one sentence to give an agent so it can
@@ -338,8 +349,14 @@ function serveBesideMcp(): void {
  * command", which the entry point turns into exit 2 - a caller can act on that,
  * where a command that ran and failed has already set `exitCode` and said
  * something more specific than any code.
+ *
+ * A promise means the same thing later. `update` downloads and `uninstall`
+ * asks a question, and neither can answer synchronously; both still refuse a
+ * bad argv *before* awaiting anything, so a typo is the usage and an exit code
+ * rather than a download. The entry point is the only caller that has to care,
+ * and `gitwarren.ts` handles both shapes in one place.
  */
-export function runCli(argv: readonly string[]): boolean {
+export function runCli(argv: readonly string[]): boolean | Promise<boolean> {
   const [command, ...rest] = argv
 
   switch (command) {
@@ -361,6 +378,15 @@ export function runCli(argv: readonly string[]): boolean {
 
     case 'agent-setup':
       return runAgentSetup(rest)
+
+    case 'update':
+      return runUpdate(rest)
+
+    case 'doctor':
+      return runDoctor(rest)
+
+    case 'uninstall':
+      return runUninstall(rest)
 
     case 'mcp':
       return runMcp(rest)

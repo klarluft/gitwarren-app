@@ -22,9 +22,17 @@
 #
 # Set GITWARREN_VERSION to install a specific release instead of the latest.
 #
-# Uninstall: `gitwarren service uninstall`, then `rm -rf ~/.gitwarren`. Reviews
-# live elsewhere (`gitwarren service status` prints where) and are not touched
-# by either.
+# ## Afterwards, the program does this itself
+#
+# `gitwarren update` is this script from the inside, and is the better way to
+# move forward: it restarts the background daemon, which this cannot - a
+# launcher pointing at the new install does nothing for a `serve` that is
+# already running - and it removes the version it replaced, which this does not
+# either. `gitwarren uninstall` undoes the whole of it, launchers and login
+# item included. Both are in `src/cli/`.
+#
+# This script stays the way *in*, because there is nothing to run yet when it
+# is needed.
 set -eu
 
 repo="klarluft/gitwarren-app"
@@ -75,7 +83,7 @@ launcher="$root/bin/gitwarren"
 
 if [ -x "$launcher" ] && [ "$("$launcher" --version 2>/dev/null || true)" = "$version" ]; then
   say "GitWarren $version is already installed at $dest."
-  say "Run \`gitwarren serve\` to start it."
+  say "Run \`gitwarren serve\` to start it, or \`gitwarren doctor\` to check it over."
   exit 0
 fi
 
@@ -145,3 +153,6 @@ say ""
 say "    gitwarren serve              run it now, in this terminal"
 say "    gitwarren service install    or keep it running in the background, from now and at every login"
 say "    gitwarren agent-setup        the sentence to give a coding agent so it can use GitWarren"
+say ""
+say "From here on GitWarren looks after itself: \`gitwarren update\` moves to the next"
+say "release and \`gitwarren uninstall\` takes all of this back off the machine."

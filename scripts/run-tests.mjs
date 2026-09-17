@@ -83,7 +83,31 @@ function tsxCli() {
  * cover them.
  */
 const ENVELOPE = 'only a carrier holding raw messages can observe the response envelope'
+
+/**
+ * The daemon tarball is built for Linux and macOS only - see
+ * `scripts/build-daemon-tarball.mjs` - so a Windows machine has no install for
+ * `gitwarren update` to replace and nothing for these to act on.
+ */
+const TARBALL = 'the daemon tarball, and so an update of one, is POSIX-only'
+
+/**
+ * Windows keeps its at-logon tasks in a global store rather than under `HOME`,
+ * which is what every other test here redirects into a temporary directory. A
+ * `buildPlan` that ran there would query - and then remove - the developer's
+ * own login item, so these run on the two platforms where a test HOME is the
+ * whole truth.
+ */
+const LOGIN_ITEM = 'a Windows login item is in a global store, not under a test HOME'
+
 const MAY_SKIP = new Map([
+  ['an update unpacks into its own version directory and takes the old one with it', TARBALL],
+  ['a tarball that unpacks into something that cannot run leaves the version directory alone', TARBALL],
+  ['a managed install is removed with its launchers, and the reviews are not', LOGIN_ITEM],
+  ['--data is the only way the reviews go', LOGIN_ITEM],
+  ['the desktop app keeps its launcher, and is named rather than passed over', LOGIN_ITEM],
+  ['a Homebrew install is not deleted behind brew’s back', LOGIN_ITEM],
+  ['a checkout has nothing to uninstall and says so', LOGIN_ITEM],
   [
     'a symlink counts as what it points at',
     'Windows refuses a symlink to an unprivileged process without Developer Mode (M5.0)'

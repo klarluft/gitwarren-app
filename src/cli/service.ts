@@ -62,7 +62,8 @@ install    keeps GitWarren running in the background: it starts now, and again
            for a machine that is only ever reached from another one.
 uninstall  stops the background GitWarren and removes the login item. The two
            files in ~/.gitwarren/bin stay, because an agent config may name
-           one; delete that directory by hand to remove them.
+           one - \`gitwarren uninstall\` is the command that removes GitWarren
+           from this machine entirely.
 status     what is registered, what is running, and where the data is.
 `
 
@@ -177,7 +178,7 @@ function registerLoginItem(launcher: string): string {
   return path
 }
 
-function removeLoginItem(): string {
+export function removeLoginItem(): string {
   if (process.platform === 'win32') {
     ask('schtasks', ['/Delete', '/TN', WINDOWS_TASK, '/F'])
     return `Scheduled Task "${WINDOWS_TASK}"`
@@ -195,8 +196,71 @@ function removeLoginItem(): string {
   return path
 }
 
+/**
+ * Whether the OS has a login item at all, for the two commands that have to
+ * act on one they did not register.
+ *
+ * `loginItemState` below answers the same question in a sentence for a person
+ * to read; this answers it as a fact, because `uninstall` has to decide
+ * whether to remove one and `update` has to decide whether to restart one.
+ * Asking the OS rather than looking for the file: on Windows there is no file,
+ * and on the other two a unit that was written and never loaded is a thing
+ * `uninstall` should still clean up.
+ */
+export function isLoginItemRegistered(): boolean {
+  if (process.platform === 'win32') {
+    return ask('schtasks', ['/Query', '/TN', WINDOWS_TASK]) !== null
+  }
+  const path = unitPath()
+  return path !== null && existsSync(path)
+}
+
+/**
+ * Restart the background GitWarren, so an update takes effect now.
+ *
+ * This is the step `install.sh` cannot take and therefore never took: it
+ * finishes by writing launchers, which point at the new install, while the
+ * daemon that is *already running* goes on serving the old code until the next
+ * login. On macOS the reinstall happened to fix it - `bootout` then
+ * `bootstrap` is a restart - and on Linux and Windows it did not, so an update
+ * silently did nothing until the user logged out. Whoever runs `gitwarren
+ * update` has said plainly enough that they want the new version now.
+ *
+ * Only ever a restart of something already running: `try-restart` on systemd,
+ * and on Windows a task that is not running is not started. A machine whose
+ * user stopped the service meant to stop it, and an update is not consent to
+ * start it again.
+ *
+ * Null when there was nothing to restart, which is the ordinary case on a host
+ * installed with `--no-login-item`.
+ */
+export function restartLoginItem(): string | null {
+  if (!isLoginItemRegistered()) return null
+
+  if (process.platform === 'win32') {
+    // `/End` on a task that is not running exits non-zero and means "there was
+    // nothing running", which is why this is `ask` and why the result decides
+    // whether to start it again.
+    if (ask('schtasks', ['/End', '/TN', WINDOWS_TASK]) === null) return null
+    ask('schtasks', ['/Run', '/TN', WINDOWS_TASK])
+    return `Scheduled Task "${WINDOWS_TASK}"`
+  }
+
+  if (process.platform === 'darwin') {
+    // `kickstart -k` stops and starts in one step, and reports failure for a
+    // label that is not loaded - which is the "nothing to restart" case.
+    return ask('launchctl', ['kickstart', '-k', `${launchdDomain()}/${LAUNCHD_LABEL}`]) === null
+      ? null
+      : LAUNCHD_LABEL
+  }
+
+  if (ask('systemctl', ['--user', 'is-active', SYSTEMD_UNIT]) === null) return null
+  ask('systemctl', ['--user', 'try-restart', SYSTEMD_UNIT])
+  return SYSTEMD_UNIT
+}
+
 /** Whether the OS says the login item is registered, and how it knows. */
-function loginItemState(): string {
+export function loginItemState(): string {
   if (process.platform === 'win32') {
     return ask('schtasks', ['/Query', '/TN', WINDOWS_TASK]) === null
       ? 'not registered'
@@ -289,7 +353,8 @@ export function runService(argv: readonly string[]): boolean {
         console.log(
           'GitWarren no longer runs in the background or starts at login. `gitwarren serve` ' +
             'still runs it in a terminal. The two files in ~/.gitwarren/bin were left alone, ' +
-            'because an agent config may name one; delete that directory to remove them.'
+            'because an agent config may name one - `gitwarren uninstall` removes those, and ' +
+            'GitWarren itself, in one step.'
         )
         return true
 

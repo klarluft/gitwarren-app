@@ -159,6 +159,20 @@ export function locateMcpServer(): string | null {
   return findMcpServer(resolveScript())
 }
 
+/**
+ * The same answer, for `cli/layout.ts`, which asks a different question of it.
+ *
+ * `describeSelf` is about *relaunching*: it resolves the migrations folder and
+ * throws when it cannot, because a launcher written without one starts
+ * nothing. `update`, `uninstall` and `doctor` ask only where this install's
+ * files are, and all three have to keep working on a machine broken enough
+ * that the migrations have gone missing - that is a thing for `doctor` to
+ * report, not a reason for it to refuse to run.
+ */
+export function locateSelfScript(): string | null {
+  return resolveScript()
+}
+
 /** What this process would have to be told to start itself again. */
 export function describeSelf(): SelfDescription {
   const script = resolveScript()
