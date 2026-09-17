@@ -41,6 +41,34 @@ bring their own.
 | --- | --- |
 | `gitwarren agent-setup` | print the one sentence to give an agent so it can reach GitWarren over MCP |
 
+**Keep it current, or take it off again**
+
+| | |
+| --- | --- |
+| `gitwarren update --check` | say what is installed and what the newest release is |
+| `gitwarren doctor` | is every path GitWarren hands another program still pointing at something? `--fix` repoints a stale one |
+| `gitwarren uninstall` | take GitWarren off this machine; reviews stay unless `--data` says otherwise |
+
+`gitwarren update` replaces an install in place only when GitWarren is the one
+that put it there — `install.sh`, or the app installing onto a machine of yours
+over ssh. **This package is not that case, and the command says so rather than
+writing into a `node_modules` it does not own:** an `npm install -g` copy is
+updated with `npm install -g gitwarren@latest`, and under `npx` there is
+nothing to update at all, because `npx gitwarren@latest` fetches the newest
+release every time. `--check` answers *is there a newer one* whichever of those
+you are.
+
+`uninstall` is worth knowing here, where `npm uninstall` looks like the whole
+story. It is not. Whichever command you ran first also wrote
+`~/.gitwarren/bin/gitwarren` and `gitwarren-mcp`, and `service install` may
+have registered a login item; npm has a record of none of that, and an agent
+config naming a launcher goes on naming it after the package is gone — which
+surfaces as *MCP server failed to connect*, in another product, with nothing
+saying why. `gitwarren uninstall` takes the launchers it can attribute to this
+install and the login item with them, and names the npm command for the package
+itself. `gitwarren doctor` says whether a launcher has already been left
+dangling, and exits non-zero when one has, so a script can be what notices.
+
 `gitwarren serve --stdio` answers GitWarren's protocol on stdin and stdout; it
 is what a GitWarren on another machine spawns, and nothing a person needs to
 type.

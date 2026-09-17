@@ -1335,6 +1335,48 @@ and the script installed v0.1.8 from GitHub with curl and again with only
 wget. `service install` on a real systemd was not re-exercised — the only
 change there is wording.
 
+**M3.3 revisited again on 16 September: the install could arrive and never
+leave.** M3.3 gave the command line a way *in* on a machine with no Homebrew
+and no Node, and stopped there. An `install.sh` install had exactly one way
+forward — remember the curl one-liner — and no way at all to find out there was
+something to move to; removing it was three steps the reader assembled from the
+README, the comment at the top of `install.sh` and the formula's caveats.
+Underneath both sat one bug with three faces: `~/.gitwarren/bin/gitwarren-mcp`
+has one path per machine, two programs that write it, and nothing that removed
+it. `brew uninstall gitwarren-cli` takes the Cellar and leaves the launcher
+naming it, and the only symptom is an agent reporting *MCP server failed to
+connect* — in another product, with nothing naming the cause.
+
+`update`, `uninstall` and `doctor` are the answer, and the new decision they
+all rest on is `src/cli/layout.ts`: which of five kinds of install this is, and
+therefore what may be written over or deleted. Only `~/.gitwarren/daemon/<version>`
+is ours — the layout M3.3 defined, which is exactly why it is the one an
+in-place update can replace. Homebrew, npm and npx are told the command that is
+theirs and nothing is touched; a checkout owns nothing at all. The rule is that
+a command may delete a file only if it can say which install put it there.
+
+Two things `update` does that re-running `install.sh` cannot, both of which are
+consequences of it running *inside* the program rather than from a pipe: the
+background daemon that is already running is restarted, rather than serving the
+old code until the next login — which on Linux and Windows is where the old
+script quietly stopped short — and the version it replaced is removed, which
+nothing has ever done on any machine, including the hosts M4 installs onto at
+~45 MB a version. And launchers are now *read* as well as written:
+`readLauncherContents` parses back every form both writers produce, the CLI's
+two and the app's three including the AppImage one, so ownership is decidable
+and a machine carrying both the app and the command line keeps working after
+either is removed.
+
+Verified end to end against the published 0.1.14 release from a managed install
+in a temporary `HOME`: downloaded, checksum matched the one the release
+published in its own formula, unpacked, launcher rewritten by the *new* binary
+with the right absolute paths — which is also the proof it runs here —
+`0.1.13 - 907 KB freed`, and then `uninstall --yes` took `~/.gitwarren` and left
+the data directory and its database alone. Not done here: the periodic "a new
+version exists" notice on `serve`, of which `update --check` is the on-demand
+half, and the desktop app's own uninstall, which still leaves the command
+line's furniture behind.
+
 **M3.4, done on the Mac, 10 September.** The screen that hands GitWarren to an
 agent. Most of the words were already right — M2 wrote the sentence and put it
 above the snippet — so this change is mostly about where they live and who they
