@@ -35,10 +35,11 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsCount, TabsList, TabsPanel, TabsTab } from '@/components/ui/tabs'
-import { errorMessage, isDisconnection } from '@/lib/errors'
+import { errorMessage, isDisconnection, isUnknownHost } from '@/lib/errors'
 import { plural } from '@/lib/format'
 import { useHostScope } from '@/lib/host-scope'
 import { useRegisterCommands, type Command } from '@/features/commands/command-registry'
+import { UnknownHostCard } from '@/features/hosts/unknown-host-card'
 import { navigate, replace, REVIEW_TABS, type DiffFocus, type ReviewTab } from '@/lib/router'
 import { useReviewComments } from '../comments/use-comments'
 import { RefChip } from './ref-chip'
@@ -190,6 +191,21 @@ export function ReviewDetail({ reviewId, tab, focus }: ReviewDetailProps) {
   // answer *about* this review. See `isDisconnection` in `lib/errors.ts`.
   const stale = review !== undefined && isDisconnection(error)
 
+  // Before the not-found card, because the two are different claims and the
+  // one underneath used to swallow this one. See `unknown-host-card.tsx`: the
+  // machine holding this review is not in the host list, so nothing was asked
+  // and "Review not found" was blaming the review for a missing computer.
+  if (isUnknownHost(error) && scope.host !== undefined) {
+    return (
+      <UnknownHostCard
+        host={scope.host}
+        route={{ name: 'review', reviewId, tab, ...(focus ? { focus } : {}), ...scope }}
+        subject="review"
+        error={error}
+      />
+    )
+  }
+
   if (!review || (error !== undefined && !stale)) {
     return (
       <Card className="flex flex-col items-center gap-3 border-destructive/40 px-6 py-12 text-center">
@@ -206,6 +222,10 @@ export function ReviewDetail({ reviewId, tab, focus }: ReviewDetailProps) {
           <ArrowLeft />
           Back to repositories
         </Button>
+        {/* Keeps the scope, and that is still right here: this is a real
+            `NOT_FOUND` from a host that answered, so its repository list is a
+            place that exists. The case where the scope was the problem is
+            handled above and never reaches this card. */}
       </Card>
     )
   }

@@ -38,7 +38,7 @@
  * repository path can appear under the path input again.
  */
 import { resultOf, type RpcMethod, type RpcParams, type RpcResult } from '@shared/rpc'
-import { errorMessage, isDisconnection } from './errors'
+import { errorMessage, isDisconnection, isUnknownHost } from './errors'
 import { reportHostAnswered, reportHostUnreachable } from './host-reachability'
 import type { GitWarrenApi, GitWarrenBridge } from '@shared/api'
 import type { DiffChanges } from '@shared/git'
@@ -87,8 +87,18 @@ function ask<M extends RpcMethod>(
       // Only a transport failure says anything about the machine - the rule the
       // pool applies before touching its backoff ladder, arriving at the other
       // end of the same wire. A `NOT_FOUND` is proof the far end is there.
+      //
+      // `UNKNOWN_HOST` is the one error that is proof of neither, and it is the
+      // exception this branch did not have before M6.8. It is raised *here*, by
+      // the router, before a carrier is chosen - so nothing was sent, nothing
+      // answered, and recording the machine as reachable would have this window
+      // claiming to have heard from a computer it has no way to reach. Left
+      // unrecorded rather than marked down, because "we never asked" is not
+      // "it is asleep" either: the honest rendering of an unasked question is
+      // neither answer. The same rule `host-banner.tsx` states about a host
+      // list that has not loaded yet.
       if (isDisconnection(error)) reportHostUnreachable(host, errorMessage(error))
-      else reportHostAnswered(host)
+      else if (!isUnknownHost(error)) reportHostAnswered(host)
       throw error
     }
   )

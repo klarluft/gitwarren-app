@@ -63,6 +63,7 @@ import { timeOfDay } from '@/lib/format'
 import { useHost } from '@/lib/host-scope'
 import { hostReachability, subscribeToHostChanges } from '@/lib/host-reachability'
 import { navigate } from '@/lib/router'
+import { clearPendingDestination } from '@/lib/pending-destination'
 import { useHosts, useHostMutations } from './use-hosts'
 import { ReachabilityBadge, type Reachability } from './host-status'
 import type { HostWithState } from '@shared/schemas'
@@ -115,6 +116,24 @@ export function HostBanner() {
 
   if (host === undefined) return null
 
+  /**
+   * A host that is genuinely not in the list says nothing here any more.
+   *
+   * It used to say "A host this GitWarren no longer knows" above whatever the
+   * screen had managed to render, which in practice was always the same thing:
+   * every read on an unknown host fails, so the screen below is
+   * `UnknownHostCard`, which since M6.8 names the machine, offers to add it,
+   * and carries its own way back. Two notices about one missing computer, in
+   * the same two centimetres of screen, is precisely the duplication the note
+   * at the top of this file exists to refuse - and the card is the one with
+   * room to do something about it.
+   *
+   * `null` only, never `undefined`: a list that has not arrived yet is not the
+   * claim that this machine is absent, which is the same distinction the rest
+   * of this component turns on.
+   */
+  if (row === null) return null
+
   const observed: Reachability | undefined =
     reachability.offlineSince !== null ? 'down' : reachability.lastSeenAt !== null ? 'up' : undefined
 
@@ -144,13 +163,9 @@ export function HostBanner() {
     <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-md border border-dashed px-3 py-2">
       <Server className="size-4 shrink-0 text-muted-foreground" />
       <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-        <p className="text-sm font-medium">
-          {row
-            ? row.label
-            : row === null
-              ? 'A host this GitWarren no longer knows'
-              : 'Another machine'}
-        </p>
+        {/* `row` is either a real row or still on its way; the absent case
+            returned above. */}
+        <p className="text-sm font-medium">{row ? row.label : 'Another machine'}</p>
         {row ? (
           // This window's own evidence, which beats the row's - see
           // `reachabilityOf`. Undefined when it has none, which leaves the row
@@ -257,7 +272,15 @@ function BackToThisComputer() {
       variant="ghost"
       size="sm"
       className="shrink-0 text-muted-foreground"
-      onClick={() => navigate({ name: 'repositories' })}
+      onClick={() => {
+        // Leaving for this computer ends any unknown-host errand as well. The
+        // errand is only ever set by a link that failed, and a person who has
+        // chosen to go home is not still on their way somewhere else - an
+        // offer to "open it" appearing on the Hosts screen an hour later would
+        // be the app remembering something the user has finished with.
+        clearPendingDestination()
+        navigate({ name: 'repositories' })
+      }}
     >
       Back to this computer
     </Button>

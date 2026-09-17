@@ -29,6 +29,18 @@ export function isDisconnection(error: unknown): boolean {
   return errorCode(error) === 'HOST_OFFLINE'
 }
 
+/**
+ * The link named a machine this install has never been told about.
+ *
+ * Its own predicate rather than a comparison spelled out at each screen,
+ * because three of them ask it and the one that forgets is the one that goes
+ * back to saying "Review not found" about a missing computer. See
+ * `features/hosts/unknown-host-card.tsx` for what is shown instead.
+ */
+export function isUnknownHost(error: unknown): boolean {
+  return errorCode(error) === 'UNKNOWN_HOST'
+}
+
 /** Field-level messages keyed by form field, ready to render inline. */
 export function fieldErrors(error: unknown): Record<string, string[]> {
   return error instanceof AppError && error.fieldErrors ? error.fieldErrors : {}

@@ -96,12 +96,20 @@ export function routeFor(row: HostRow): HostRoute {
  * needs to know how an editor names that machine. The sentence names the id
  * rather than saying "unknown host", because the id is what the link contained
  * and the only thing a person can compare against their Hosts screen.
+ *
+ * The code is `UNKNOWN_HOST` rather than `NOT_FOUND`, and that is M6.8's whole
+ * starting point. This sentence was always correct and was always rendered as
+ * the grey subtitle of a card headed "Review not found" - so the screen blamed
+ * the review for the absence of the machine, and the one message that said what
+ * had actually happened was the one nobody read. A code of its own lets the
+ * screen lead with the cause and offer the machine, rather than offering the
+ * way back to a repository list on the same unreachable host.
  */
 export function requireInstance(instanceId: string): HostRow {
   const row = getDatabase().select().from(hosts).where(eq(hosts.instanceId, instanceId)).get()
   if (!row) {
     throw new AppError(
-      'NOT_FOUND',
+      'UNKNOWN_HOST',
       `This GitWarren does not know a host with id ${instanceId}. ` +
         'It may have been removed, or the link may have come from somewhere else.'
     )
