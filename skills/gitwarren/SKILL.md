@@ -72,6 +72,14 @@ moment it is: `npx gitwarren serve` shows it in a browser, or the user opens
 the desktop app. Say that, with both options, and do not try to open the link
 yourself.
 
+## If the link opens but says the review is on another machine
+
+That is a different thing and needs a different answer. The link reached their
+GitWarren, and their GitWarren does not have the machine this review lives on
+in its list of hosts. The screen offers to find and add it, so the useful thing
+to say is which machine you are on, not to mint another link. A second link
+would name the same absent machine.
+
 ## Reviewing someone else's change
 
 To review a branch or a review as a reviewer rather than as its author, use the

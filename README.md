@@ -759,12 +759,17 @@ http://127.0.0.1:41427/#h=<instance-id>/review/4/conversation
 
 which the page turns into `gitwarren://<instance-id>/review/4/conversation`.
 That is what lets a link resolve on whichever GitWarren the user clicked from —
-the app can tell its own review 4 from another machine's. A link naming an
-install this one is not lands on the home screen rather than opening the local
-review with that number. If the install it names is a host this one knows, the
-link opens *that* machine's review instead — the host segment travels with it,
-so this install's review 4 is never reachable by a link that meant another
-machine's.
+the app can tell its own review 4 from another machine's. If the install it
+names is a host this one knows, the link opens *that* machine's review — the
+host segment travels with it, so this install's review 4 is never reachable by
+a link that meant another machine's.
+
+If the install it names is one this GitWarren has never been told about, the
+screen says so and offers to fix it: it names the machine the link came from,
+looks for it on your tailnet, and — when it is there — adds it and opens the
+review you clicked. When it is somewhere only SSH or WSL reaches, the Hosts
+screen remembers what you were opening and offers the way back once the machine
+is in the list.
 
 When the page at that address is served by a daemon rather than by the app —
 `gitwarren serve`, or the plugin's `gitwarren mcp --serve` — the link also
@@ -2072,6 +2077,12 @@ these two are unrelated and both need updating if the branding moves.
   rather than the moment it goes. Keeping a socket open to every host would mean
   connecting to every machine you own, which is the thing the pool exists to
   avoid.
+- **A link from an unknown machine can only be resolved for you on a tailnet.**
+  When a link names a GitWarren you have not added, the screen offers to find
+  and add that machine — but finding it is a tailnet probe, so a machine you
+  reach over SSH or `wsl.exe` cannot be offered that way. The screen names the
+  instance id and sends you to the Hosts screen, which remembers what you were
+  opening and offers the way back once the machine is in the list.
 - **On Linux, `tailscale serve` needs to be allowed to run.** It refuses without
   root unless `sudo tailscale set --operator=$USER` has been run once; GitWarren
   reports what Tailscale said rather than silently failing to turn the switch on.

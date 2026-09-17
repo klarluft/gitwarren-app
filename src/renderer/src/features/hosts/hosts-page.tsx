@@ -72,6 +72,7 @@ import { errorMessage } from '@/lib/errors'
 import { navigate } from '@/lib/router'
 import { useRegisterCommands, type Command } from '@/features/commands/command-registry'
 import { DiscoveredHosts } from './discovered-hosts'
+import { PendingDestinationBanner } from './pending-destination-banner'
 import { HostCard } from './host-card'
 import { HostFormDialog } from './host-form-dialog'
 import { InstallResultDialog, type InstallOutcome } from './install-result-dialog'
@@ -224,6 +225,10 @@ export function HostsPage() {
           </div>
         </div>
       </div>
+
+      {/* Above everything, because it is the reason this screen was opened at
+          all when it is showing. See `pending-destination-banner.tsx`. */}
+      <PendingDestinationBanner hosts={hosts} />
 
       {sectioned && <SectionHeading>This machine</SectionHeading>}
       <TailnetPanel />

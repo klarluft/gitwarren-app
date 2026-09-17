@@ -73,8 +73,11 @@ function requireHostRow(
 ): { kind: string; target: string; editorTarget: string | null } {
   const row = list.find((candidate) => candidate.instanceId === instanceId)
   if (!row) {
+    // `UNKNOWN_HOST`, in step with `core/services/hosts.ts`. The two shells
+    // have to refuse a link the same way or the same click says two different
+    // things depending on which one the person opened it in.
     throw new AppError(
-      'NOT_FOUND',
+      'UNKNOWN_HOST',
       `This GitWarren does not know a host with id ${instanceId}. ` +
         'It may have been removed, or the link may have come from somewhere else.'
     )

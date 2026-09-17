@@ -71,18 +71,34 @@ test('a repository on a host this install knows is not answered here', () => {
   assert.equal(isAnsweredLocally(OTHER, 'repositories.list'), false)
 })
 
-test('a host id nobody knows is NOT_FOUND, and the message names it', async () => {
+test('a host id nobody knows is UNKNOWN_HOST, and the message names it', async () => {
   // What a link to a machine that has since been forgotten produces. Naming the
   // id is the whole of the message's value: it is the only thing the reader can
   // compare against their Hosts screen.
+  //
+  // The code is `UNKNOWN_HOST` rather than `NOT_FOUND` as of M6.8, and that is
+  // the assertion worth having rather than a detail of it. While the two shared
+  // a code, every screen rendered this as "Review not found" with the sentence
+  // below demoted to grey subtitle - blaming the review for the absence of a
+  // computer. A code of its own is what lets the screen offer the machine.
   try {
     await route(STRANGER, 'repositories.list')
     throw new Error('expected the route to reject')
   } catch (error) {
     assert.ok(error instanceof AppError)
-    assert.equal(error.code, 'NOT_FOUND')
+    assert.equal(error.code, 'UNKNOWN_HOST')
     assert.ok(error.message.includes(STRANGER), `message should name the host: ${error.message}`)
   }
+})
+
+test('an unknown host is not a NOT_FOUND, because nothing was asked', async () => {
+  // The distinction stated from the other side, so that folding the two back
+  // together fails here rather than in a screenshot. A `NOT_FOUND` is a machine
+  // answering "no such review"; this is no machine at all.
+  await assert.rejects(
+    () => route(STRANGER, 'repositories.list'),
+    (error: unknown) => error instanceof AppError && error.code !== 'NOT_FOUND'
+  )
 })
 
 test('an unknown host is refused before anything is sent', async () => {
@@ -114,7 +130,7 @@ test('a routed failure arrives as a message, never as a throw', async () => {
 
   assert.equal(response.id, 8)
   assert.ok('error' in response)
-  assert.equal(response.error.code, 'NOT_FOUND')
+  assert.equal(response.error.code, 'UNKNOWN_HOST')
 })
 
 test('a host on the envelope does not reach the far end', async () => {

@@ -20,8 +20,9 @@ import { Tooltip } from '@/components/ui/tooltip'
 import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { CACHE_KEYS } from '@/lib/api'
-import { errorMessage, isDisconnection } from '@/lib/errors'
+import { errorMessage, isDisconnection, isUnknownHost } from '@/lib/errors'
 import { useApi, useHost, useHostScope } from '@/lib/host-scope'
+import { UnknownHostCard } from '@/features/hosts/unknown-host-card'
 import { useRevealPath } from '@/lib/reveal-path'
 import { useRegisterCommands, type Command } from '@/features/commands/command-registry'
 import { navigate } from '@/lib/router'
@@ -111,6 +112,20 @@ export function RepositoryDetail({ repositoryId }: { repositoryId: number }) {
   // failure - see the same guard in `review-detail.tsx` and `isDisconnection`
   // in `lib/errors.ts`. `HostBanner` is what says so.
   const stale = repository !== undefined && isDisconnection(error)
+
+  // Ahead of the not-found card, for the reason `review-detail.tsx` states: a
+  // machine that is not in the host list was never asked, so "Repository not
+  // found" is an answer nobody gave.
+  if (isUnknownHost(error) && scope.host !== undefined) {
+    return (
+      <UnknownHostCard
+        host={scope.host}
+        route={{ name: 'repository', repositoryId, ...scope }}
+        subject="repository"
+        error={error}
+      />
+    )
+  }
 
   if (!repository || (error !== undefined && !stale)) {
     return (

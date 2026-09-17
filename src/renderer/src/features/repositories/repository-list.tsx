@@ -46,7 +46,8 @@ import { Tooltip } from '@/components/ui/tooltip'
 import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { api, CACHE_KEYS } from '@/lib/api'
-import { errorCode, errorMessage, isDisconnection } from '@/lib/errors'
+import { errorCode, errorMessage, isDisconnection, isUnknownHost } from '@/lib/errors'
+import { UnknownHostCard } from '@/features/hosts/unknown-host-card'
 import { useHost } from '@/lib/host-scope'
 import { useRegisterCommands, type Command } from '@/features/commands/command-registry'
 import { RepositoryCard, type Elsewhere } from './repository-card'
@@ -146,6 +147,23 @@ export function RepositoryList() {
       [openAdd, refresh]
     )
   )
+
+  // The whole screen rather than the `ErrorState` slot inside it, which is the
+  // difference between this and every other failure here. A repository list for
+  // a machine that is not in the host list has no header worth drawing: "0
+  // tracked", an Add button that would add to *this* computer, and a refresh
+  // that will fail the same way. What the screen is about is the missing
+  // machine, so the missing machine is the screen. See `unknown-host-card.tsx`.
+  if (isUnknownHost(error) && host !== undefined) {
+    return (
+      <UnknownHostCard
+        host={host}
+        route={{ name: 'repositories', host }}
+        subject="repositories"
+        error={error}
+      />
+    )
+  }
 
   return (
     <section className="flex flex-col gap-4">

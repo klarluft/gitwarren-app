@@ -4182,6 +4182,113 @@ was a `200` where a refusal was expected, from a deliberately forged header sent
 through the proxy - which looks exactly like a hole and is in fact the mechanism
 working. The difference between those two readings is one experiment.
 
+---
+
+### M6.8 — The unknown host, and the words on the screen
+
+**Reported from use rather than found by a test, 17 September.** Somebody who
+works with agents on several machines said their GitWarren sometimes answers a
+link with "no such repository or review", and asked whether it could instead
+work out where to go, or failing that say the machine is not connected.
+
+The interesting part of the report is that both of those already existed.
+M6.7's route keeps the host segment, so a link to a known host opens that
+machine's review; `requireInstance` has refused an unknown one *by name* since
+M4.4, in a sentence that says exactly what the report asked for. The feature was
+built. What was wrong was where its output landed.
+
+**The diagnosis is one line of JSX.** `requireInstance` raised `NOT_FOUND`, and
+`review-detail.tsx` renders every `NOT_FOUND` as a card headed **Review not
+found** with `errorMessage(error)` as the grey subtitle beneath it. So the
+screen led with a claim about the review - which had never been asked about -
+and demoted the one sentence that named the missing machine to supporting text.
+The user's memory of the message was accurate. The heading is what they read.
+
+Two more things were wrong underneath it, both invisible while the heading was:
+
+- The card's way out, **Back to repositories**, navigated with `...scope` - the
+  unknown host still attached - so the escape hatch landed on the same missing
+  machine's repository list and failed there identically. The *banner's* "Back
+  to this computer" was correct all along, which is why this went unreported:
+  the working exit was the one people used.
+- `lib/api.ts` recorded every non-disconnection failure as the host having
+  *answered*, on the rule that "a `NOT_FOUND` is proof the far end is there".
+  True of a `NOT_FOUND`; false of this, which is raised by the router before a
+  carrier is chosen. A window could therefore hold a reachability record for a
+  computer it has no way to reach.
+
+**The fix is a code, not a string.** `UNKNOWN_HOST` joins the vocabulary in
+`shared/errors.ts`, and everything else follows from a screen being able to ask
+the question. `NOT_FOUND` is an answer about data - a machine was asked and has
+no review 4. `UNKNOWN_HOST` is the absence of anyone to ask. Both shells raise
+it, because a link that says two different things depending on which shell
+opened it is worse than either message.
+
+**Then the screen does the errand rather than reporting on it.**
+`unknown-host-card.tsx` leads with the cause, probes the tailnet for the
+instance id the link carried, and - when that machine answers - adds it, probes
+it to learn its id, and navigates to the review that was clicked. Three screens
+of recovery collapse into one button in the case where the machine is there.
+
+Two decisions inside it are worth recording because both went against a rule
+that was right in its own context.
+
+*It probes without being asked.* `core/hosts/discover.ts` says discovery runs
+only when the Hosts screen opens or somebody presses "Look again" - never on a
+timer, never at startup. This card obeys the reason rather than the letter: it
+is not a timer and nobody lands on it by accident, it draws only when a link
+just clicked named a missing machine, and "which machine is that?" is the only
+question on the screen. It costs nothing where there is no Tailscale, because
+`discoverPeers` answers empty without touching the network.
+
+*Adding is not the end of it.* `hosts.add` inserts `instance_id` NULL; the id is
+learned on the first successful connect, in `recordSeen`. So "I have added the
+machine the link named" is not something the Add button can know - it becomes
+true one probe later. The card therefore adds, probes, and compares the id it
+learned against the id the link carried, and says so plainly when they differ
+rather than bouncing somebody to a review that would fail again.
+
+**The machine that cannot be discovered is the one that needed the other half.**
+Discovery is a tailnet probe, so a host reached over `ssh` or `wsl.exe` can
+never be offered this way - and that is the common case, not the exotic one.
+`lib/pending-destination.ts` is what stops the walk to the Hosts screen being
+one-way: the errand is written down when the card draws, the Hosts screen says
+what the visit is for while the machine is still missing, and offers **Open it**
+the moment the id turns up in the list.
+
+It is state beside the router rather than in it. Hanging the intent off the
+Hosts location was the obvious alternative and was rejected twice over: the
+hosts route is `host?: undefined` on purpose, and an intent is not a location -
+pressing Back should not step through a half-finished errand, and a URL someone
+copies should not carry it to somebody else. `sessionStorage` backs it because
+the browser shell reloads the tab for reasons nobody asked for, and an errand
+that evaporated on the token exchange would strand exactly the person this is
+for.
+
+**One notice, not two.** `host-banner.tsx` used to say "A host this GitWarren no
+longer knows" above whatever the screen managed to render - which, since every
+read on an unknown host fails, was always this card. The banner now renders
+nothing in that case. The note at the top of that file already refused two
+components about one host in the same two centimetres of screen; this is that
+rule applied to the case it did not yet cover, and the card is the one with room
+to do something about it.
+
+**Deliberately not done.** Matching a review across machines by its git origin,
+branch or commit was considered and refused. There is no origin-URL matching
+anywhere in the codebase, review ids are per-host integers, and a review row
+records nothing about which machine made it - so a guess at "the equivalent
+review here" would show the wrong diff, which is the exact failure the host
+segment exists to make unrepresentable. The safe precedent is already in the
+tree and stays repository-only: `repository-list.tsx` matches clones by **root
+commit** and says "Also on this computer", which is an offer rather than a
+redirect.
+
+Also left alone: a fragment with no instance id is still treated as local, which
+is the pre-M2 link form. It is a real hazard - a bare `#/reviews/4` copied from
+one machine's address bar means a different review on another - but it is a
+hazard for links minted by builds older than M2, and the install base does not
+have any.
+
 ## Agent setup
 
 One sentence instead of a snippet per harness. Agents know their own
@@ -4274,7 +4381,7 @@ least one alternative.
 | Colleague permissions | — | Non-goal. Object-centric RPC from M1 keeps the door open. |
 | Git argument and path hardening | M0 | Hygiene now; not a security boundary while every caller is the owner. |
 | Host-scoped routes and IDs | M0, M4, M6 | Optional host segment in the route grammar; hosts table; links carry the instance id. M6 is where that id finally decides something in every direction: it routes a link across installs, it excludes this machine from its own discovery, it tags an event with the machine it happened on, and it is what refuses one box added twice under two carriers. |
-| Which GUI a link opens | M2, M6 | Loopback resolves on the clicker's machine; `webUrl` for a phone, added only while the host listens and spelled as the machine reported rather than by convention. M6.7 also made a link naming *another* install open that machine's review rather than the home screen — the host segment travels, so this install's review 4 stays unreachable by a link that said 4. |
+| Which GUI a link opens | M2, M6 | Loopback resolves on the clicker's machine; `webUrl` for a phone, added only while the host listens and spelled as the machine reported rather than by convention. M6.7 also made a link naming *another* install open that machine's review rather than the home screen — the host segment travels, so this install's review 4 stays unreachable by a link that said 4. M6.8 closed the half M6.7 left: a link naming an install this one has never heard of now leads somewhere instead of failing, with its own error code, its own screen, and the errand kept across the walk to the Hosts screen. |
 | Attachments across hosts | M3, M4 | Ingest on the host; HTTP for the web view, the carrier for the app. |
 | Version skew between hosts | M4, M6 | The GUI installs the daemon version it wants; protocol version in the handshake; unknown fields ignored — and since M6 an unknown *event name* is ignored too, which is the same rule arriving in the one direction nothing had exercised. What M6 found is a gap in the mechanism rather than in the design: `hosts.install` decides by **version string**, so a host running a same-versioned build from before a milestone answers `already-current` and is not upgraded. `force` is the existing way out and was needed twice here. A pre-release that changes methods without changing its version is the case this does not cover. |
 | Daemon process on headless hosts | M2, M3, M4, M5 | Bundle in M2, `gitwarren service install` in M3.3, spawned on demand over SSH in M4 and through `wsl.exe` in M5 — the same installer either way, since it was written against "a machine with a shell and a `tar`". |

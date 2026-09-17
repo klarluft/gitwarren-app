@@ -35,6 +35,24 @@ export const APP_ERROR_CODES = [
    * never retries a write on it. See `core/rpc/stdio-client.ts`.
    */
   'HOST_OFFLINE',
+  /**
+   * A route or a link names an install this one has never been told about.
+   *
+   * Split out of `NOT_FOUND` because the two lead somewhere different and a
+   * screen that cannot tell them apart says the wrong thing. `NOT_FOUND` is an
+   * answer *about the data*: the machine was asked and has no review 4. This is
+   * not an answer at all - nothing was asked, because there is nowhere to ask.
+   * Heading a screen "Review not found" on this code blames the review for the
+   * absence of the machine, which is the confusion M6.8 exists to remove.
+   *
+   * It is also not a disconnection, and the distinction matters in both
+   * directions. A disconnection keeps stale content on screen because the data
+   * is probably still true; there is no stale content here, because this route
+   * never loaded anything. And an unknown host must not be recorded as
+   * *answering* either - see `lib/api.ts`, where every other non-disconnection
+   * error is proof the far end is there. This one is proof of nothing.
+   */
+  'UNKNOWN_HOST',
   'INTERNAL'
 ] as const
 
