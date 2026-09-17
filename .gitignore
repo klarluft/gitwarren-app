@@ -40,3 +40,7 @@ screenshots-out/
 
 # scratch output from scripts/capture-hero-video.mjs
 video-out/
+
+# Screenshots from `npm run visual`. Artefacts of a run, not facts about the
+# repository - see the note at the top of visual/capture.ts.
+visual/shots/

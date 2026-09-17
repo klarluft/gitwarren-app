@@ -43,12 +43,26 @@ function asBridgeCarrier(carrier: WebCarrier): BridgeCarrier {
   }
 }
 
-export function installBridge(): GitWarrenBridge {
+/**
+ * `carrier` is a parameter, and a socket is only its default.
+ *
+ * Nothing in the app passes one; `visual/` does. The screenshot harness runs
+ * this same renderer with a carrier that answers from the real dispatcher in
+ * the Node process driving the browser, so there is no server, no port and no
+ * token between a test and the screen it is photographing - see
+ * `visual/README.md`.
+ *
+ * A parameter rather than a second `installHarnessBridge` beside this one,
+ * because the assembly below is the part that must not fork: what a shell *is*
+ * - a carrier plus `createWebShell` on top of it - is the contract M1 drew, and
+ * a harness that built its own bridge would be free to drift from it and would
+ * photograph a shell the app does not have.
+ */
+export function installBridge(carrier: WebCarrier = createWebCarrier()): GitWarrenBridge {
   // The shell is handed the carrier, which the preload's never needed. Two of
   // the things a tab does for itself - attaching an image, opening a file in an
   // editor - are half a question for the host and half an action here, and the
   // host half is an ordinary method. See `shell.ts` on where that line falls.
-  const carrier = createWebCarrier()
   const bridge: GitWarrenBridge = {
     carrier: asBridgeCarrier(carrier),
     // The shell keeps the throwing carrier: it is ordinary in-world code, and

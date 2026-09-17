@@ -85,6 +85,24 @@ The tests create throwaway git repositories in a temp directory and point the
 app at a temp data directory via `GITWARREN_DATA_DIR`, so they never touch your
 real database.
 
+### If you changed how something looks
+
+None of those four can see the screen. `npm run visual` takes screenshots of the
+real app — real services, real git, a fixture repository — and drops them in
+`visual/shots/` for you to look at:
+
+```bash
+npx playwright-core install chromium-headless-shell   # once
+npm run visual
+npm run visual -- --dark
+```
+
+It is deliberately not a regression suite and CI does not run it; there is
+nothing to re-bless and nothing to go red. It is there so that "I looked at it"
+is cheap enough to be true. If your change adds a screen or a control worth
+seeing, add a line to `SHOTS_TO_TAKE` in `visual/capture.ts` in the same commit.
+See [visual/README.md](visual/README.md) for how it works without a server.
+
 ### What CI runs
 
 `.github/workflows/ci.yml` runs those four, plus one daemon tarball build, on

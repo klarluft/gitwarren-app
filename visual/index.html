@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      No Content-Security-Policy, unlike the two shipped documents.
+
+      Theirs is a lockdown on a page that can be reached by a link and renders
+      text other people wrote. This one is served by a Vite dev server on a
+      random loopback port, for the length of one screenshot run, to a browser
+      the same process launched. Copying the header here would buy nothing and
+      would have to be loosened for the dev server's own inline module
+      preamble - a weaker rule than the app's, sitting in a file named as if it
+      were the app's. Better to have none and say why.
+    -->
+    <!--
+      An empty data URL, which is the whole of the fix.
+
+      A browser with no declared icon asks for `/favicon.ico` on its own, and
+      the dev server has nothing there - so every run logged a 404 that had
+      nothing to do with the app. The shipped documents answer this by naming a
+      real icon; a harness has no need of one and only needs the probe not to
+      happen, which naming an empty resource achieves.
+    -->
+    <link rel="icon" href="data:," />
+    <title>GitWarren — visual harness</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

@@ -51,7 +51,10 @@
     "vite.mcp.config.ts",
     "vite.daemon.config.ts",
     "vite.web.config.ts",
+    "vite.visual.config.ts",
     "vite.ws-define.ts",
+    "visual/capture.ts",
+    "visual/fixture.ts",
     "drizzle.config.ts",
     "scripts/**/*.ts"
   ]
