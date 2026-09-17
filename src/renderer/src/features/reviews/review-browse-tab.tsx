@@ -279,7 +279,16 @@ export function ReviewBrowseTab({
           the file beside it scrolls; a stretched column would never stick. */}
       <div className="flex items-start gap-4">
         {listOpen && (
-          <SidebarColumn storageKey="browse-tree-width" narrow={narrow} label="the file list">
+          <SidebarColumn
+            storageKey="browse-tree-width"
+            narrow={narrow}
+            label={searching ? 'the search results' : 'the file list'}
+            // A result row is a path *and* a line of code; a tree row is a file
+            // name. At the list's width the search panel wraps both of them, so
+            // it starts wider - until the reader drags the grip, after which
+            // the column is whatever they said, in either panel.
+            defaultWidth={searching ? 'w-80 xl:w-96 2xl:w-[28rem]' : undefined}
+          >
             {searching ? (
               <FileSearchPanel
                 reviewId={review.id}

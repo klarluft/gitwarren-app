@@ -395,11 +395,25 @@ export function ReviewDetail({ reviewId, tab, focus, search }: ReviewDetailProps
             {commits.data && <TabsCount>{commits.data.commits.length}</TabsCount>}
           </TabsTab>
           <TabsTab value="files">Files changed</TabsTab>
-          {/* Last, and named for what it does rather than for what it holds.
-              "Files" would be the same word as the tab next to it for two
-              different things; "Browse files" says which of the two is the one
-              that lets you go and look at something nobody changed. */}
-          <TabsTab value="browse">
+          {/* Named for what it does rather than for what it holds. "Files"
+              would be the same word as the tab next to it for two different
+              things; "Browse files" says which of the two is the one that lets
+              you go and look at something nobody changed.
+
+              Pushed to the far end of the strip, away from the other three.
+              Every forge puts the diff last, so a hand that has reviewed code
+              anywhere else goes to the *last* tab for it - and landing on a
+              file browser instead is a mistake you make repeatedly, because the
+              habit is older than this app. Separating it spatially says "this
+              one is not part of that sequence" before the label has to be read.
+
+              `ml-auto` and not a reorder: it stays fourth in `REVIEW_TABS`, so
+              it keeps its `4`, its place in the palette, and its arrow-key
+              position. When the strip is too narrow to have spare room the
+              margin collapses and the tabs simply scroll, which is the right
+              thing to happen to a decoration that needs space it does not
+              have. */}
+          <TabsTab value="browse" className="ml-auto">
             <FolderTree />
             Browse files
           </TabsTab>

@@ -15,8 +15,8 @@
  * ## What is remembered, and what is not
  *
  * Only a width that was actually chosen. Until someone drags the grip the
- * column keeps the responsive width it always had - `w-56`, wider at `xl` and
- * `2xl` - and grows with the window. A stored number replaces all three, on
+ * column keeps a responsive width from the stylesheet - `w-56`, wider at `xl`
+ * and `2xl` - and grows with the window. A stored number replaces all three, on
  * purpose: a person who has said "this wide" has answered the question the
  * breakpoints were guessing at, and a column that jumped at 1280 pixels *after*
  * being set would be ignoring them.
@@ -25,6 +25,14 @@
  * different things - a few dozen changed files beside a diff, every file in the
  * repository beside one file - and the width that suits one need not suit the
  * other.
+ *
+ * `defaultWidth` is which responsive width, for the caller that knows its
+ * content needs more room than a list of names does. The browse tab uses it for
+ * the search results, where a row is a path *and* a line of code rather than a
+ * file name, and at the list's width both wrap: a directory breaks mid-word to
+ * `comme/nts` and every hit costs three lines. It is the default and not a
+ * second stored value, so one drag still settles the column for both of that
+ * tab's panels - it is one column, whatever is inside it.
  *
  * ## The grip
  *
@@ -80,14 +88,23 @@ export interface SidebarColumnProps {
   narrow: boolean
   /** What the column is called, for the grip's label. */
   label: string
+  /**
+   * The responsive width to use until somebody drags the grip. Tailwind classes,
+   * because it is three widths and a breakpoint apiece - see the note above.
+   */
+  defaultWidth?: string
   className?: string
   children: ReactNode
 }
+
+/** A list of file names. Narrow enough that the code beside it keeps the room. */
+const DEFAULT_WIDTH = 'w-56 xl:w-64 2xl:w-72'
 
 export function SidebarColumn({
   storageKey,
   narrow,
   label,
+  defaultWidth = DEFAULT_WIDTH,
   className,
   children
 }: SidebarColumnProps) {
@@ -193,7 +210,7 @@ export function SidebarColumn({
       className={cn(
         'sticky top-[var(--diff-scroll-top,0.5rem)] flex max-h-[calc(100dvh-6rem)] shrink-0',
         // Only while nobody has chosen: a set width has answered this.
-        width === null && 'w-56 xl:w-64 2xl:w-72'
+        width === null && defaultWidth
       )}
     >
       <aside
