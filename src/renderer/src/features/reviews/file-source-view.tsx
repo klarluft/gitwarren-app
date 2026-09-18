@@ -30,9 +30,11 @@ import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { errorMessage } from '@/lib/errors'
+import { revealElement } from '@/lib/reveal'
 import { cn } from '@/lib/utils'
 import { CommentThreadCard } from '../comments/comment-thread-card'
 import { CopyPathAction, IconAction, LineRow, type DiffComments, type RowContext } from './diff-view'
+import { lineDomId } from './dom-ids'
 import { FilePath } from './file-path'
 import type { DiffSearch } from './diff-search'
 import { ImagePane } from './image-diff'
@@ -190,6 +192,46 @@ export function FileSourceCard({
   const problem = content?.error ?? (text.error === undefined ? null : errorMessage(text.error))
   const isImage = (content?.isBinary ?? false) && imageMediaType(path) !== null
   const clipped = (lines?.length ?? 0) > MAX_RENDERED_LINES
+
+  /**
+   * Take the reader to the line they asked for.
+   *
+   * Marking it was never enough. A search result names line 412 of a file the
+   * reader has not opened before, and arriving at the top of it with a
+   * highlight somewhere below the fold is a worse answer than the search was:
+   * they now have to find by eye the thing they just asked the machine to find.
+   * The diff has done this since links into it existed (`useFocusScroll` in
+   * `review-files-tab.tsx`); the browse tab had the ids and never scrolled to
+   * them.
+   *
+   * `rows.length` is in the dependencies and that is the load-bearing part.
+   * The row cannot be scrolled to before it exists, and the file arrives a
+   * round trip after the card does - longer over `ssh`. `revealElement` retries
+   * for about half a second, which covers a render but not a read, so the
+   * effect is re-run when the rows land rather than being asked to wait them
+   * out.
+   *
+   * `center` rather than `start`, matching the diff: a line of code means very
+   * little without the lines around it, and the card's header is sticky, so a
+   * row parked at the top would sit under it.
+   *
+   * A hit past `MAX_RENDERED_LINES` has no row to reach. `revealElement` gives
+   * up quietly after its frames, which is the right amount of noise - the card
+   * already says in words that it stopped drawing at five thousand lines.
+   */
+  // `markedKey` stands in for the object, which the tab rebuilds from the route
+  // on every render - depending on it directly would re-scroll forever. The
+  // same stand-in `useFocusScroll` uses, for the same reason.
+  const markedKey = marked === undefined ? null : `${marked.side}:${marked.line}`
+
+  useEffect(() => {
+    if (marked === undefined || rows.length === 0) return
+    return revealElement(lineDomId(path, marked.side, marked.line), {
+      block: 'center',
+      behavior: 'smooth'
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [path, markedKey, rows.length])
 
   return (
     <Card className="overflow-clip">
