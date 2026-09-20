@@ -133,11 +133,14 @@ A  Home desk                                       (16:9 and 9:16)
            Medium shot, subject centred with room around them, relaxed,
            eyes on the screen, not on the camera. Slight film grain, shallow
            depth of field, photographic, natural colour, no lens flares.
-   motion  One continuous shot, a single take, no cuts, no transitions. The
-           camera holds one position and pushes in very slowly and
-           steadily; focus stays fixed. They type, unhurried; in the last
-           seconds they stop, look at the MacBook, and lean in slightly with
-           a small smile.
+   motion  One continuous shot, a single take, no cuts, no transitions.
+           The camera holds one position and pushes in very slowly and
+           steadily; focus stays fixed. For most of the clip the
+           programmer types unhurriedly, eyes on the ultrawide monitor.
+           Only in the final three seconds: the MacBook screen brightens
+           with a notification, they stop typing, turn their head to the
+           MacBook and lean in slightly, a small smile. They never look at
+           the camera.
 
 B  Café                                            (vertical hero)
    still   A woman in her thirties at a café table by a window, laughing
@@ -150,12 +153,14 @@ B  Café                                            (vertical hero)
            [9:16, with the 16:9 keeper as reference: same woman, same café,
            same light and grain, framed vertical - the table and phone in
            the lower third, her face in the upper half.]
-   motion  One continuous shot, a single take, no cuts, no transitions. The
-           camera holds one position and pushes in very slowly and
-           steadily; focus stays fixed. She laughs and talks with her
-           friend; in the last seconds the phone on the table lights up,
-           she glances down with a small smile, picks it up and lifts it so
-           its screen faces the camera.
+   motion  One continuous shot, a single take, no cuts, no transitions.
+           The camera holds one position and pushes in very slowly and
+           steadily; focus stays fixed. For most of the clip she laughs
+           and talks with her friend across the table. Only in the final
+           three seconds: the phone on the table lights up, she stops
+           mid-sentence, glances down, picks the phone up and lifts it so
+           its screen faces the camera, a small smile. She never looks at
+           the camera.
 
 C  Laundry
    still   A man in his forties folding warm laundry on a table in a small,
@@ -168,11 +173,13 @@ C  Laundry
            [9:16, with reference: same man, same room, same light and
            grain, framed vertical - the table and phone in the lower third,
            his face in the upper half.]
-   motion  One continuous shot, a single take, no cuts, no transitions. The
-           camera holds one position and pushes in very slowly and
-           steadily; focus stays fixed. He folds a towel and sets it on the
-           pile; in the last seconds the phone at the table's edge lights
-           up, he looks over at it, smiles slightly and picks it up.
+   motion  One continuous shot, a single take, no cuts, no transitions.
+           The camera holds one position and pushes in very slowly and
+           steadily; focus stays fixed. For most of the clip he folds a
+           towel and sets it on the pile, unhurried. Only in the final
+           three seconds: the phone at the table's edge lights up, he
+           stops, turns his head to it, picks it up and looks at the
+           screen with a small smile. He never looks at the camera.
 
 D  Dog park
    still   A young woman in a park on an overcast morning, crouched to
@@ -185,11 +192,13 @@ D  Dog park
            [9:16, with reference: same woman and dog, same park, same
            light and grain, framed vertical - the dog low in the frame, her
            face in the upper half.]
-   motion  One continuous shot, a single take, no cuts, no transitions. The
-           camera holds one position and pushes in very slowly and
-           steadily; focus stays fixed. She ruffles the dog's fur and it
-           wags; in the last seconds she pauses, takes the phone from her
-           jacket pocket, looks at it and smiles.
+   motion  One continuous shot, a single take, no cuts, no transitions.
+           The camera holds one position and pushes in very slowly and
+           steadily; focus stays fixed. For most of the clip she ruffles
+           the dog's fur and the dog wags and leans into her. Only in the
+           final three seconds: she pauses, takes the phone from her
+           jacket pocket, looks at the screen and smiles. She never looks
+           at the camera.
 
 E  Airport gate                                    (horizontal hero, 10s)
    still   A man in his thirties relaxed in an airport gate seating row,
@@ -204,12 +213,14 @@ E  Airport gate                                    (horizontal hero, 10s)
            [9:16, with reference: same man, same gate, same light and
            grain, framed vertical - the closed laptop on his lap in the
            lower half, his face in the upper half, tall windows above.]
-   motion  One continuous shot, a single take, no cuts, no transitions. The
-           camera holds one position and pushes in very slowly and
-           steadily; focus stays fixed. He sips the coffee and watches the
-           plane; in the last seconds he looks down, opens the laptop lid
-           and looks at the screen, which is dark and out of focus, facing
-           the camera.
+   motion  One continuous shot, a single take, no cuts, no transitions.
+           The camera holds one position and pushes in very slowly and
+           steadily; focus stays fixed. For most of the clip he sips his
+           coffee and watches the plane through the window. Only in the
+           final three seconds: he looks down at the closed laptop on his
+           lap, opens the lid toward the camera and looks at the screen;
+           the screen is dark and out of focus. He never looks at the
+           camera.
 ```
 
 The reverse montage near the end is the same grid, run from each clip's
