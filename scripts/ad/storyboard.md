@@ -99,68 +99,92 @@ cursor and captions.
 | 0:21 | Screen recording: Hosts, pc-win. VO: *Even the box in the other room. No account, no server.* | Phone screen recording |
 | 0:25 | End card. VO: *Free and open source. gitwarren.com.* | Static, 9:16 |
 
-## Runway prompts — do not generate until the beats above are locked
+## Runway — the five people beats
 
-Five beats, each generated twice: once 16:9, once 9:16. Same prompt both
-times except the framing sentence. 5-second clips; a 10-second take of beat A
-is worth having for the zoom plate and the bookend. Faces out of frame or soft
-in every beat — hands, devices, place. That is where the model is reliable and
-it is the framing we want anyway.
+Still first, then animate the still. Image-to-video is the controllable path:
+the still locks composition, framing, light and grade, and the video prompt
+then describes one motion. It is also what makes the 16:9 and 9:16 versions
+of a beat read as the same place - both start from the same picture, framed
+twice. Faces out of frame or soft in every beat; hands, devices, place.
 
-One grade for all five: warm practicals, cool ambient, slight film grain, no
-lens flares, no slow motion. Say it in every prompt; the model does not
-remember the last one.
+**Order of work, per beat:**
 
-**Consistency:** generate one still of the dark-room desk first (Runway's image
-model, or any) and use it as the image input for beat A. Everything else is a
-different person in a different place, so no consistency is needed — the
-bookend reuses beat A's clip.
+1. Generate the still (Gen-4 Image), in 16:9. 4 candidates; keep one.
+2. Generate the same still in 9:16 with the vertical framing line; give it
+   the 16:9 keeper as a reference so the place and the grade carry over.
+3. Animate each keeper (Gen-4 Turbo, image-to-video, 5s; beat A also 10s)
+   with the motion prompt. 2-3 takes; vary the seed, not the prompt.
+4. Download the keeper at the highest resolution offered. Upscale beat A's:
+   the edit pushes into its screen.
+
+Iterate on Turbo; regenerate a winner on the full model only if Turbo's
+hands or fabric fall apart on it. Name files `A-16x9-take2.mp4`,
+`B-9x16-still.png`, and so on, in `~/Desktop/gitwarren-ad/runway/`.
+
+**One grade, in every still prompt:** *warm practicals, cool ambient, slight
+film grain, shallow depth of field, photographic, no lens flares.* The
+model does not remember the last prompt.
+
+**Reject** any take with legible text on a screen, a face in focus, a device
+or a hand that morphs between frames, slow motion, or a camera move the
+prompt did not ask for.
 
 ```
-A  Dark room
-   Night. A wooden desk lit only by an open laptop's screen glow. Camera at
-   desk height, slightly behind the laptop's left edge, the person out of
-   focus in the background. A hand enters from the right and settles on the
-   trackpad. Static camera, subtle handheld drift. Warm screen light, cool
-   dark room, fine film grain, shallow depth of field. No text on the screen.
-   [16:9: the laptop centred, room around it.]
-   [9:16: the laptop fills the lower two-thirds, dark wall above.]
+A  Dark room                                       (5s and 10s)
+   still   Night. A wooden desk lit only by the glow of an open laptop
+           screen, the screen angled toward the camera. Camera at desk
+           height, slightly behind the laptop's left edge. The screen shows
+           a dark code editor, soft and out of focus, no legible text. A
+           person sits behind it, out of focus. Warm screen light, cool dark
+           room. + grade
+           [16:9: the laptop centred, room around it]
+           [9:16: the laptop fills the lower two-thirds, dark wall above]
+   motion  A hand enters from the right and settles on the trackpad. Static
+           camera with a subtle handheld drift. Nothing else moves.
 
 B  Café
-   Daytime café, window light. A phone lies face-down on a wooden table next
-   to a half-finished flat white. A hand turns the phone over and lifts it
-   toward the camera; the screen is dark glass. Static camera at table
-   height, background soft. Warm light, slight grain, no faces.
-   [16:9: table runs across the frame.]
-   [9:16: cup at the bottom, hand rising through the frame.]
+   still   A café table by a window, daytime. A phone lies face-down on the
+           wood beside a half-finished flat white. Camera at table height,
+           the room soft behind. Warm window light. No people in focus.
+           + grade
+           [16:9: the table runs across the frame]
+           [9:16: the cup low in frame, empty table above]
+   motion  A hand turns the phone over and lifts it toward the camera; the
+           screen is dark glass. Static camera.
 
 C  Laundry
-   A small laundry room, afternoon light from a high window. One hand holds
-   a folded towel against a hip; the other pulls a phone from a back pocket
-   and raises it. Camera at waist height, tight on the hands and the phone.
-   Natural light, soft, slight grain, no faces.
-   [16:9: the washing machine door in the left third.]
-   [9:16: towel low, phone rising to the upper third.]
+   still   A small laundry room, afternoon light from a high window. Camera
+           at waist height, tight on a person's hands: one holds a folded
+           towel against a hip, a phone sits in the back pocket. Washing
+           machine door in the left third. Natural soft light. No face in
+           frame. + grade
+           [16:9: machine left, hands centre]
+           [9:16: towel low, empty frame above for the phone to rise into]
+   motion  The free hand pulls the phone from the back pocket and raises it
+           into frame. Static camera.
 
 D  Dog park
-   A park path, overcast morning. One hand holds a leash that runs out of
-   frame toward a dog; the dog pulls once. The other hand brings a phone up
-   into frame. Camera low, following slightly, grass and path soft behind.
-   Cool daylight, slight grain, no faces.
-   [16:9: leash leads out of frame to the right.]
-   [9:16: leash leads out of the bottom of frame, phone rising to eye level.]
+   still   A park path, overcast morning. Camera low, at hip height. One
+           hand holds a leash that runs out of frame toward a dog; grass and
+           path soft behind. Cool daylight. No face in frame. + grade
+           [16:9: the leash leads out of frame to the right]
+           [9:16: the leash leads out of the bottom of frame]
+   motion  The dog pulls the leash once; the other hand brings a phone up
+           into frame. The camera follows slightly, handheld.
 
 E  Airport gate
-   An airport gate seating row, big windows, a plane at the jet bridge far
-   behind and out of focus. A laptop rests half-open on a knee, a boarding
-   pass on the seat beside. A hand opens the lid the rest of the way. Camera
-   at seat height, static. Flat daylight, slight grain, no faces.
-   [16:9: the row of seats across the frame.]
-   [9:16: knee and laptop in the lower half, windows above.]
+   still   An airport gate seating row, big windows, a plane at the jet
+           bridge far behind and out of focus. A laptop rests half-open on a
+           knee, a boarding pass on the seat beside. Camera at seat height.
+           Flat daylight. No face in frame. + grade
+           [16:9: the row of seats across the frame]
+           [9:16: knee and laptop in the lower half, windows above]
+   motion  A hand opens the laptop lid the rest of the way. Static camera.
 ```
 
-Reject any take with legible text on a screen, a face in focus, a device that
-morphs between frames, or slow motion. Three takes per beat is usually enough.
+The bookend at 0:53 is beat A's clip again, not a second generation. The
+reverse montage at 0:47 is the tails of D, C and B, or the clips reversed
+where the motion reads.
 
 ## Product captures — setup
 
