@@ -1,0 +1,176 @@
+# The GitWarren ad — script and storyboard
+
+A 55-second horizontal piece for gitwarren.com, the README, YouTube and the
+launch post, and a 25-second vertical cut of the same material for X, Shorts
+and Reels. One rule for everything below: **a video model generates the
+people; the scripted capture pipeline generates every pixel of the product.**
+The zoom from a person's screen into the app is a compositing step, never a
+prompt.
+
+The argument of the piece: an agent finished and wants a review; that finds
+you anywhere; GitWarren brings the review to wherever you are, on your own
+machines, and the phone over the tailnet is the beat that proves it.
+
+Beats end at a fixed second from the first frame, as in `capture-dhh-clip.mjs`:
+overhead comes out of the hold, never the total.
+
+## Voice-over, timed (horizontal, 0:58)
+
+~105 words. Read at a talking pace, not an announcer's; leave the gaps where
+the clock leaves them. Every line is a claim the app makes for real.
+
+```
+0:00  (the chime — the agent-finished notification. No words.)
+0:02  One of your agents just finished.
+0:04  And it wants a review.
+0:09  Wherever that finds you.
+0:15  The agent left you a link.
+0:18  GitWarren. GitHub-style code review, on your own machines.
+0:22  It shows you the change before it's a commit —
+0:26  — and you can talk to your agent right on the line.
+0:32  Comment on a file the change didn't touch.
+0:36  And reach the repos on your other machines, over your own tailnet.
+0:40  No account. No server. Nothing leaves your computers.
+0:44  Send it back.
+0:50  GitWarren is free and open source.
+0:53  Desktop, command line, or a browser tab. Mac, Windows, Linux.
+      Works with any agent.
+0:58  (out)
+```
+
+## Storyboard, horizontal (16:9, 1920×1080)
+
+| Ends | Shot | Source | Notes |
+|-----:|------|--------|-------|
+| 0:03 | **Dark room.** A desk at night, laptop open, screen glow the only light. The chime; a hand comes into frame and reaches for the trackpad. | Runway, beat A | Also the bookend and the plate for the zoom at 0:15. Generate this one first; keep the best take. |
+| 0:06 | **Café.** A phone face-down on a table beside a cup; the hand turns it over and lifts it. | Runway, beat B | |
+| 0:09 | **Laundry.** A phone pulled from a back pocket with one hand, the other holding a basket or a folded towel. | Runway, beat C | |
+| 0:12 | **Dog park.** Leash in one hand, phone raised in the other; the dog pulls a little. | Runway, beat D | |
+| 0:15 | **Airport gate.** Laptop half-open on a knee, boarding pass on the seat beside; the lid opens the rest of the way. | Runway, beat E | |
+| 0:18 | **Zoom into the dark-room screen.** Push in on beat A's laptop until the screen fills frame; the screen is a real terminal: Claude Code, last lines a summary and a `http://127.0.0.1:41427/...` review link. | Beat A plate + terminal recording, composited | Terminal recorded for real (`screencapture -v`), big font, dark theme. Corner-pinned into the plate in Resolve, then a hard cut to the full-frame recording. |
+| 0:22 | **Click the link → review opens.** Browser, the review's Files changed tab, branch header with the amber *uncommitted* badge. Drawn cursor. | CDP capture, wide | `record.mjs` + `overlay.mjs`, page shot at 1440 and delivered at 1920 as the DHH clip was. |
+| 0:26 | **Scroll the diff.** Two or three hunks of a change that reads well in three seconds. Caption: *staged, unstaged and untracked — before it's a commit*. | CDP capture, wide | |
+| 0:30 | **A comment on a line.** Cursor to the gutter, click, type a short real comment, post. | CDP capture, wide | The comment text is in the seed; something a reviewer would actually say. |
+| 0:32 | **The agent replies in the thread.** Reply appears under the comment, agent identity visible. | CDP capture, wide | `demo-agent-reply.ts` posts it while recording. |
+| 0:36 | **Browse files.** Open the repository tree, filter to a file the diff never touched, open it, leave a comment on a line. Caption: *any file in the repo, not just the change*. | CDP capture, wide | Same beat as the DHH clip's browse tab. |
+| 0:40 | **Hosts.** The Hosts screen with `pc-win` reachable on the tailnet, then its repositories listed from the Mac. Caption: *your other machines, over your tailnet*. | CDP capture, wide | pc-win must be running GitWarren for real; see setup. |
+| 0:44 | **The phone.** Filmed: a real phone, the review from 0:22 open in Safari at the pc-win tailnet URL, thumb scrolls the diff, the comment thread from 0:30 is there. | Filmed | The most credible four seconds in the piece. Daylight, hand-held, no tripod polish. |
+| 0:47 | **Back in the terminal.** Typing `left some comments in gitwarren, please check` and Enter; the agent starts reading the review. | Terminal recording | Same session as 0:18. |
+| 0:50 | **Reverse montage, fast.** Dog park, laundry, café — one second each — phones going away, people going back to it. | Runway beats D, C, B — tail ends | Use the tail of each clip, or the clip reversed if the motion reads. |
+| 0:53 | **Dark room, bookend.** The same beat A clip; the laptop lid coming down, or the hand leaving frame. | Runway, beat A | Literally the same clip as 0:03, not a second generation — consistency for free. |
+| 0:58 | **End card.** Logo, `gitwarren.com`. Under it: *free · GPL-3 · macOS, Windows, Linux · desktop, CLI, web · works with any agent*. | Static, `build-social-preview.mjs` style | Hold 5s; the VO's last line runs over it. |
+
+Sound: the chime at 0:00 and, quieter, as the sting into 0:18 and 0:44. Music
+bed ducks under VO. Captions burned in throughout; autoplay is muted everywhere
+this will run.
+
+## Storyboard, vertical (9:16, 1080×1920, 0:25)
+
+The phone *is* the product footage here. The desktop beats that survive are
+captured a second time at a narrow viewport (`record.mjs` takes a `width`) so
+the app lays itself out for the column — no cropping.
+
+| Ends | Shot | Source |
+|-----:|------|--------|
+| 0:02 | Dark room, the chime. | Runway A, 9:16 |
+| 0:05 | Café, phone lifted. VO: *One of your agents just finished.* | Runway B, 9:16 |
+| 0:07 | Dog park. VO: *Wherever that finds you.* | Runway D, 9:16 |
+| 0:11 | Filmed phone: GitWarren open at the tailnet URL, the review tapped, it opens. VO: *GitWarren. GitHub-style review, on your own machines.* | Filmed |
+| 0:14 | Narrow capture: scroll the diff, amber badge. VO: *Before it's a commit.* | CDP, narrow |
+| 0:18 | Narrow capture: comment, agent reply. VO: *Talk to your agent on the line.* | CDP, narrow |
+| 0:21 | Narrow capture: Hosts, pc-win. VO: *Even the box in the other room. No account, no server.* | CDP, narrow |
+| 0:25 | End card. VO: *Free and open source. gitwarren.com.* | Static, 9:16 |
+
+## Runway prompts — do not generate until the beats above are locked
+
+Five beats, each generated twice: once 16:9, once 9:16. Same prompt both
+times except the framing sentence. 5-second clips; a 10-second take of beat A
+is worth having for the zoom plate and the bookend. Faces out of frame or soft
+in every beat — hands, devices, place. That is where the model is reliable and
+it is the framing we want anyway.
+
+One grade for all five: warm practicals, cool ambient, slight film grain, no
+lens flares, no slow motion. Say it in every prompt; the model does not
+remember the last one.
+
+**Consistency:** generate one still of the dark-room desk first (Runway's image
+model, or any) and use it as the image input for beat A. Everything else is a
+different person in a different place, so no consistency is needed — the
+bookend reuses beat A's clip.
+
+```
+A  Dark room
+   Night. A wooden desk lit only by an open laptop's screen glow. Camera at
+   desk height, slightly behind the laptop's left edge, the person out of
+   focus in the background. A hand enters from the right and settles on the
+   trackpad. Static camera, subtle handheld drift. Warm screen light, cool
+   dark room, fine film grain, shallow depth of field. No text on the screen.
+   [16:9: the laptop centred, room around it.]
+   [9:16: the laptop fills the lower two-thirds, dark wall above.]
+
+B  Café
+   Daytime café, window light. A phone lies face-down on a wooden table next
+   to a half-finished flat white. A hand turns the phone over and lifts it
+   toward the camera; the screen is dark glass. Static camera at table
+   height, background soft. Warm light, slight grain, no faces.
+   [16:9: table runs across the frame.]
+   [9:16: cup at the bottom, hand rising through the frame.]
+
+C  Laundry
+   A small laundry room, afternoon light from a high window. One hand holds
+   a folded towel against a hip; the other pulls a phone from a back pocket
+   and raises it. Camera at waist height, tight on the hands and the phone.
+   Natural light, soft, slight grain, no faces.
+   [16:9: the washing machine door in the left third.]
+   [9:16: towel low, phone rising to the upper third.]
+
+D  Dog park
+   A park path, overcast morning. One hand holds a leash that runs out of
+   frame toward a dog; the dog pulls once. The other hand brings a phone up
+   into frame. Camera low, following slightly, grass and path soft behind.
+   Cool daylight, slight grain, no faces.
+   [16:9: leash leads out of frame to the right.]
+   [9:16: leash leads out of the bottom of frame, phone rising to eye level.]
+
+E  Airport gate
+   An airport gate seating row, big windows, a plane at the jet bridge far
+   behind and out of focus. A laptop rests half-open on a knee, a boarding
+   pass on the seat beside. A hand opens the lid the rest of the way. Camera
+   at seat height, static. Flat daylight, slight grain, no faces.
+   [16:9: the row of seats across the frame.]
+   [9:16: knee and laptop in the lower half, windows above.]
+```
+
+Reject any take with legible text on a screen, a face in focus, a device that
+morphs between frames, or slow motion. Three takes per beat is usually enough.
+
+## Product captures — setup
+
+Everything the DHH clip needed, plus the phone and the terminal:
+
+- Demo repositories and a seeded database at `DEMO_REPO_ROOT=~/Developer/klarluft`,
+  `DEMO_TAILNET_HOST=pc-win.tail688c0c.ts.net` (`make-demo-repos.sh`, then
+  `seed-demo.ts`). The seed needs a review whose diff reads in three seconds
+  and a comment that a reviewer would actually write.
+- pc-win running GitWarren with *Reachable on your tailnet* on; otherwise the
+  Hosts card says "stopped responding".
+- The installed Mac app holds 41427: `LINK_SERVER_PORT=41428` for the capture,
+  reverted after. Start `serve` with `__APP_VERSION__` set to pc-win's version
+  or the card offers a "0.0.0-dev" update.
+- A dev build rewrites `~/.gitwarren/bin/gitwarren-mcp` to itself; point it
+  back at `/Applications/GitWarren.app/...` when done.
+- Chrome from a script file with `--remote-debugging-port=9222
+  --user-data-dir=<scratch>`; the worktree guard refuses the quoted app path
+  inline.
+- Terminal shots: a real Claude Code session in a Terminal window sized
+  1920×1080, font ~18pt, dark theme, recorded with `screencapture -v`. The
+  GitWarren plugin installed so the summary ends with the review link for
+  real.
+- The phone: Safari at `http://pc-win.tail688c0c.ts.net:41427` (or the Mac's
+  tailnet URL), opened on the same review the wide capture used, so the
+  comment thread on the phone is the one from 0:30.
+
+Outputs: `video-out/ad/` (gitignored) — `wide-*.mp4` and `narrow-*.mp4` per
+beat, `end-card-16x9.png`, `end-card-9x16.png`, and `rough.mp4`, an ffmpeg
+assembly of the product beats on the VO clock as a timing reference for the
+Resolve cut.
