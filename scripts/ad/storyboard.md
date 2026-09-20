@@ -14,6 +14,22 @@ machines, and the phone over the tailnet is the beat that proves it.
 Beats end at a fixed second from the first frame, as in `capture-dhh-clip.mjs`:
 overhead comes out of the hold, never the total.
 
+## Status (2026-09-20)
+
+Captured, at `~/Desktop/gitwarren-ad/` and in `video-out/ad/`: the seven
+product clips (`review-opens` 5.1s, `scroll-diff` 5.1s, `comment-and-reply`
+8.2s, `browse-untouched` 12.9s, `hosts` 6.1s, `conversation` 5.1s, `home`
+4.1s), both end cards, and `rough.mp4` - the clips on this clock with a slate
+wherever a Runway beat, the terminal or the phone goes.
+
+The rough runs 1:09.7 against the 0:58 written below. The product section is
+11.7s over: `comment-and-reply` needs 8s where the clock gives 6, and
+`browse-untouched` carries two moments (browse and open, ~5s; the comment and
+the answer, ~7s) where the clock gives 4. The edit decides: cut inside the
+browse clip, speed the typing, or let the second half of the voice-over start
+later. Not captured yet: the two terminal shots (a real Claude Code session,
+recorded on a desktop), the phone, and the Runway beats.
+
 ## Voice-over, timed (horizontal, 0:58)
 
 ~105 words. Read at a talking pace, not an announcer's; leave the gaps where
@@ -66,19 +82,21 @@ this will run.
 
 ## Storyboard, vertical (9:16, 1080×1920, 0:25)
 
-The phone *is* the product footage here. The desktop beats that survive are
-captured a second time at a narrow viewport (`record.mjs` takes a `width`) so
-the app lays itself out for the column — no cropping.
+The phone *is* the product footage here: the product beats are **iOS screen
+recordings** of Safari on the real phone, at the tailnet URL — already 9:16,
+already real. A CDP capture at a narrow viewport (`record.mjs` takes a
+`width`) is the fallback if a recording turns out illegible or needs the drawn
+cursor and captions.
 
 | Ends | Shot | Source |
 |-----:|------|--------|
 | 0:02 | Dark room, the chime. | Runway A, 9:16 |
 | 0:05 | Café, phone lifted. VO: *One of your agents just finished.* | Runway B, 9:16 |
 | 0:07 | Dog park. VO: *Wherever that finds you.* | Runway D, 9:16 |
-| 0:11 | Filmed phone: GitWarren open at the tailnet URL, the review tapped, it opens. VO: *GitWarren. GitHub-style review, on your own machines.* | Filmed |
-| 0:14 | Narrow capture: scroll the diff, amber badge. VO: *Before it's a commit.* | CDP, narrow |
-| 0:18 | Narrow capture: comment, agent reply. VO: *Talk to your agent on the line.* | CDP, narrow |
-| 0:21 | Narrow capture: Hosts, pc-win. VO: *Even the box in the other room. No account, no server.* | CDP, narrow |
+| 0:11 | Filmed phone (hand in frame): GitWarren open at the tailnet URL, the review tapped, it opens. VO: *GitWarren. GitHub-style review, on your own machines.* | Filmed |
+| 0:14 | Screen recording: scroll the diff, amber badge. VO: *Before it's a commit.* | Phone screen recording |
+| 0:18 | Screen recording: comment, agent reply. VO: *Talk to your agent on the line.* | Phone screen recording |
+| 0:21 | Screen recording: Hosts, pc-win. VO: *Even the box in the other room. No account, no server.* | Phone screen recording |
 | 0:25 | End card. VO: *Free and open source. gitwarren.com.* | Static, 9:16 |
 
 ## Runway prompts — do not generate until the beats above are locked
@@ -149,14 +167,19 @@ morphs between frames, or slow motion. Three takes per beat is usually enough.
 Everything the DHH clip needed, plus the phone and the terminal:
 
 - Demo repositories and a seeded database at `DEMO_REPO_ROOT=~/Developer/klarluft`,
-  `DEMO_TAILNET_HOST=pc-win.tail688c0c.ts.net` (`make-demo-repos.sh`, then
-  `seed-demo.ts`). The seed needs a review whose diff reads in three seconds
-  and a comment that a reviewer would actually write.
-- pc-win running GitWarren with *Reachable on your tailnet* on; otherwise the
-  Hosts card says "stopped responding".
-- The installed Mac app holds 41427: `LINK_SERVER_PORT=41428` for the capture,
-  reverted after. Start `serve` with `__APP_VERSION__` set to pc-win's version
-  or the card offers a "0.0.0-dev" update.
+  `DEMO_TAILNET_HOST=pc-win.tail688c0c.ts.net:41427` (`make-demo-repos.sh`,
+  then `seed-demo.ts`). The port is explicit on purpose: with the link port
+  moved (next point) a bare hostname would normalise to the moved port.
+  `set-host-target.ts` repairs a database seeded without it.
+- pc-win running GitWarren; otherwise the Hosts card says "stopped responding"
+  (tailscale serve there answers 502). The desktop app is no longer installed
+  on pc-win, so it is `npx gitwarren@<version> serve` against the data dir the
+  app left behind - started through WMI (`Invoke-CimMethod Win32_Process
+  Create`), because a process started from an SSH session dies with it.
+- The installed Mac app holds 41427: `LINK_SERVER_PORT = 41428` in
+  `src/shared/link-port.ts` for the capture, reverted after. `serve.sh` starts
+  serve with `__APP_VERSION__` set to pc-win's version, or the card offers a
+  "0.0.0-dev" update.
 - A dev build rewrites `~/.gitwarren/bin/gitwarren-mcp` to itself; point it
   back at `/Applications/GitWarren.app/...` when done.
 - Chrome from a script file with `--remote-debugging-port=9222
@@ -168,7 +191,11 @@ Everything the DHH clip needed, plus the phone and the terminal:
   real.
 - The phone: Safari at `http://pc-win.tail688c0c.ts.net:41427` (or the Mac's
   tailnet URL), opened on the same review the wide capture used, so the
-  comment thread on the phone is the one from 0:30.
+  comment thread on the phone is the one from 0:30. Two things from it: the
+  **filmed** take (a camera on the hand holding the phone, daylight, 4K, one
+  continuous scroll to the thread) with an iOS screen recording running
+  underneath as insurance, and separate clean **screen recordings** for the
+  vertical cut: open the review, scroll the diff, comment and reply, Hosts.
 
 Outputs: `video-out/ad/` (gitignored) — `wide-*.mp4` and `narrow-*.mp4` per
 beat, `end-card-16x9.png`, `end-card-9x16.png`, and `rough.mp4`, an ffmpeg
