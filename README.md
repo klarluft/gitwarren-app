@@ -2,6 +2,12 @@
 
 # GitWarren
 
+[![Build status](https://github.com/klarluft/gitwarren-app/actions/workflows/ci.yml/badge.svg)](https://github.com/klarluft/gitwarren-app/actions/workflows/ci.yml)
+[![Version on npm](https://img.shields.io/npm/v/gitwarren)](https://www.npmjs.com/package/gitwarren)
+[![Downloads a month from npm](https://img.shields.io/npm/dm/gitwarren)](https://www.npmjs.com/package/gitwarren)
+[![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE)
+[![MCP server rated A on Glama](https://glama.ai/mcp/servers/klarluft/gitwarren-app/badges/score.svg)](https://glama.ai/mcp/servers/klarluft/gitwarren-app)
+
 **[gitwarren.com](https://gitwarren.com)** — the official site, with downloads for
 macOS, Windows and Linux. On macOS there is also a Homebrew cask:
 
