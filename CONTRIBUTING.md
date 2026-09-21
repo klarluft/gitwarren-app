@@ -34,9 +34,9 @@ break them will not be merged:
   `git`. It does not bundle a git implementation and does not write to the user's
   repositories.
 
-The [Known limitations](README.md#known-limitations) section of the README lists
-things that are already understood to be missing. Those are fair game, and a
-comment saying you are picking one up avoids duplicated effort.
+[Known limitations](docs/limitations.md) lists things that are already
+understood to be missing. Those are fair game, and a comment saying you are
+picking one up avoids duplicated effort.
 
 ## The Contributor License Agreement
 
@@ -66,9 +66,9 @@ npm install          # also rebuilds native deps for Electron
 npm run dev          # start the app with hot reload
 ```
 
-See [Development setup](README.md#development-setup) in the README for the full
-list of scripts, and [Project layout](README.md#project-layout) for where things
-live.
+See [Development setup](docs/development.md#development-setup) for the full list
+of scripts, and [Project layout](docs/development.md#project-layout) for where
+things live.
 
 ## Before you open a pull request
 
@@ -147,7 +147,7 @@ npm run db:generate
 
 Migrations are shipped as real `.sql` files and read from disk at runtime, so the
 generated files must be committed — see
-[Database migrations](README.md#database-migrations).
+[Database migrations](docs/development.md#database-migrations).
 
 If you touched the plugin — the manifests at the repository root, or `skills/`,
 `commands/`, `agents/`, `packaging/plugin/start.mjs` — there is a CI step the
@@ -161,8 +161,9 @@ Five manifests each carry their own `version`, and none can point at
 `package.json` instead, so CI fails when one drifts. `npm version` runs the
 writing half of that script and commits the result, so a release keeps them in
 step on its own; the check is there for the hand-edited case. Which tool reads
-which file is in [Project layout](README.md#project-layout), and the install
-lines are in [Installing it as a plugin](README.md#installing-it-as-a-plugin).
+which file is in [Project layout](docs/development.md#project-layout), and the
+install lines are in
+[Installing it as a plugin](docs/agents.md#installing-it-as-a-plugin).
 
 A change to `skills/gitwarren/SKILL.md` is a change to how every agent that
 installs GitWarren behaves, so treat it as behaviour rather than as prose: say
