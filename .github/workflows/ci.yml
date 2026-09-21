@@ -162,3 +162,62 @@ jobs:
       # scripts/build-daemon-tarball.mjs` for the person who runs it by hand,
       # which is precisely who found `du -h`.
       - run: node scripts/build-daemon-tarball.mjs linux-x64
+
+  container:
+    name: Container image
+    runs-on: ubuntu-latest
+
+    # A job about a file nobody here runs, guarding a failure nobody here would
+    # see. Glama builds every MCP server it lists from a Dockerfile and, when
+    # the build does not come out, keeps the profile page and quietly drops the
+    # server from search, category listings and recommendations. That is the
+    # whole failure: no red check, no mail, just fewer people finding it. So the
+    # build runs on every pull request, in the one place a broken Dockerfile
+    # still says so out loud.
+    steps:
+      - uses: actions/checkout@v7
+
+      # The image installs the published package, which means CI can only build
+      # a version npm already has - and for the length of a release there is one
+      # it does not, because `npm version` commits the bump before the workflow
+      # publishes it. Failing there would be a red check for a clock rather than
+      # a fault, so the pin is checked against the registry first and the newest
+      # published version stands in when it is ahead. What is being tested is
+      # the Dockerfile; the pin itself is `sync-plugin-versions.mjs`'s job, and
+      # that gate has already run in the job above.
+      - name: Resolve the version to build
+        id: pin
+        run: |
+          pin=$(sed -n 's/^ARG GITWARREN_VERSION=//p' Dockerfile | sort -u)
+          if [ "$(printf '%s\n' "$pin" | wc -l)" -ne 1 ]; then
+            echo "::error::the build stages pin different versions: $pin"
+            exit 1
+          fi
+          if npm view "gitwarren@$pin" version >/dev/null 2>&1; then
+            echo "version=$pin" >> "$GITHUB_OUTPUT"
+          else
+            latest=$(npm view gitwarren version)
+            echo "::notice::$pin is not published yet; building $latest instead"
+            echo "version=$latest" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build
+        run: docker build --build-arg GITWARREN_VERSION=${{ steps.pin.outputs.version }} -t gitwarren:ci .
+
+      # A build that produces an image which cannot answer is still a broken
+      # listing, so the check is a real handshake rather than a successful
+      # build. `--network none` is the assertion, not the caution: this server
+      # opens no socket to anywhere, and the day that stops being true this step
+      # is where it should surface.
+      - name: Speak MCP to it
+        run: |
+          reply=$(
+            {
+              printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"ci","version":"1.0.0"}}}'
+              printf '%s\n' '{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}'
+              printf '%s\n' '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
+            } | docker run --rm -i --network none gitwarren:ci
+          )
+          echo "$reply"
+          echo "$reply" | grep -q '"serverInfo"' || { echo "::error::no handshake"; exit 1; }
+          echo "$reply" | grep -q '"name":"list_repositories"' || { echo "::error::no tools"; exit 1; }

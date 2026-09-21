@@ -88,6 +88,7 @@ line — see [Agent access (MCP)](#agent-access-mcp).
 - [Database migrations](#database-migrations)
 - [Agent access (MCP)](#agent-access-mcp)
 - [Installing it as a plugin](#installing-it-as-a-plugin)
+- [In a container](#in-a-container)
 - [The `gitwarren` command line](#the-gitwarren-command-line)
 - [Your other machines](#your-other-machines)
 - [Linking the user back into the app](#linking-the-user-back-into-the-app)
@@ -1153,6 +1154,68 @@ database.
 The app does not need to be running for the MCP server to work — both open the
 same database independently, and an agent gets a working `guiUrl` either way.
 
+### In a container
+
+There is a `Dockerfile` at the root, and it is worth saying plainly what it is
+for, because it is not how anybody should run this. The whole claim of the
+product is that the review sits next to the working copy on your machine, and a
+container is by construction not your machine: what you get in one is a server
+that can only see what you remembered to mount, writing a database that is gone
+at the end of the run unless you mounted that too.
+
+It exists because the directories want one. Glama builds every server it lists
+from a Dockerfile — the maintainer's, or one its own tooling guesses — runs the
+result in a microVM, watches what it does at the syscall and network layers,
+and withholds a server from search and recommendations when the build is not
+reproducible. Writing the file ourselves is the difference between being
+scanned as we actually ship and being scanned as somebody's inference of us.
+The second reason is smaller and real: it is the shortest way for a stranger to
+watch this server run without installing anything of ours.
+
+```bash
+docker build -t gitwarren .
+
+docker run --rm -i \
+  -v "$PWD:/workspace:ro" \
+  -v gitwarren-data:/data \
+  gitwarren
+```
+
+The image installs the published npm package at a pinned version — the same
+artifact `npx gitwarren mcp` fetches, so what a scanner sees is what a user
+runs. `scripts/sync-plugin-versions.mjs` keeps the pin level with package.json
+the way it does for the plugin and registry manifests, and CI fails on a pin
+that has drifted.
+
+Three things about it are deliberate, and all three are the answer to the
+question a security scan is asking:
+
+- **It writes to exactly one directory.** `GITWARREN_DATA_DIR` is set to
+  `/data` rather than left to the platform default, so the SQLite file and the
+  instance id have a declared home instead of landing in a container layer. A
+  `docker diff` after a real session — add a repository, open a review, leave a
+  comment — lists `/data/gitwarren.db` and `/data/instance-id`, and nothing
+  else anywhere in the filesystem.
+- **It asks the network for nothing.** That same flow runs unchanged under
+  `--network none`. The server speaks stdio, reads the working tree, and writes
+  SQLite; the only socket it ever opens is the best-effort poke to a GUI on
+  loopback, which in a container finds no owner and carries on. `--serve` is
+  left out of the default command for the same reason — a listener nobody asked
+  for is surface nobody wanted. Add it, and publish 41427, if you want the
+  review page.
+- **It runs as nobody in particular.** The compiler lives in a build stage that
+  is thrown away, so the shipped image has no toolchain, no headers and no
+  package index; the server runs as the base image's `node` user, uid 1000, and
+  root owns nothing it touches.
+
+The one concession is `safe.directory`. A bind-mounted repository belongs to a
+uid from the host, and the version control tooling refuses to read a repository
+it believes is someone else's, so the image waives that check rather than
+asking whoever runs it to. The check defends against a repository's own config
+running commands as you; inside a container holding one server and one mount,
+where no shell is ever involved, that is a trade worth making — but it is a
+trade, and it is made here and nowhere else.
+
 ---
 
 ## The `gitwarren` command line
@@ -1422,8 +1485,9 @@ Artifacts and the update manifest are published to **GitHub Releases**
 # 1. Bump the version. electron-builder reads it from package.json,
 #    and it becomes the version electron-updater compares against.
 npm version patch          # or minor / major — creates a commit and a tag
-#    The `version` script copies the number into the plugin manifests at the
-#    repository root, so that one commit says the version everywhere it appears.
+#    The `version` script copies the number into the plugin manifests and the
+#    Dockerfile's pin at the repository root, so that one commit says the
+#    version everywhere it appears.
 
 # 2. Verify before shipping.
 npm run lint && npm test
