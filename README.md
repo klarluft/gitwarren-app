@@ -1485,8 +1485,9 @@ Artifacts and the update manifest are published to **GitHub Releases**
 # 1. Bump the version. electron-builder reads it from package.json,
 #    and it becomes the version electron-updater compares against.
 npm version patch          # or minor / major — creates a commit and a tag
-#    The `version` script copies the number into the plugin manifests at the
-#    repository root, so that one commit says the version everywhere it appears.
+#    The `version` script copies the number into the plugin manifests and the
+#    Dockerfile's pin at the repository root, so that one commit says the
+#    version everywhere it appears.
 
 # 2. Verify before shipping.
 npm run lint && npm test
