@@ -50,6 +50,12 @@ request is, with *conversation*, *commits* and *files changed* tabs.
   live on the machine the code is on and stay there; nothing is replicated or
   relayed anywhere but the computers you already own.
 
+Comments go on the line, the way a pull request does them. The agent that
+wrote the code answers in the same thread, while you are still reading the
+diff:
+
+<a href="https://gitwarren.com"><img src="docs/comment-on-a-line.gif" alt="A line in the diff is hovered, the comment composer opens, a question about Escape handling is typed and submitted, and Claude Code answers in the same thread" width="800" /></a>
+
 ---
 
 ## Install
