@@ -76,6 +76,12 @@ commit, which is exactly when review is most useful.
 Nothing is cached: every branch name, commit and diff on screen is read from git
 at the moment it is shown.
 
+Comments go on the line, the way a pull request does them. The agent that
+wrote the code answers in the same thread, while you are still reading the
+diff:
+
+<a href="https://gitwarren.com"><img src="docs/comment-on-a-line.gif" alt="A line in the diff is hovered, the comment composer opens, a question about Escape handling is typed and submitted, and Claude Code answers in the same thread" width="800" /></a>
+
 Local AI agents get the same capabilities through an MCP server over stdio, and
 a plugin puts it into Claude Code, Codex, Cursor, VS Code and Gemini CLI in one
 line — see [Agent access (MCP)](#agent-access-mcp).
