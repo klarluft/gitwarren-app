@@ -1,0 +1,5 @@
+# The build needs none of the repository: the image installs the published
+# package. Everything is excluded, and the Dockerfile is re-admitted so that a
+# daemon-side build still has the file it was pointed at.
+*
+!Dockerfile

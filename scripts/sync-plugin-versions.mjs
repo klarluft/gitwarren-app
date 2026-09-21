@@ -32,6 +32,9 @@ import { join, resolve } from 'node:path'
 const root = resolve(import.meta.dirname, '..')
 const { version } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
 
+/** Every `ARG GITWARREN_VERSION=` line in the Dockerfile, one per build stage. */
+const DOCKERFILE_PIN = /^ARG GITWARREN_VERSION=(.+)$/gm
+
 /**
  * Where the version has to appear, and how to reach it in each file. The
  * marketplace lists the plugin as an entry, so its field is one level down.
@@ -55,6 +58,17 @@ const manifests = [
       m.version = version
       m.packages[0].version = version
     }
+  },
+  // Not JSON, and the only entry that is not a manifest: the image installs the
+  // published package by name, so the pin in it is a version of GitWarren like
+  // any other and goes stale the same way. `text` swaps the parse for the raw
+  // string; the getter reports every distinct value it found, so that the two
+  // build stages drifting apart is a failure rather than a coin toss.
+  {
+    file: 'Dockerfile',
+    text: true,
+    get: (s) => [...new Set([...s.matchAll(DOCKERFILE_PIN)].map((m) => m[1]))].join(' and '),
+    set: (s) => s.replace(DOCKERFILE_PIN, `ARG GITWARREN_VERSION=${version}`)
   }
 ]
 
@@ -63,7 +77,18 @@ const stale = []
 
 for (const manifest of manifests) {
   const path = join(root, manifest.file)
-  const parsed = JSON.parse(readFileSync(path, 'utf8'))
+  const raw = readFileSync(path, 'utf8')
+
+  if (manifest.text) {
+    const found = manifest.get(raw)
+    if (found === version) continue
+    stale.push(`${manifest.file} says ${found}`)
+    if (check) continue
+    writeFileSync(path, manifest.set(raw), 'utf8')
+    continue
+  }
+
+  const parsed = JSON.parse(raw)
   if (manifest.get(parsed) === version) continue
   stale.push(`${manifest.file} says ${manifest.get(parsed)}`)
   if (check) continue
