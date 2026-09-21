@@ -1169,14 +1169,21 @@ container is by construction not your machine: what you get in one is a server
 that can only see what you remembered to mount, writing a database that is gone
 at the end of the run unless you mounted that too.
 
-It exists because the directories want one. Glama builds every server it lists
-from a Dockerfile — the maintainer's, or one its own tooling guesses — runs the
-result in a microVM, watches what it does at the syscall and network layers,
-and withholds a server from search and recommendations when the build is not
-reproducible. Writing the file ourselves is the difference between being
-scanned as we actually ship and being scanned as somebody's inference of us.
-The second reason is smaller and real: it is the shortest way for a stranger to
-watch this server run without installing anything of ours.
+It was written for Glama, and Glama turns out not to read it. That directory
+builds a server from a spec on the maintainer's admin page — a base image, a
+list of build steps, a CMD — generates its own Dockerfile from those fields,
+and ignores whatever is committed here. The published methodology says a
+server is built "from a Dockerfile … authored by the maintainer and checked
+into the repository, or inferred", which reads as though this file is one of
+the two, and it is not. Anyone configuring that page should go by
+`docs/glama-build-spec.md`, which is where the fields that *are* read live.
+
+Two reasons to keep it anyway, both smaller than the one it was written for
+and both true. CI builds it on every pull request and speaks a real handshake
+to the result, which is the only thing in this repository that proves the
+*published* package starts and answers on Linux — everything else tests the
+source tree. And it is the shortest way for a stranger to watch this server
+run without installing anything of ours.
 
 ```bash
 docker build -t gitwarren .
@@ -1188,13 +1195,14 @@ docker run --rm -i \
 ```
 
 The image installs the published npm package at a pinned version — the same
-artifact `npx gitwarren mcp` fetches, so what a scanner sees is what a user
+artifact `npx gitwarren mcp` fetches, so what gets exercised is what a user
 runs. `scripts/sync-plugin-versions.mjs` keeps the pin level with package.json
 the way it does for the plugin and registry manifests, and CI fails on a pin
 that has drifted.
 
 Three things about it are deliberate, and all three are the answer to the
-question a security scan is asking:
+question a security review asks. They are also what the Glama build spec
+reproduces, which is why they are written down here rather than only there:
 
 - **It writes to exactly one directory.** `GITWARREN_DATA_DIR` is set to
   `/data` rather than left to the platform default, so the SQLite file and the
