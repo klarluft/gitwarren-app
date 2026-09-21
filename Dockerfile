@@ -4,14 +4,22 @@
 #
 # This is not how a person runs GitWarren. The point of the product is that the
 # reviews are on your machine, next to the working copy the diff is read from,
-# and a container is by construction not your machine. What this image is for is
-# the two places that insist on one: a directory like Glama, which builds every
-# server it lists from a Dockerfile and will not distribute a server whose build
-# does not come out reproducibly, and anyone who wants to look at what the
-# server does with no compiler, no daemon and no npm cache of their own involved.
+# and a container is by construction not your machine.
+#
+# It was written for Glama and Glama does not read it: that directory generates
+# its own Dockerfile from a form on the server's admin page and ignores what is
+# committed here. `docs/glama-build-spec.md` holds the fields it does read, and
+# they are kept deliberately close to this file so that the thing they scan and
+# the thing CI builds behave the same way.
+#
+# What is left is worth the file. CI builds this on every pull request and
+# speaks a real handshake to the result, which is the only check in the
+# repository that exercises the *published* package rather than the source
+# tree; and it is the shortest way for a stranger to watch this server run
+# without installing anything of ours.
 #
 # So it runs the published package, at a pinned version, exactly as `npx` would
-# fetch it - anything else would be scanning a build nobody runs. The version is
+# fetch it - anything else would be testing a build nobody runs. The version is
 # kept in step with package.json by `scripts/sync-plugin-versions.mjs`, which
 # the `npm version` script runs on every bump, the same way the plugin and
 # registry manifests are kept honest.

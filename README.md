@@ -2,6 +2,12 @@
 
 # GitWarren
 
+[![Build status](https://github.com/klarluft/gitwarren-app/actions/workflows/ci.yml/badge.svg)](https://github.com/klarluft/gitwarren-app/actions/workflows/ci.yml)
+[![Version on npm](https://img.shields.io/npm/v/gitwarren)](https://www.npmjs.com/package/gitwarren)
+[![Downloads a month from npm](https://img.shields.io/npm/dm/gitwarren)](https://www.npmjs.com/package/gitwarren)
+[![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE)
+[![MCP server rated A on Glama](https://glama.ai/mcp/servers/klarluft/gitwarren-app/badges/score.svg)](https://glama.ai/mcp/servers/klarluft/gitwarren-app)
+
 **Code review for your own git repositories, on your own machines.** Your
 machines, your agents, no one else's server — and no account.
 
@@ -99,6 +105,7 @@ screens. See [Installing it as a plugin](docs/agents.md#installing-it-as-a-plugi
 | [Architecture](docs/architecture.md) | The stack, the shared service layer both surfaces call, and what is and is not stored |
 | [Development](docs/development.md) | Running from source, the project layout, database migrations |
 | [Releasing](docs/releasing.md) | Cutting a release, auto-update, code signing and notarization |
+| [The Glama build spec](docs/glama-build-spec.md) | The fields Glama's admin page actually reads, and why they say what they say |
 | [Known limitations](docs/limitations.md) | What GitWarren does not do, and why |
 | [GitWarren across hosts](docs/across-hosts.md) | The design plan behind the remote-host model |
 

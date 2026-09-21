@@ -36,6 +36,12 @@ const { version } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
 const DOCKERFILE_PIN = /^ARG GITWARREN_VERSION=(.+)$/gm
 
 /**
+ * The pinned install in the Glama build spec. Only the pinned spellings, so
+ * that the prose around it can go on saying `npx gitwarren mcp` untouched.
+ */
+const SPEC_PIN = /gitwarren@(\d+\.\d+\.\d+[^\s"`]*)/g
+
+/**
  * Where the version has to appear, and how to reach it in each file. The
  * marketplace lists the plugin as an entry, so its field is one level down.
  */
@@ -69,6 +75,16 @@ const manifests = [
     text: true,
     get: (s) => [...new Set([...s.matchAll(DOCKERFILE_PIN)].map((m) => m[1]))].join(' and '),
     set: (s) => s.replace(DOCKERFILE_PIN, `ARG GITWARREN_VERSION=${version}`)
+  },
+  // The Glama build spec names the version too. Glama's own field is on their
+  // website and out of reach of anything here, so this cannot keep that in
+  // step - what it keeps in step is the document somebody copies the field
+  // from, which is the next best thing and the only part we own.
+  {
+    file: 'docs/glama-build-spec.md',
+    text: true,
+    get: (s) => [...new Set([...s.matchAll(SPEC_PIN)].map((m) => m[1]))].join(' and '),
+    set: (s) => s.replace(SPEC_PIN, `gitwarren@${version}`)
   }
 ]
 
