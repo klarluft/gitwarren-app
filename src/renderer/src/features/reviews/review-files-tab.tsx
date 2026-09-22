@@ -139,6 +139,28 @@ function scrollParent(element: HTMLElement): HTMLElement {
 }
 
 /**
+ * How far below its scroller a card comes to rest when it is scrolled to -
+ * where the reading area starts, rather than where the scroller does.
+ *
+ * The two are not the same. A card holds itself clear of the sticky find bar
+ * with `scroll-mt`, so a file scrolled to the top parks that far down and the
+ * strip left above it is filled by the tail of the file before it. Measuring
+ * "which file is at the top" from the scroller's own edge therefore answers
+ * with the file being left behind, which is the bug this exists to remove: the
+ * highlight in the tree lagged one file behind every click, until the next
+ * pixel of scrolling clipped that sliver away and it corrected itself.
+ */
+function readingInset(card: HTMLElement): number {
+  const inset = Number.parseFloat(getComputedStyle(card).scrollMarginTop)
+  return Number.isFinite(inset) ? inset : 0
+}
+
+/** The same line as a viewport coordinate, for whoever is comparing rects. */
+function readingTop(card: HTMLElement): number {
+  return scrollParent(card).getBoundingClientRect().top + readingInset(card)
+}
+
+/**
  * The gap the tab leaves between the blocks stacked down it - `gap-3`.
  *
  * Written out here because the sticky offset is arithmetic done in JS: a header
@@ -280,13 +302,33 @@ function anchorByFile(
  * screen" without a layout read per frame, and the top band is narrowed with a
  * negative bottom margin so "current" means the file you are reading rather
  * than the last one that happens to be visible.
+ *
+ * The band starts at `readingInset` and not at the top of the scroller, which
+ * is the difference between pointing at the file you just clicked and pointing
+ * at the one above it. A card scrolled to the top rests a `scroll-mt` down, and
+ * the strip that leaves above it is the last few pixels of the file before -
+ * enough to keep that file "visible", and it is the earlier of the two, so it
+ * won the highlight. `TOP_EDGE_SLACK` on top of that covers the pixel or two
+ * `scrollIntoView` lands short by; it stays far below the height of any card,
+ * so the file actually at the top is never the one excluded.
+ *
+ * `sticky` is not read here - it is the dependency that rebuilds the band when
+ * the find bar opens or closes and moves the line every card parks on.
  */
-function useActiveFile(paths: string[]): string | null {
+function useActiveFile(paths: string[], sticky: string): string | null {
   const [active, setActive] = useState<string | null>(null)
   const key = paths.join('\n')
 
   useEffect(() => {
     const order = key === '' ? [] : key.split('\n')
+    const cards = order
+      .map((path) => document.getElementById(fileDomId(path)))
+      .filter((card): card is HTMLElement => card !== null)
+    const first = cards[0]
+    if (first === undefined) return
+
+    const scroller = scrollParent(first)
+    const top = readingInset(first) + TOP_EDGE_SLACK
     const visible = new Set<string>()
 
     const observer = new IntersectionObserver(
@@ -299,15 +341,18 @@ function useActiveFile(paths: string[]): string | null {
         }
         setActive(order.find((path) => visible.has(path)) ?? null)
       },
-      { rootMargin: '0px 0px -70% 0px' }
+      {
+        // The scroller rather than the window: the band is measured from where
+        // the diff starts, and a percentage here is a share of the diff's own
+        // height rather than of whatever the shell has wrapped around it.
+        root: scroller === document.documentElement ? null : scroller,
+        rootMargin: `${-top}px 0px -70% 0px`
+      }
     )
 
-    for (const path of order) {
-      const element = document.getElementById(fileDomId(path))
-      if (element) observer.observe(element)
-    }
+    for (const card of cards) observer.observe(card)
     return () => observer.disconnect()
-  }, [key])
+  }, [key, sticky])
 
   return active
 }
@@ -492,7 +537,6 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
   // freshly built list on every keystroke elsewhere on the screen.
   const files = useMemo(() => data?.files ?? [], [data?.files])
   const paths = useMemo(() => files.map((file) => file.path), [files])
-  const activePath = useActiveFile(paths)
   const find = useDiffFind(files)
   const [bindFindBar, findBarHeight] = useMeasuredHeight()
 
@@ -524,6 +568,10 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
     '--diff-sticky-top': stickyTop,
     '--diff-scroll-top': `calc(${stickyTop} + 0.5rem)`
   } as CSSProperties
+
+  // Below `stickyTop` because it is measured against the same line: where a
+  // card scrolled to the top comes to rest.
+  const activePath = useActiveFile(paths, stickyTop)
 
   /**
    * The fingerprint of every file *as it is being shown*, which is what a
@@ -684,7 +732,7 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
     for (const [index, path] of paths.entries()) {
       const element = document.getElementById(fileDomId(path))
       if (element === null) continue
-      edge ??= scrollParent(element).getBoundingClientRect().top
+      edge ??= readingTop(element)
       if (element.getBoundingClientRect().top - edge > TOP_EDGE_SLACK) break
       current = index
     }
