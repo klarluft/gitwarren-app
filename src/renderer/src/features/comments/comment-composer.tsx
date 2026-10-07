@@ -343,7 +343,7 @@ export function CommentComposer({
   return (
     <div
       ref={composerRef}
-      className={cn('flex flex-col gap-2', className)}
+      className={cn('flex flex-col gap-2 max-sm:gap-1.5', className)}
       // The whole composer is the drop target, not just the textarea's
       // rectangle. Dropping a screenshot "on the comment box" means the box as
       // a person sees it, toolbar and buttons included, and a drop that lands
@@ -367,12 +367,20 @@ export function CommentComposer({
       }}
     >
       <Tabs value={tab} onValueChange={(next) => setTab(next as 'write' | 'preview')}>
+        {/* On a phone every row of chrome is a row of the diff the comment is
+            about, pushed off a screen the keyboard has already halved - so the
+            tabs, the toolbar and the box all come down to their dense sizes
+            below `sm`. The desktop layout is untouched. */}
         <TabsList>
-          <TabsTab value="write">Write</TabsTab>
-          <TabsTab value="preview">Preview</TabsTab>
+          <TabsTab value="write" className={DENSE_TAB}>
+            Write
+          </TabsTab>
+          <TabsTab value="preview" className={DENSE_TAB}>
+            Preview
+          </TabsTab>
         </TabsList>
 
-        <TabsPanel value="write" className="pt-2">
+        <TabsPanel value="write" className="pt-2 max-sm:pt-1.5">
           <div
             className={cn(
               'rounded-md border border-input transition-colors',
@@ -393,19 +401,30 @@ export function CommentComposer({
               onKeyDown={onKeyDown}
               onPaste={onPaste}
               aria-label={placeholder}
-              className="min-h-24 rounded-none rounded-b-md border-0 shadow-none focus-visible:outline-none"
+              className={cn(
+                'min-h-24 rounded-none rounded-b-md border-0 shadow-none focus-visible:outline-none',
+                // Three lines rather than five, and 16px type on a touch
+                // screen: iOS zooms the whole page into any field set smaller
+                // than that the moment it takes focus, which is what made the
+                // composer feel enormous - it was being magnified.
+                'max-sm:min-h-16 max-sm:px-2 max-sm:py-1.5 [@media(pointer:coarse)]:text-base',
+                // Starting small only works if it grows: a fixed three lines
+                // scrolls what you wrote out of sight inside the box. Capped
+                // so a long comment cannot push the buttons under the keyboard.
+                'max-sm:max-h-[40dvh] max-sm:[field-sizing:content]'
+              )}
             />
           </div>
         </TabsPanel>
 
-        <TabsPanel value="preview" className="pt-2">
+        <TabsPanel value="preview" className="pt-2 max-sm:pt-1.5">
           {/*
             The preview renders through the same <Markdown> component the posted
             comment will, which is the only way it can be trusted. A preview
             drawn by a second code path drifts, and a preview that lies is worse
             than no preview at all.
           */}
-          <div className="min-h-24 rounded-md border border-input px-3 py-2">
+          <div className="min-h-24 rounded-md border border-input px-3 py-2 max-sm:min-h-16 max-sm:px-2 max-sm:py-1.5">
             {value.trim().length > 0 ? (
               <Markdown body={value} />
             ) : (
@@ -425,7 +444,9 @@ export function CommentComposer({
           squeezing one another; on a narrow window the hint is three lines of
           its own and left the buttons a sliver. */}
       <div className="flex flex-wrap items-center justify-end gap-2">
-        <span className="mr-auto text-xs text-muted-foreground">
+        {/* Not on a phone: there is no ⌘ to press and nothing to drop, and the
+            line it took is a line of code. The attach button says the rest. */}
+        <span className="mr-auto text-xs text-muted-foreground max-sm:hidden">
           {dragging
             ? 'Drop to attach'
             : 'Markdown supported · paste or drop an image · ⌘↵ to submit'}
@@ -491,7 +512,15 @@ function Toolbar({
   ]
 
   return (
-    <div className="flex flex-wrap items-center gap-0.5 border-b border-border px-1 py-1">
+    // One row that scrolls sideways on a phone rather than two that wrap: the
+    // second row was the attach button alone, and cost the textarea a line.
+    <div
+      className={cn(
+        'flex flex-wrap items-center gap-0.5 border-b border-border px-1 py-1',
+        'max-sm:flex-nowrap max-sm:gap-0 max-sm:overflow-x-auto max-sm:py-0.5',
+        '[scrollbar-width:none] [&::-webkit-scrollbar]:hidden'
+      )}
+    >
       {actions.map(({ icon: Icon, title, run }) => (
         <Tooltip key={title} label={title}>
           <button
@@ -503,7 +532,7 @@ function Toolbar({
               transform(run)
             }}
             className={cn(
-              'rounded p-1.5 text-muted-foreground transition-colors',
+              'shrink-0 rounded p-1.5 text-muted-foreground transition-colors max-sm:px-1',
               'hover:bg-muted hover:text-foreground',
               'disabled:pointer-events-none disabled:opacity-50'
             )}
@@ -517,7 +546,7 @@ function Toolbar({
           the same rule the reveal button follows. See the note at the top. */}
       {onAttach && (
         <>
-          <span className="mx-1 h-4 w-px bg-border" />
+          <span className="mx-1 h-4 w-px shrink-0 bg-border max-sm:mx-0.5" />
 
           <Tooltip label="Attach an image">
             <button
@@ -529,7 +558,7 @@ function Toolbar({
                 onAttach()
               }}
               className={cn(
-                'rounded p-1.5 text-muted-foreground transition-colors',
+                'shrink-0 rounded p-1.5 text-muted-foreground transition-colors max-sm:px-1',
                 'hover:bg-muted hover:text-foreground',
                 'disabled:pointer-events-none disabled:opacity-50'
               )}
@@ -542,6 +571,9 @@ function Toolbar({
     </div>
   )
 }
+
+/** The Write / Preview tabs at a phone's density. */
+const DENSE_TAB = 'max-sm:px-2 max-sm:py-1 max-sm:text-xs'
 
 /**
  * A default alt text, used only when nothing better is available.

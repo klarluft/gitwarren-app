@@ -86,6 +86,17 @@ const EXPAND_UNBOUNDED = 20_000
 
 const NO_THREADS: AnchoredThread[] = []
 
+/**
+ * A file badge's word, dropped to its icon on a phone.
+ *
+ * The badges, the stat, the reviewed checkbox and the actions came to a few
+ * pixels more than a phone is wide, so the actions wrapped onto a third line of
+ * a header that sticks to the top of the screen the whole way down the file.
+ * The amber dot is the same colour the review's own banner explains in words,
+ * and the word stays for screen readers and in the badge's title.
+ */
+export const DENSE_LABEL = 'max-sm:sr-only'
+
 const STATUS_ICONS = {
   added: FilePlus,
   deleted: FileMinus,
@@ -418,7 +429,7 @@ export function FileDiffCard({
             disabled={!canToggle}
             aria-expanded={expanded}
             className={cn(
-              'flex min-w-0 items-center gap-2 px-3 py-2 text-left transition-colors',
+              'flex min-w-0 items-center gap-2 px-3 py-2 text-left transition-colors max-sm:gap-1.5 max-sm:py-1.5 max-sm:pl-2 max-sm:pr-1',
               canToggle ? 'hover:bg-muted/50' : 'cursor-default'
             )}
           >
@@ -455,7 +466,7 @@ export function FileDiffCard({
             checkbox and the actions come to more than a phone is wide - so
             they wrap among themselves instead of running off the end of the
             card, where nothing could scroll them back into reach. */}
-        <div className="ml-auto flex flex-wrap items-center gap-2 py-1 pl-2 lg:flex-nowrap lg:shrink-0">
+        <div className="ml-auto flex flex-wrap items-center gap-2 py-1 pl-2 max-sm:ml-0 max-sm:gap-1.5 max-sm:pb-1 max-sm:pl-[2.875rem] max-sm:pt-0 lg:flex-nowrap lg:shrink-0">
           {/* Shown even while the file is folded shut, so a discussion is never
             hidden by a collapse the reviewer did not think about. */}
           {threads.length > 0 && (
@@ -475,13 +486,13 @@ export function FileDiffCard({
           {file.isUntracked && (
             <Badge variant="warning" title="This file is not tracked by git yet">
               <CircleDot />
-              untracked
+              <span className={DENSE_LABEL}>untracked</span>
             </Badge>
           )}
           {!file.isUntracked && file.hasUncommittedChanges && (
             <Badge variant="warning" title="Part of this change is not committed">
               <CircleDot />
-              uncommitted
+              <span className={DENSE_LABEL}>uncommitted</span>
             </Badge>
           )}
           {file.isBinary && <Badge variant="outline">binary</Badge>}
@@ -1155,7 +1166,9 @@ export function LineRow({
         // container is miserable. The width is the *visible* width of that
         // container (`cqi`), not the width of its scrolled contents, so the
         // discussion stays inside the file card however long the lines are.
-        <div className="sticky left-0 flex w-[min(48rem,100cqi)] flex-col gap-2 border-y border-border bg-muted/20 p-3 font-sans text-sm">
+        // On a phone the two layers of padding - this strip's and the card's
+        // inside it - came to a tenth of the screen's width on each side.
+        <div className="sticky left-0 flex w-[min(48rem,100cqi)] flex-col gap-2 border-y border-border bg-muted/20 p-3 font-sans text-sm max-sm:gap-1.5 max-sm:p-1.5">
           {threads.map((thread) => (
             <CommentThreadCard
               key={thread.id}
@@ -1173,7 +1186,7 @@ export function LineRow({
           ))}
 
           {composing && number !== null && composingOn && (
-            <div className="rounded-lg border border-border bg-card p-3">
+            <div className="rounded-lg border border-border bg-card p-3 max-sm:p-2">
               <CommentComposer
                 autoFocus
                 placeholder={`Comment on ${rangeLabel}`}

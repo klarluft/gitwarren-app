@@ -42,6 +42,7 @@ import { useHostScope } from '@/lib/host-scope'
 import { useRegisterCommands, type Command } from '@/features/commands/command-registry'
 import { UnknownHostCard } from '@/features/hosts/unknown-host-card'
 import { navigate, replace, REVIEW_TABS, type DiffFocus, type ReviewTab } from '@/lib/router'
+import { cn } from '@/lib/utils'
 import { useReviewComments } from '../comments/use-comments'
 import { RefChip } from './ref-chip'
 import { ReviewBrowseTab, SEARCH_KEYS } from './review-browse-tab'
@@ -62,6 +63,12 @@ import type { CompareEndpoint } from '@shared/git'
 import type { Review } from '@shared/schemas'
 
 /** Tab labels and icons, shared by the tab strip's commands and the strip. */
+/**
+ * The review's tabs at a phone's density: tight enough that all four fit on a
+ * 390px screen rather than "Files changed" scrolling off the end of the strip.
+ */
+const DENSE_TAB = 'max-sm:gap-1 max-sm:px-1.5 max-sm:text-[0.8125rem] max-sm:[&_svg]:hidden'
+
 const TAB_LABELS: Record<ReviewTab, string> = {
   conversation: 'Conversation',
   commits: 'Commits',
@@ -277,12 +284,12 @@ export function ReviewDetail({ reviewId, tab, focus, search }: ReviewDetailProps
   const unresolvedThreads = threads.filter((thread) => thread.resolvedAt === null).length
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-5 max-sm:gap-3">
       <div>
         <Button
           variant="ghost"
           size="sm"
-          className="-ml-2 mb-2 text-muted-foreground"
+          className="-ml-2 mb-2 text-muted-foreground max-sm:mb-1"
           onClick={() =>
             navigate({ name: 'repository', repositoryId: review.repositoryId, ...scope })
           }
@@ -291,7 +298,7 @@ export function ReviewDetail({ reviewId, tab, focus, search }: ReviewDetailProps
           {review.repository.name}
         </Button>
 
-        <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex flex-wrap items-start justify-between gap-3 max-sm:gap-2">
           <div className="min-w-0">
             {/* The title wraps here where it truncates in the review list, and
                 the difference is deliberate: in a list it is one row among
@@ -301,14 +308,14 @@ export function ReviewDetail({ reviewId, tab, focus, search }: ReviewDetailProps
                 takes two. */}
             <div className="flex items-start gap-2">
               <GitPullRequestArrow
-                className={`mt-1 size-5 shrink-0 ${isOpen ? 'text-success' : 'text-muted-foreground'}`}
+                className={`mt-1 size-5 shrink-0 max-sm:mt-0.5 ${isOpen ? 'text-success' : 'text-muted-foreground'}`}
               />
-              <h1 className="min-w-0 break-words text-xl font-semibold tracking-tight">
+              <h1 className="min-w-0 break-words text-xl font-semibold tracking-tight max-sm:text-lg max-sm:leading-snug">
                 {review.title}
               </h1>
               <Badge
                 variant={isOpen ? 'success' : 'outline'}
-                className="mt-1 shrink-0"
+                className="mt-1 shrink-0 max-sm:mt-0.5"
               >
                 {isOpen ? 'Open' : 'Closed'}
               </Badge>
@@ -383,18 +390,20 @@ export function ReviewDetail({ reviewId, tab, focus, search }: ReviewDetailProps
         }
       >
         <TabsList>
-          <TabsTab value="conversation">
+          <TabsTab value="conversation" className={DENSE_TAB}>
             <MessageSquare />
             Conversation
             {/* Unresolved rather than total: the number that should make you
                 click is how much is still open, not how much was ever said. */}
             {unresolvedThreads > 0 && <TabsCount>{unresolvedThreads}</TabsCount>}
           </TabsTab>
-          <TabsTab value="commits">
+          <TabsTab value="commits" className={DENSE_TAB}>
             Commits
             {commits.data && <TabsCount>{commits.data.commits.length}</TabsCount>}
           </TabsTab>
-          <TabsTab value="files">Files changed</TabsTab>
+          <TabsTab value="files" className={DENSE_TAB}>
+            Files changed
+          </TabsTab>
           {/* Named for what it does rather than for what it holds. "Files"
               would be the same word as the tab next to it for two different
               things; "Browse files" says which of the two is the one that lets
@@ -413,7 +422,7 @@ export function ReviewDetail({ reviewId, tab, focus, search }: ReviewDetailProps
               margin collapses and the tabs simply scroll, which is the right
               thing to happen to a decoration that needs space it does not
               have. */}
-          <TabsTab value="browse" className="ml-auto">
+          <TabsTab value="browse" className={cn('ml-auto', DENSE_TAB)}>
             <FolderTree />
             Browse files
           </TabsTab>
