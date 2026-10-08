@@ -106,7 +106,7 @@ export function CommentThreadCard({
   return (
     <div className={cn('overflow-hidden rounded-lg border border-border bg-card', className)}>
       {(location || note || resolved) && (
-        <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-3 py-2">
+        <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-3 py-2 max-sm:px-2 max-sm:py-1.5">
           {location}
           {note && (
             <Badge variant="warning" title={note.title}>
@@ -135,7 +135,7 @@ export function CommentThreadCard({
         </p>
       )}
 
-      <div className="flex items-center gap-2 border-t border-border bg-muted/20 px-3 py-2">
+      <div className="flex items-center gap-2 border-t border-border bg-muted/20 px-3 py-2 max-sm:px-2 max-sm:py-1.5">
         {replying ? (
           <CommentComposer
             className="w-full"
@@ -203,8 +203,11 @@ function CommentRow({
   }
 
   return (
-    <div className="flex gap-3 px-3 py-3">
-      <AuthorAvatar author={comment.author} className="mt-0.5" />
+    <div className="flex gap-3 px-3 py-3 max-sm:px-2 max-sm:py-2">
+      {/* Not on a phone, where its column cost every line of the comment a
+          tenth of the width. The byline beside it already names the author and
+          carries the AI badge, so nothing it says is lost. */}
+      <AuthorAvatar author={comment.author} className="mt-0.5 max-sm:hidden" />
 
       <div className="min-w-0 flex-1">
         <div className="flex items-start justify-between gap-2">

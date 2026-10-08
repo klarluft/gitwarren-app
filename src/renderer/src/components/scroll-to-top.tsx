@@ -81,7 +81,14 @@ export function ScrollToTop({ target }: { target: RefObject<HTMLElement | null> 
           'fixed bottom-6 right-6 z-30 flex size-10 items-center justify-center rounded-full',
           'border border-border bg-card text-muted-foreground shadow-lg',
           'transition-colors hover:bg-muted hover:text-foreground',
-          'motion-safe:animate-[rise-in_120ms_ease-out]'
+          'motion-safe:animate-[rise-in_120ms_ease-out]',
+          // On a phone it floats over the right-hand end of whatever is at the
+          // bottom of the screen - which, mid-comment, is the Comment button.
+          // So it is smaller and further into the corner there, and absent
+          // altogether while something is being typed: with the keyboard up
+          // the bottom of the screen *is* the composer.
+          'max-sm:bottom-3 max-sm:right-3 max-sm:size-9',
+          'max-sm:[body:has(textarea:focus,input:focus)_&]:hidden'
         )}
       >
         <ArrowUp className="size-5" />

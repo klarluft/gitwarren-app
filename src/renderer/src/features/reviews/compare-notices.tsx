@@ -45,10 +45,10 @@ export function WorkingTreeBanner({ workingTree }: { workingTree: WorkingTreeCha
   ].filter((part) => part !== null)
 
   return (
-    <div className="flex items-start gap-3 rounded-lg border border-warning/40 bg-warning/10 px-4 py-3">
+    <div className="flex items-start gap-3 rounded-lg border border-warning/40 bg-warning/10 px-4 py-3 max-sm:gap-2 max-sm:px-3 max-sm:py-2">
       <CircleDot className="mt-0.5 size-4 shrink-0 text-warning" />
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium text-warning">
+        <p className="text-sm font-medium text-warning max-sm:text-xs">
           Uncommitted changes — {parts.join(', ')}
         </p>
         {/* `items-start` once the path is allowed more than one line, so the

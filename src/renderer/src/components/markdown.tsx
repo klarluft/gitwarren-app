@@ -40,9 +40,12 @@
  * that the renderer does not have, so for now they read as links rather than as
  * broken image icons.
  */
+import { useState } from 'react'
 import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { ExternalLink } from 'lucide-react'
 import { ATTACHMENT_URL_PREFIX } from '@shared/attachments'
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { useApi } from '@/lib/host-scope'
 import { cn } from '@/lib/utils'
 
@@ -217,6 +220,23 @@ const components: Components = {
 }
 
 /**
+ * Whether a drawable `src` is also somewhere a browser tab can be sent.
+ *
+ * Asked of the URL rather than of the shell: in a tab the attachment is a path
+ * on the page's own origin and a new tab can open it as it is, while in the
+ * window it is the `gitwarren:` scheme, which only this renderer can resolve -
+ * handed to the real browser it would come back to the OS as a deep link.
+ */
+function openableInTab(src: string): boolean {
+  try {
+    const { protocol } = new URL(src, window.location.href)
+    return protocol === 'http:' || protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+/**
  * One attachment, drawn from the store that holds it.
  *
  * A component of its own rather than an expression inside the `img` override,
@@ -236,18 +256,96 @@ function AttachmentImage({
   'src' | 'className'
 >) {
   const api = useApi()
+  const [open, setOpen] = useState(false)
+  // Fit to the screen, or every pixel the image has. On a desktop the fit is
+  // usually enough; on a phone it is barely wider than the thumbnail, and
+  // actual size - scrolled around inside the viewer - is what makes a
+  // screenshot's text readable.
+  const [actualSize, setActualSize] = useState(false)
+  // The one place a stored token becomes something fetchable, and the only
+  // place that differs between the two shells: the window has a custom scheme
+  // registered and passes it through, a tab rewrites it to a path on its own
+  // origin. Both attach the host the same way. See `ShellApi.attachmentSrc`.
+  const src = api.attachments.src(url)
+  const alt = props.alt ?? ''
+
   return (
-    <img
-      // The one place a stored token becomes something fetchable, and the only
-      // place that differs between the two shells: the window has a custom
-      // scheme registered and passes it through, a tab rewrites it to a path on
-      // its own origin. Both attach the host the same way. See
-      // `ShellApi.attachmentSrc`.
-      src={api.attachments.src(url)}
-      className={cn('my-2 max-w-full rounded-md border border-border', className)}
-      {...props}
-      alt={props.alt ?? ''}
-    />
+    <>
+      {/*
+        A screenshot in a comment is drawn at the width of the card it sits in,
+        which on a phone - or for a before/after pair side by side - is too
+        small to read. Clicking it opens the same image as large as the screen
+        allows, in the app rather than in a tab, because only a tab can open a
+        tab: the window's `gitwarren:` source means nothing to the browser.
+
+        A button rather than a link around the image, for the same reason - and
+        `inline-block` so it hugs the image instead of claiming the paragraph's
+        whole width as a click target.
+      */}
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        title="View full size"
+        className="my-2 inline-block max-w-full cursor-zoom-in rounded-md align-top"
+      >
+        <img
+          src={src}
+          className={cn('block max-w-full rounded-md border border-border', className)}
+          {...props}
+          alt={alt}
+        />
+      </button>
+
+      <Dialog
+        open={open}
+        onOpenChange={(next) => {
+          setOpen(next)
+          if (!next) setActualSize(false)
+        }}
+      >
+        <DialogContent
+          // Sized by the image, up to nearly the whole screen, rather than by
+          // the dialog's usual reading width. Centred by its two edges rather
+          // than by `left: 50%` and a translate: a box sized to its content at
+          // `left: 50%` only ever has the right half of the screen to grow
+          // into, and drew the image smaller than the thumbnail it enlarges.
+          className="left-0 right-0 mx-auto flex w-fit max-w-[96vw] translate-x-0 flex-col gap-2 p-2 pt-10"
+        >
+          {/* The alt text is the title: it is what the author wrote to say what
+              the picture shows, and a dialog needs a name either way. */}
+          <DialogTitle className="absolute left-3 right-12 top-3 truncate text-sm font-medium leading-normal text-muted-foreground">
+            {alt.length > 0 ? alt : 'Image'}
+          </DialogTitle>
+          {/* Fit to the screen and never enlarged past the pixels it has, until
+              it is tapped; then actual size, scrolling inside this box. */}
+          <div className="max-h-[calc(100dvh-7rem)] max-w-full overflow-auto">
+            <img
+              src={src}
+              alt={alt}
+              title={actualSize ? 'Fit to screen' : 'Actual size'}
+              onClick={() => setActualSize(!actualSize)}
+              className={cn(
+                'mx-auto block rounded-md',
+                actualSize
+                  ? 'max-w-none cursor-zoom-out'
+                  : 'max-h-[calc(100dvh-7rem)] max-w-full cursor-zoom-in object-contain'
+              )}
+            />
+          </div>
+          {openableInTab(src) && (
+            <a
+              href={src}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="flex items-center gap-1.5 self-end px-1 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+            >
+              <ExternalLink className="size-3.5" />
+              Open in new tab
+            </a>
+          )}
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
 

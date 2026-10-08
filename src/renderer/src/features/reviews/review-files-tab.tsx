@@ -62,7 +62,7 @@ import { DiffFindBar, useDiffFind } from './diff-find-bar'
 import { CompareErrorCard, NoWorktreeNotice, WorkingTreeBanner } from './compare-notices'
 import { fileDomId, lineDomId } from './dom-ids'
 import { DiffSnippet } from './diff-snippet'
-import { DiffStat, FileDiffCard, type AnchoredThread } from './diff-view'
+import { DENSE_LABEL, DiffStat, FileDiffCard, type AnchoredThread } from './diff-view'
 import {
   DEFAULT_DIFF_CHANGES,
   useEditors,
@@ -906,7 +906,7 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
           controls at its end out of reach entirely - there is no horizontal
           scroll here to reveal them, so `Refresh` and the view toggle were
           simply gone below about 700px. */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 max-sm:gap-y-1.5">
         <div className="flex flex-wrap items-center gap-3">
           <p className="text-sm text-muted-foreground">
             {plural(data.files.length, 'file')} changed
@@ -925,17 +925,22 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
           )}
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
+        {/* On a phone the three buttons keep their icons and lose their words,
+            which is what lets them share one row with the view toggle instead
+            of taking two of their own above the diff. The words stay in the
+            title and for screen readers. */}
+        <div className="flex flex-wrap items-center gap-3 max-sm:gap-1">
           {data.files.length > 0 && (
             <Button
               variant="ghost"
               size="sm"
+              className="max-sm:px-2"
               onClick={find.show}
               title={`Find in the diff (${formatStep('mod+f')})`}
               aria-expanded={find.open}
             >
               <Search />
-              Find
+              <span className={DENSE_LABEL}>Find</span>
             </Button>
           )}
 
@@ -943,12 +948,13 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
             <Button
               variant="ghost"
               size="sm"
+              className="max-sm:px-2"
               onClick={() => setListOpen(!listOpen)}
               title={listOpen ? 'Hide the file list' : 'Show the file list'}
               aria-pressed={listOpen}
             >
               {listOpen ? <PanelLeftClose /> : <PanelLeft />}
-              Files
+              <span className={DENSE_LABEL}>Files</span>
             </Button>
           )}
 
@@ -986,9 +992,15 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
             selfReview={selfReview}
           />
 
-          <Button variant="ghost" size="sm" onClick={() => void refresh()} title="Re-read from disk">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="max-sm:px-2"
+            onClick={() => void refresh()}
+            title="Re-read from disk"
+          >
             <RefreshCw className={isRefreshing ? 'animate-spin' : undefined} />
-            Refresh
+            <span className={DENSE_LABEL}>Refresh</span>
           </Button>
         </div>
       </div>

@@ -94,8 +94,10 @@ export function App() {
             while it is mounted and the palette has to outlive any one of them. */}
         <CommandRegistryProvider>
           <div className="flex h-full flex-col">
-            {/* Draggable strip so the frameless macOS title bar still moves the window. */}
-            <div className="titlebar-drag h-11 shrink-0" />
+            {/* Draggable strip so the frameless macOS title bar still moves the window.
+                Below `sm` there is no window - it has a minimum width of 720 -
+                only a browser tab, with no title bar to make room for. */}
+            <div className="titlebar-drag h-11 shrink-0 max-sm:h-3" />
 
             <main
               ref={scroller}
@@ -103,13 +105,15 @@ export function App() {
               // put the keyboard back there too without adding a tab stop.
               tabIndex={-1}
               className={cn(
-                'mx-auto w-full flex-1 overflow-y-auto px-6 pb-10 outline-none',
+                // Half the gutter on a phone, where every pixel of it is a column of
+                // code that has to be scrolled sideways to instead.
+                'mx-auto w-full flex-1 overflow-y-auto px-6 pb-10 outline-none max-sm:px-3',
                 route.name === 'review' ? reviewWidth(route.tab) : 'max-w-3xl'
               )}
             >
               {/* `gap-3` so the two can be on screen at once; an empty box is
                   still zero high, so the spacing below is unchanged. */}
-              <div className="mb-6 flex flex-col gap-3">
+              <div className="mb-6 flex flex-col gap-3 max-sm:mb-3">
                 {/* Above the host strip deliberately: a page that cannot reach
                     its own core has nothing to say about anybody else's
                     machine. See `connection-banner.tsx`. */}
