@@ -67,6 +67,11 @@ import {
 import { errorMessage } from '@/lib/errors'
 import { matchOffsets, rowPosition, type DiffSearch } from './diff-search'
 import { useLineSelection, type LineRange } from './line-selection'
+import { useDiffHighlight } from './diff-highlight'
+import type { LineHighlighter } from '@/lib/highlight/diff-blocks'
+import { segmentLine } from '@/lib/highlight/segments'
+import { renderPieces } from '@/lib/highlight/use-highlight'
+import type { LineTokens } from '@/lib/highlight/tokenize'
 import { imageMediaType } from '@shared/git'
 import type { DiffChanges, DiffHunk, DiffLine, FileChangeStatus, FileDiff } from '@shared/git'
 import type { CommentThread } from '@shared/schemas'
@@ -296,6 +301,14 @@ export function FileDiffCard({
   const canExpand = source !== undefined && isExpandable(file)
   const text = useReviewFile(canExpand ? source.reviewId : null, file.path, source?.changes ?? 'all')
 
+  // Coloured only while the body is on screen; a folded card asks for nothing.
+  const highlight = useDiffHighlight(
+    file.path,
+    file.hunks,
+    text.content && !text.content.isBinary ? text.content.lines : null,
+    expanded && file.hunks.length > 0
+  )
+
   const reveal = useCallback(
     (from: number, to: number) => {
       text.load()
@@ -362,7 +375,8 @@ export function FileDiffCard({
     covered,
     marked: marked ?? null,
     filePath: file.path,
-    search: search ?? null
+    search: search ?? null,
+    highlight
   }
 
   const orphans = threads.filter((thread) => thread.anchor.line === null)
@@ -976,6 +990,12 @@ export interface RowContext {
    * see `file-source-view.tsx`, which is the only caller that sets this.
    */
   oneGutter?: boolean
+  /**
+   * Syntax colours for a row, when the file is in a language that has them.
+   * Absent, the row is drawn the way it always was: added and removed text in
+   * green and red.
+   */
+  highlight?: LineHighlighter
 }
 
 function HunkRows({
@@ -1011,7 +1031,8 @@ export function LineRow({
   marked,
   filePath,
   search,
-  oneGutter = false
+  oneGutter = false,
+  highlight
 }: { line: DiffLine } & RowContext) {
   // Which side a comment on this row belongs to, and the number it carries
   // there. Shared with the search, so a hit is addressed to the row it is on.
@@ -1168,15 +1189,26 @@ export function LineRow({
           }}
           className={cn(
             'whitespace-pre px-3',
-            line.type === 'insert' && 'text-success',
-            line.type === 'delete' && 'text-destructive'
+            // With syntax colours the text keeps them, the way it does on
+            // GitHub: the row's tint and the marker say added or removed, and
+            // green text over a coloured keyword would say neither clearly.
+            highlight === undefined && line.type === 'insert' && 'text-success',
+            highlight === undefined && line.type === 'delete' && 'text-destructive'
           )}
         >
-          <span aria-hidden className="select-none opacity-60">
+          <span
+            aria-hidden
+            className={cn(
+              'select-none opacity-60',
+              line.type === 'insert' && 'text-success',
+              line.type === 'delete' && 'text-destructive'
+            )}
+          >
             {line.type === 'insert' ? '+' : line.type === 'delete' ? '-' : ' '}
           </span>
           <LineText
             content={line.content}
+            tokens={highlight?.(line) ?? null}
             query={search?.query ?? null}
             activeOccurrence={
               number !== null &&
@@ -1245,36 +1277,41 @@ export function LineRow({
 }
 
 /**
- * One row's code, with the search hits picked out of it.
+ * One row's code, in its syntax colours, with the search hits picked out of it.
  *
  * The scan happens here, per rendered row, rather than being handed down from
  * the search: only the rows actually on screen pay for it, and a file the
  * reader never opened costs nothing. `matchOffsets` is the same function the
  * counter walks, so what is marked and what is counted cannot drift.
+ *
+ * A hit can start in one token and end in another, so the two are merged by
+ * `segmentLine` rather than nested: each hit is still a single `<mark>`, and
+ * the code inside it keeps its colours.
  */
 function LineText({
   content,
+  tokens,
   query,
   activeOccurrence
 }: {
   content: string
+  tokens: LineTokens | null
   query: string | null
   /** Index of the hit *in this row* that the reader is being pointed at. */
   activeOccurrence: number | null
 }) {
   const offsets = query === null ? [] : matchOffsets(content, query)
-  if (query === null || offsets.length === 0) return <>{content}</>
+  if ((query === null || offsets.length === 0) && (tokens === null || tokens.length === 0)) {
+    return <>{content}</>
+  }
 
-  const parts: ReactNode[] = []
-  let cursor = 0
-
-  for (const [index, offset] of offsets.entries()) {
-    if (offset > cursor) parts.push(content.slice(cursor, offset))
-    const end = offset + query.length
-    const isActive = index === activeOccurrence
-    parts.push(
+  const matches = query === null ? [] : offsets.map((start) => ({ start, end: start + query.length }))
+  const parts: ReactNode[] = segmentLine(content, tokens, matches).map((segment, index) => {
+    if (segment.match === null) return <Fragment key={index}>{renderPieces(segment.pieces)}</Fragment>
+    const isActive = segment.match === activeOccurrence
+    return (
       <mark
-        key={offset}
+        key={index}
         id={isActive ? ACTIVE_MATCH_ID : undefined}
         className={cn(
           'rounded-[2px] text-inherit',
@@ -1283,13 +1320,11 @@ function LineText({
           isActive ? 'bg-warning/60 shadow-[0_0_0_1px_var(--color-warning)]' : 'bg-warning/25'
         )}
       >
-        {content.slice(offset, end)}
+        {renderPieces(segment.pieces)}
       </mark>
     )
-    cursor = end
-  }
+  })
 
-  if (cursor < content.length) parts.push(content.slice(cursor))
   return <>{parts}</>
 }
 

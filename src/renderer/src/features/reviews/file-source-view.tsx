@@ -39,6 +39,7 @@ import { FilePath } from './file-path'
 import type { DiffSearch } from './diff-search'
 import { ImagePane } from './image-diff'
 import { useLineSelection } from './line-selection'
+import { useFileHighlight } from './diff-highlight'
 import { useReviewFile } from './use-reviews'
 import { SquareArrowOutUpRight } from 'lucide-react'
 import { resolveAnchorInFile } from '@shared/comment-anchors'
@@ -170,6 +171,14 @@ export function FileSourceCard({
     [lines]
   )
 
+  // Only what is drawn is coloured: past the row ceiling there is nothing to
+  // put the colours on.
+  const shownLines = useMemo(
+    () => (lines === undefined || content?.isBinary ? null : lines.slice(0, MAX_RENDERED_LINES)),
+    [lines, content?.isBinary]
+  )
+  const highlight = useFileHighlight(path, shownLines)
+
   const rowContext: RowContext = {
     placed,
     comments: { ...comments, threads: anchored },
@@ -184,7 +193,8 @@ export function FileSourceCard({
     search: search ?? null,
     // A file has one set of line numbers; the diff's second gutter would be a
     // column of nothing down the whole document.
-    oneGutter: true
+    oneGutter: true,
+    highlight
   }
 
   const orphans = anchored.filter((thread) => thread.anchor.line === null)

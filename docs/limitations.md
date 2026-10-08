@@ -55,16 +55,25 @@
 - **Remote images are shown as links, never inlined**, and raw HTML in markdown
   is not rendered at all. Both are deliberate; see
   [Images in comments](agents.md#images-in-comments).
-- **Fenced code in comments is not syntax highlighted**, and neither Mermaid nor
-  any other diagram syntax is rendered.
+- **Mermaid and other diagram syntax are not rendered.** Fenced code is syntax
+  highlighted when the fence names a language GitWarren has a grammar for; a
+  diagram stays as its source.
 - **SVG cannot be attached.** It is a script-bearing document rather than a
   raster image, so only PNG, JPEG, GIF and WebP are accepted, up to 10 MB.
 - **Orphaned attachments are collected at startup, not immediately.** An image
   pasted into a composer that is then abandoned sits on disk until the next
   launch of the GUI. The sweep runs only there, never in the MCP server, which
   may be one of several concurrent processes.
-- **Diffs are unified, not side-by-side**, and have no syntax highlighting or
-  word-level intra-line highlighting.
+- **Diffs are unified, not side-by-side**, and have no word-level intra-line
+  highlighting.
+- **Syntax highlighting covers about sixty languages, not every one.** The
+  grammars are a curated set (`src/renderer/src/lib/highlight/languages.ts`)
+  rather than Shiki's full catalogue of ten megabytes; a file in any other
+  language is shown plain, with added and removed lines in green and red as
+  before. Lines over 2,000 characters are left uncoloured. A hunk that starts
+  inside a block comment or a multi-line string can be coloured wrongly until
+  the whole file has been read - by unfolding context, or in Browse files -
+  because a hunk on its own does not say what came before it.
 - **Large diffs are clipped.** A file's patch stops rendering past 4,000 lines
   and untracked files over 512 KB are listed without content, though the
   add/delete counts stay honest. Commit lists stop at 500.
