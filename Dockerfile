@@ -42,7 +42,7 @@ ARG NODE_IMAGE=node:24-bookworm-slim
 # runs the server has no compiler, no headers and no package index in it.
 FROM ${NODE_IMAGE} AS build
 
-ARG GITWARREN_VERSION=0.1.17
+ARG GITWARREN_VERSION=0.1.18
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates python3 make g++ \
@@ -53,7 +53,7 @@ RUN npm install --global --omit=dev "gitwarren@${GITWARREN_VERSION}"
 
 FROM ${NODE_IMAGE}
 
-ARG GITWARREN_VERSION=0.1.17
+ARG GITWARREN_VERSION=0.1.18
 
 LABEL org.opencontainers.image.title="GitWarren" \
       org.opencontainers.image.description="Code review on your own machine, for you and your coding agent. Nothing leaves your computer." \
