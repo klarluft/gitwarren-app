@@ -40,13 +40,16 @@
  * that the renderer does not have, so for now they read as links rather than as
  * broken image icons.
  */
-import { useState } from 'react'
+import { useMemo, useState, type ComponentProps } from 'react'
 import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { ExternalLink } from 'lucide-react'
 import { ATTACHMENT_URL_PREFIX } from '@shared/attachments'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { useApi } from '@/lib/host-scope'
+import { languageForFence, type LanguageId } from '@/lib/highlight/languages'
+import { segmentLine } from '@/lib/highlight/segments'
+import { renderPieces, useHighlightedBlocks } from '@/lib/highlight/use-highlight'
 import { cn } from '@/lib/utils'
 
 /**
@@ -147,12 +150,24 @@ const components: Components = {
   // back off again for fenced blocks. react-markdown stopped passing an
   // `inline` flag in v9, and "reset it inside pre" is more robust than
   // reconstructing that flag from the node's parent.
-  code: ({ node: _node, className, ...props }) => (
-    <code
-      className={cn('rounded bg-muted px-1 py-0.5 font-mono text-[0.85em]', className)}
-      {...props}
-    />
-  ),
+  //
+  // A fence that names a language - ```ts - is coloured the way GitHub colours
+  // it, with the same grammars and theme as the diff. remark puts the name in
+  // a `language-*` class, and only fenced blocks get one.
+  code: ({ node: _node, className, children, ...props }) => {
+    const fence = /(?:^|\s)language-(\S+)/.exec(className ?? '')?.[1]
+    const lang = fence === undefined ? null : languageForFence(fence)
+    const styles = cn('rounded bg-muted px-1 py-0.5 font-mono text-[0.85em]', className)
+
+    if (lang !== null && typeof children === 'string') {
+      return <FencedCode language={lang} code={children} className={styles} {...props} />
+    }
+    return (
+      <code className={styles} {...props}>
+        {children}
+      </code>
+    )
+  },
   pre: ({ node: _node, className, ...props }) => (
     <pre
       className={cn(
@@ -247,6 +262,32 @@ function openableInTab(src: string): boolean {
  * module-scope `api`, which is always this install - which is precisely why an
  * image on a remote review rendered as a broken one.
  */
+/**
+ * A fenced block in its syntax colours. Drawn plain on the first frame and
+ * coloured when the tokens land, like every other highlighted view.
+ */
+function FencedCode({
+  language,
+  code,
+  ...props
+}: { language: LanguageId; code: string } & Omit<ComponentProps<'code'>, 'children'>) {
+  // The fence's own closing newline is not a line of code.
+  const lines = useMemo(() => code.replace(/\n$/, '').split('\n'), [code])
+  const blocks = useMemo(() => [lines], [lines])
+  const tokens = useHighlightedBlocks(blocks, language)?.[0] ?? null
+
+  return (
+    <code {...props}>
+      {lines.map((line, index) => (
+        <span key={index}>
+          {renderPieces(segmentLine(line, tokens?.[index] ?? null, [])[0]?.pieces ?? [])}
+          {index < lines.length - 1 && '\n'}
+        </span>
+      ))}
+    </code>
+  )
+}
+
 function AttachmentImage({
   url,
   className,

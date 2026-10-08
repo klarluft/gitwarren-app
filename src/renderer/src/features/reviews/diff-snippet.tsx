@@ -22,6 +22,9 @@ import { ChevronRight, FileCode } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { FilePath } from './file-path'
+import { useSnippetHighlight } from './diff-highlight'
+import { segmentLine } from '@/lib/highlight/segments'
+import { renderPieces } from '@/lib/highlight/use-highlight'
 import type { AnchorState, DiffSide } from '@shared/comment-anchors'
 import type { DiffLine } from '@shared/git'
 
@@ -70,6 +73,8 @@ export function DiffSnippet({
   const range =
     startLine !== null && line !== null && startLine < line ? `${startLine}–${line}` : line
   const noun = startLine !== null && line !== null && startLine < line ? 'lines' : 'line'
+  const highlight = useSnippetHighlight(filePath, lines)
+
   const lineLabel =
     line === null
       ? null
@@ -146,18 +151,30 @@ export function DiffSnippet({
                     data-selectable
                     className={cn(
                       'whitespace-pre px-3',
-                      snippetLine.type === 'insert' && 'text-success',
-                      snippetLine.type === 'delete' && 'text-destructive'
+                      // Same rule as the diff: syntax colours replace the green
+                      // and red text, and the marker keeps them.
+                      highlight === undefined && snippetLine.type === 'insert' && 'text-success',
+                      highlight === undefined && snippetLine.type === 'delete' && 'text-destructive'
                     )}
                   >
-                    <span aria-hidden className="select-none opacity-60">
+                    <span
+                      aria-hidden
+                      className={cn(
+                        'select-none opacity-60',
+                        snippetLine.type === 'insert' && 'text-success',
+                        snippetLine.type === 'delete' && 'text-destructive'
+                      )}
+                    >
                       {snippetLine.type === 'insert'
                         ? '+'
                         : snippetLine.type === 'delete'
                           ? '-'
                           : ' '}
                     </span>
-                    {snippetLine.content}
+                    {renderPieces(
+                      segmentLine(snippetLine.content, highlight?.(snippetLine) ?? null, [])[0]
+                        ?.pieces ?? []
+                    )}
                   </span>
                 </div>
               )
