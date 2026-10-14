@@ -192,7 +192,10 @@ function buildApi(host: string | undefined): GitWarrenApi {
       add: (input) => ask('repositories.add', input, host),
       update: (input) => ask('repositories.update', input, host),
       remove: (input) => ask('repositories.remove', input, host),
-      refs: (input) => ask('repositories.refs', input, host)
+      refs: (input) => ask('repositories.refs', input, host),
+      tree: (input) => ask('repositories.tree', input, host),
+      file: (input) => ask('repositories.file', input, host),
+      image: (input) => ask('repositories.image', input, host)
     },
     reviews: {
       list: (input) => ask('reviews.list', input, host),
@@ -395,6 +398,17 @@ export const CACHE_KEYS = {
     changes: DiffChanges,
     host?: string
   ) => scoped(`review-image:${reviewId}:${changes}:${side}:${path}`, host),
+  /**
+   * A repository's files outside any review. A null ref is the checkout's own
+   * branch, read from disk - a different answer from any named ref, so a key of
+   * its own.
+   */
+  repositoryTree: (repositoryId: number, ref: string | null, host?: string) =>
+    scoped(`repository-tree:${repositoryId}:${ref ?? ''}`, host),
+  repositoryFile: (repositoryId: number, ref: string | null, path: string, host?: string) =>
+    scoped(`repository-file:${repositoryId}:${ref ?? ''}:${path}`, host),
+  repositoryImage: (repositoryId: number, ref: string | null, path: string, host?: string) =>
+    scoped(`repository-image:${repositoryId}:${ref ?? ''}:${path}`, host),
   /**
    * The two reads that never change while the app runs. They keep keys so the
    * components that show them keep a loading state, but the reads underneath

@@ -12,19 +12,26 @@ import { and, asc, eq, isNull } from 'drizzle-orm'
 import { getDatabase } from '../db/client.js'
 import { repositories, type RepositoryRow } from '../db/schema.js'
 import { defaultNameForPath, readGitState, resolveRepositoryRoot } from '../git.js'
-import { readRepositoryRefs } from '../git-compare.js'
+import {
+  readRepositoryRefs,
+  readReviewFile,
+  readReviewImage,
+  readReviewTree
+} from '../git-compare.js'
 import { AppError } from '../../shared/errors.js'
 import { parseWithSchema as parse } from '../../shared/validation.js'
 import {
   addRepositoryInputSchema,
   getRepositoryInputSchema,
   removeRepositoryInputSchema,
+  repositoryFileInputSchema,
   repositoryRefsInputSchema,
+  repositoryTreeInputSchema,
   updateRepositoryInputSchema,
   type Repository,
   type RepositoryWithGitState
 } from '../../shared/schemas.js'
-import type { RepositoryRefs } from '../../shared/git.js'
+import type { FileContent, FileImage, RepositoryRefs, ReviewTree } from '../../shared/git.js'
 
 function toRepository(row: RepositoryRow): Repository {
   return {
@@ -38,6 +45,20 @@ function toRepository(row: RepositoryRow): Repository {
 
 async function withGitState(row: RepositoryRow): Promise<RepositoryWithGitState> {
   return { ...toRepository(row), git: await readGitState(row.path) }
+}
+
+/**
+ * What the repository's own checkout has checked out, as a ref to read at.
+ *
+ * The branch name rather than `HEAD`, and the difference is the whole point:
+ * the reads below find the worktree to read from disk by the *branch* it holds,
+ * so `HEAD` would match no worktree and every file would come from the last
+ * commit - hiding exactly the uncommitted work somebody opening a folder of
+ * their own expects to see. A detached checkout has no branch, and `HEAD` is
+ * then right: the reads match a detached worktree by its commit.
+ */
+async function checkedOutRef(path: string): Promise<string> {
+  return (await readGitState(path)).branch ?? 'HEAD'
 }
 
 function nowIso(): string {
@@ -106,6 +127,40 @@ export const repositoriesService = {
   async refs(input: unknown): Promise<RepositoryRefs> {
     const { id } = parse(repositoryRefsInputSchema, input)
     return readRepositoryRefs(requireRow(id).path)
+  },
+
+  /**
+   * Every file in the repository at a ref - the repository screen's file list.
+   *
+   * The review's own reads, pointed at one ref on both ends. A comparison of a
+   * ref with itself has no changes and a head that is simply that ref, so the
+   * rules a review's browse tab already follows - worktree when one holds the
+   * branch, commit otherwise, `.gitignore` honoured, paths that climb out of
+   * the checkout refused - come along unchanged rather than being written a
+   * second time. Read-only, and off the MCP surface for the reason the review
+   * reads are: an agent has the checkout itself.
+   */
+  async tree(input: unknown): Promise<ReviewTree> {
+    const { id, ref } = parse(repositoryTreeInputSchema, input)
+    const { path } = requireRow(id)
+    const at = ref ?? (await checkedOutRef(path))
+    return readReviewTree(path, at, at, { changes: 'all' })
+  },
+
+  /** One file's text at a ref, read by the same rules as `tree`. */
+  async file(input: unknown): Promise<FileContent> {
+    const { id, ref, path: filePath } = parse(repositoryFileInputSchema, input)
+    const { path } = requireRow(id)
+    const at = ref ?? (await checkedOutRef(path))
+    return readReviewFile(path, at, at, filePath, { changes: 'all' })
+  },
+
+  /** One image at a ref, for a Markdown document that draws it. */
+  async image(input: unknown): Promise<FileImage> {
+    const { id, ref, path: filePath } = parse(repositoryFileInputSchema, input)
+    const { path } = requireRow(id)
+    const at = ref ?? (await checkedOutRef(path))
+    return readReviewImage(path, at, at, filePath, 'head', { changes: 'all' })
   },
 
   /**

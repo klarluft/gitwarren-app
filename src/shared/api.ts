@@ -58,6 +58,8 @@ import type {
   ReplyToThreadInput,
   Repository,
   RepositoryRefsInput,
+  RepositoryFileInput,
+  RepositoryTreeInput,
   RepositoryWithGitState,
   Review,
   ReviewCommitsInput,
@@ -398,6 +400,13 @@ export interface GitWarrenApi {
     remove(input: RemoveRepositoryInput): Promise<{ id: number }>
     /** Branches, tags and worktrees, for the review endpoint pickers. */
     refs(input: RepositoryRefsInput): Promise<RepositoryRefs>
+    /**
+     * The repository's files at a ref, or at whatever its checkout has checked
+     * out - the repository screen's Files tab. See `repositoryTreeInputSchema`.
+     */
+    tree(input: RepositoryTreeInput): Promise<ReviewTree>
+    file(input: RepositoryFileInput): Promise<FileContent>
+    image(input: RepositoryFileInput): Promise<FileImage>
   }
   reviews: {
     list(input: ListReviewsInput): Promise<Review[]>

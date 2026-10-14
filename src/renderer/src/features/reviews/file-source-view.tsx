@@ -24,7 +24,7 @@
  * actually is, and the base-side gutter draws blank instead of repeating the
  * same number twice.
  */
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { FileWarning } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
@@ -40,7 +40,17 @@ import type { DiffSearch } from './diff-search'
 import { ImagePane } from './image-diff'
 import { useLineSelection } from './line-selection'
 import { useFileHighlight } from './diff-highlight'
-import { useReviewFile } from './use-reviews'
+import { useRepositoryFile, useRepositoryImage, useReviewFile } from './use-reviews'
+import {
+  DocumentImage,
+  MarkdownFilePreview,
+  MarkdownViewToggle,
+  useReviewImages,
+  type ImageRenderer,
+  type MarkdownView
+} from './markdown-preview'
+import { isMarkdownPath, isProsePath } from '@/lib/prose'
+import { useStoredPreference } from '@/lib/preferences'
 import { SquareArrowOutUpRight } from 'lucide-react'
 import { resolveAnchorInFile } from '@shared/comment-anchors'
 import { imageMediaType } from '@shared/git'
@@ -61,14 +71,36 @@ import type { AnchoredThread } from './diff-view'
  */
 const MAX_RENDERED_LINES = 5_000
 
+/**
+ * Where the file is read from.
+ *
+ * A review's browse tab reads through the review, at its head, and can carry a
+ * discussion. The repository screen reads the repository directly, at a ref or
+ * at whatever is checked out, and has no review for a comment to belong to - so
+ * there the gutter has no comment button, which `LineRow` already does when it
+ * is given no comments.
+ */
+export type FileReadSource =
+  | {
+      kind: 'review'
+      reviewId: number
+      /** Which version of the file to read - as always, the diff's own setting. */
+      changes: DiffChanges
+    }
+  | {
+      kind: 'repository'
+      repositoryId: number
+      /** Null is the checkout's own branch, read from disk. */
+      ref: string | null
+    }
+
 export interface FileSourceCardProps {
-  reviewId: number
+  source: FileReadSource
   path: string
-  /** Which version of the file to read - as always, the diff's own setting. */
-  changes: DiffChanges
   /** Threads stored against this path, not yet placed against the text. */
-  threads: CommentThread[]
-  comments: Omit<DiffComments, 'threads'>
+  threads?: CommentThread[]
+  /** Absent where there is no review for a comment to belong to. */
+  comments?: Omit<DiffComments, 'threads'>
   /** True when this file is part of the review's diff, so the card can say so. */
   isChanged: boolean
   /** A line arrived at from a link, marked while the reader finds it. */
@@ -84,11 +116,12 @@ export interface FileSourceCardProps {
   onOpenInEditor?: (path: string, line: number) => void
 }
 
+const NO_THREADS: CommentThread[] = []
+
 export function FileSourceCard({
-  reviewId,
+  source,
   path,
-  changes,
-  threads,
+  threads = NO_THREADS,
   comments,
   isChanged,
   marked,
@@ -96,8 +129,32 @@ export function FileSourceCard({
   editorLabel,
   onOpenInEditor
 }: FileSourceCardProps) {
-  const text = useReviewFile(reviewId, path, changes)
+  // Both reads are always called - hooks cannot be conditional - and the one
+  // that does not apply is handed a null id and reads nothing.
+  const fromReview = useReviewFile(
+    source.kind === 'review' ? source.reviewId : null,
+    path,
+    source.kind === 'review' ? source.changes : 'all'
+  )
+  const fromRepository = useRepositoryFile(
+    source.kind === 'repository' ? source.repositoryId : null,
+    source.kind === 'repository' ? source.ref : null,
+    path
+  )
+  const text = source.kind === 'review' ? fromReview : fromRepository
   const selection = useLineSelection()
+
+  /**
+   * Source or rendered, for a Markdown file - remembered with the diff's own
+   * choice, because it is the same question asked of the same kind of file.
+   */
+  const canPreview = isMarkdownPath(path)
+  const [storedView, storeView] = useStoredPreference('markdown-view', 'diff')
+  const [view, setView] = useState<MarkdownView>(storedView === 'preview' ? 'preview' : 'diff')
+  const chooseView = (next: MarkdownView): void => {
+    setView(next)
+    storeView(next)
+  }
 
   // Unlike the diff's expanders, which read a file only once somebody asks for
   // more context, the whole point of this screen is the file - so it is asked
@@ -181,7 +238,7 @@ export function FileSourceCard({
 
   const rowContext: RowContext = {
     placed,
-    comments: { ...comments, threads: anchored },
+    comments: comments === undefined ? undefined : { ...comments, threads: anchored },
     composingOn: selection.composingOn,
     onCompose: selection.setComposingOn,
     onSelectStart: selection.startSelection,
@@ -194,8 +251,12 @@ export function FileSourceCard({
     // A file has one set of line numbers; the diff's second gutter would be a
     // column of nothing down the whole document.
     oneGutter: true,
-    highlight
+    highlight,
+    wrap: isProsePath(path)
   }
+
+  const renderImage = useSourceImages(source)
+  const previewing = canPreview && view === 'preview'
 
   const orphans = anchored.filter((thread) => thread.anchor.line === null)
   const unresolved = anchored.filter((thread) => thread.resolvedAt === null).length
@@ -275,6 +336,9 @@ export function FileSourceCard({
               {unresolved > 0 ? `${unresolved} unresolved` : `${anchored.length} resolved`}
             </Badge>
           )}
+          {canPreview && !(content?.isBinary ?? false) && (
+            <MarkdownViewToggle view={view} onChange={chooseView} sourceLabel="Source" />
+          )}
           <CopyPathAction path={path} />
           {onOpenInEditor && (
             <IconAction
@@ -291,7 +355,7 @@ export function FileSourceCard({
           the same reason the files tab lists its orphans - a discussion that
           disappears because the code moved is the failure this app must not
           have. */}
-      {orphans.length > 0 && (
+      {orphans.length > 0 && comments !== undefined && (
         <div className="flex flex-col gap-2 border-b border-border bg-muted/20 p-3">
           <p className="text-xs text-muted-foreground">
             {orphans.length === 1 ? 'A comment' : `${orphans.length} comments`} on code that is no
@@ -322,13 +386,17 @@ export function FileSourceCard({
         </p>
       ) : isImage ? (
         <div className="p-3">
-          <ImagePane
-            reviewId={reviewId}
-            path={path}
-            side="head"
-            changes={changes}
-            renamedFrom={null}
-          />
+          {source.kind === 'review' ? (
+            <ImagePane
+              reviewId={source.reviewId}
+              path={path}
+              side="head"
+              changes={source.changes}
+              renamedFrom={null}
+            />
+          ) : (
+            renderImage(path, 'head', path)
+          )}
         </div>
       ) : content?.isBinary ? (
         <p className="p-3 text-xs text-muted-foreground">
@@ -342,11 +410,20 @@ export function FileSourceCard({
         </div>
       ) : rows.length === 0 ? (
         <p className="p-3 text-xs text-muted-foreground">This file is empty.</p>
+      ) : previewing && lines !== undefined ? (
+        <MarkdownFilePreview
+          lines={lines}
+          filePath={path}
+          comments={
+            comments === undefined ? undefined : { ...comments, threads: anchored }
+          }
+          renderImage={renderImage}
+        />
       ) : (
         <div
           className={cn('@container overflow-x-auto', selection.isDragging && 'select-none')}
         >
-          <div className="min-w-max font-mono text-xs leading-5">
+          <div className={cn('font-mono text-xs leading-5', !rowContext.wrap && 'min-w-max')}>
             {rows.map((line) => (
               <LineRow key={line.newNumber} line={line} {...rowContext} />
             ))}
@@ -362,5 +439,48 @@ export function FileSourceCard({
         </p>
       )}
     </Card>
+  )
+}
+
+/** Images for a document, read the same way the document itself was. */
+function useSourceImages(source: FileReadSource): ImageRenderer {
+  const fromReview = useReviewImages(
+    source.kind === 'review' ? source.reviewId : 0,
+    source.kind === 'review' ? source.changes : 'all'
+  )
+  const repositoryId = source.kind === 'repository' ? source.repositoryId : 0
+  const ref = source.kind === 'repository' ? source.ref : null
+  const fromRepository = useMemo<ImageRenderer>(
+    () =>
+      function RepositoryImage(path, _side, alt) {
+        return (
+          <RepositoryImageView repositoryId={repositoryId} gitRef={ref} path={path} alt={alt} />
+        )
+      },
+    [repositoryId, ref]
+  )
+  return source.kind === 'review' ? fromReview : fromRepository
+}
+
+function RepositoryImageView({
+  repositoryId,
+  gitRef,
+  path,
+  alt
+}: {
+  repositoryId: number
+  gitRef: string | null
+  path: string
+  alt: string
+}) {
+  const { image, isLoading } = useRepositoryImage(repositoryId, gitRef, path)
+  return (
+    <DocumentImage
+      dataUrl={image?.dataUrl ?? null}
+      error={image?.error ?? null}
+      loading={isLoading}
+      path={path}
+      alt={alt}
+    />
   )
 }

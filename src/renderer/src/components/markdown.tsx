@@ -35,13 +35,17 @@
  * on the page's own origin: `img-src 'self'` is not a loosening of the rule but
  * the same rule spelled the way that shell spells it.
  *
- * Repo-relative paths land in the same branch. Rendering those live against the
- * repository is worth doing later, but it needs repository context down here
- * that the renderer does not have, so for now they read as links rather than as
- * broken image icons.
+ * Repo-relative paths land in the same branch here. The one place that has the
+ * repository context to draw them - the document preview of a Markdown file -
+ * does so by replacing `img` through `overrides`, reading the picture out of
+ * the repository the same way the image diff does; see `markdown-preview.tsx`.
  */
 import { useMemo, useState, type ComponentProps } from 'react'
-import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown'
+import ReactMarkdown, {
+  defaultUrlTransform,
+  type Components,
+  type Options as MarkdownOptions
+} from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { ExternalLink } from 'lucide-react'
 import { ATTACHMENT_URL_PREFIX } from '@shared/attachments'
@@ -51,6 +55,8 @@ import { languageForFence, type LanguageId } from '@/lib/highlight/languages'
 import { segmentLine } from '@/lib/highlight/segments'
 import { renderPieces, useHighlightedBlocks } from '@/lib/highlight/use-highlight'
 import { cn } from '@/lib/utils'
+
+type PluggableList = NonNullable<MarkdownOptions['remarkPlugins']>
 
 /**
  * Let attachment tokens through the URL filter, and nothing else new.
@@ -393,16 +399,35 @@ function AttachmentImage({
 interface MarkdownProps {
   body: string
   className?: string
+  /**
+   * Run after GFM. The document preview adds the plugin that turns change
+   * marks into `<ins>`/`<del>` - see `features/reviews/remark-change-marks.ts`.
+   */
+  remarkPlugins?: PluggableList
+  /**
+   * Replace individual elements, over the defaults above. The document preview
+   * replaces `img`, because a document in a repository may draw images from
+   * that repository - which a comment never can.
+   */
+  overrides?: Partial<Components>
 }
 
-export function Markdown({ body, className }: MarkdownProps) {
+export function Markdown({ body, className, remarkPlugins, overrides }: MarkdownProps) {
+  // Stable for the common case - a comment with no extras - so react-markdown
+  // is not handed fresh arrays on every render of every comment on screen.
+  const plugins = useMemo(() => [remarkGfm, ...(remarkPlugins ?? [])], [remarkPlugins])
+  const merged = useMemo(
+    () => (overrides === undefined ? components : { ...components, ...overrides }),
+    [overrides]
+  )
+
   return (
     // `data-selectable` sits on the wrapper rather than on each element: the
     // app sets `user-select: none` on the body (see index.css), and user-select
     // inherits, so marking the container makes the whole rendered body
     // selectable the way the plain-text version was.
     <div data-selectable className={cn('text-sm break-words', className)}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components} urlTransform={urlTransform}>
+      <ReactMarkdown remarkPlugins={plugins} components={merged} urlTransform={urlTransform}>
         {body}
       </ReactMarkdown>
     </div>

@@ -18,6 +18,7 @@
  * at the other one. See `groupClones` in `repository-list.tsx` for how two rows
  * on two machines are decided to be one repository.
  */
+import type { ReactNode } from 'react'
 import { ChevronRight, FolderOpen, Laptop, Pencil, Trash2 } from 'lucide-react'
 import { Breakable } from '@/components/breakable'
 import { Button } from '@/components/ui/button'
@@ -42,13 +43,20 @@ interface RepositoryCardProps {
   onEdit: (repository: RepositoryWithGitState) => void
   onRemove: (repository: RepositoryWithGitState) => void
   alsoHere?: Elsewhere | undefined
+  /**
+   * Said next to the name. The local list uses it to mark a row that lives on
+   * another machine - the row looks otherwise identical to a local one, and
+   * "which computer is this on" is the first thing to know about it.
+   */
+  badge?: ReactNode
 }
 
 export function RepositoryCard({
   repository,
   onEdit,
   onRemove,
-  alsoHere
+  alsoHere,
+  badge
 }: RepositoryCardProps) {
   const scope = useHostScope()
   const revealPath = useRevealPath(repository.path)
@@ -79,6 +87,7 @@ export function RepositoryCard({
             {repository.name}
           </h3>
           <GitStateBadge git={repository.git} />
+          {badge}
         </div>
         {/* Wraps rather than truncates. A truncated path loses its tail,
             and the tail is the half that says which checkout this is - two

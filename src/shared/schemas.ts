@@ -563,6 +563,25 @@ export const openReviewFileInputSchema = reviewFileInputSchema.extend({
 
 export const repositoryRefsInputSchema = z.object({ id: repositoryIdSchema })
 
+/**
+ * A repository's files at a ref, outside of any review.
+ *
+ * `ref` is optional and its absence means something specific: whatever the
+ * repository's own checkout has checked out, read from disk - uncommitted and
+ * untracked files included - because "show me the files" asked of a folder on
+ * this machine means the files in that folder. A named ref is read the way a
+ * review's head is: from the worktree that holds it if there is one, from the
+ * commit otherwise.
+ */
+export const repositoryTreeInputSchema = z.object({
+  id: repositoryIdSchema,
+  ref: refSchema.optional()
+})
+
+export const repositoryFileInputSchema = repositoryTreeInputSchema.extend({
+  path: z.string().min(1).max(4096)
+})
+
 export type Review = z.infer<typeof reviewSchema>
 export type ReviewWithRepository = z.infer<typeof reviewWithRepositorySchema>
 export type ReviewStatus = z.infer<typeof reviewStatusSchema>
@@ -579,6 +598,8 @@ export type ReviewFileInput = z.input<typeof reviewFileInputSchema>
 export type ReviewImageInput = z.input<typeof reviewImageInputSchema>
 export type OpenReviewFileInput = z.input<typeof openReviewFileInputSchema>
 export type RepositoryRefsInput = z.input<typeof repositoryRefsInputSchema>
+export type RepositoryTreeInput = z.input<typeof repositoryTreeInputSchema>
+export type RepositoryFileInput = z.input<typeof repositoryFileInputSchema>
 
 /* -------------------------------------------------------------------------- */
 /* Reviewed files                                                             */

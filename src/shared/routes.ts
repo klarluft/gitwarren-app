@@ -86,7 +86,24 @@ export type Route =
    * always-undefined says the same thing to a reader and to the compiler.
    */
   | { name: 'hosts'; host?: undefined }
-  | ({ name: 'repository'; repositoryId: number } & HostScoped)
+  | ({
+      name: 'repository'
+      repositoryId: number
+      /**
+       * The repository's own files, rather than its reviews.
+       *
+       * Absent is the reviews list, which is what every link written before
+       * this existed means and must go on meaning.
+       */
+      tab?: 'files'
+      /** The file open in that tab - a place, like a review's browse focus. */
+      filePath?: string
+      /**
+       * The branch, tag or commit the files are read at. Absent is whatever
+       * the checkout has checked out, read from disk.
+       */
+      ref?: string
+    } & HostScoped)
   | ({
       name: 'review'
       reviewId: number
@@ -141,6 +158,12 @@ const HOSTS_SEGMENT = 'hosts'
 /** What a content search is called in the hash. Short; it is typed by hand. */
 const QUERY_PARAM = 'q'
 
+/** The repository screen's file tab. */
+const FILES_SEGMENT = 'files'
+
+/** Which ref the repository's files are read at. */
+const REF_PARAM = 'ref'
+
 /**
  * Take a `?...` off the end of a hash, if there is one.
  *
@@ -149,17 +172,26 @@ const QUERY_PARAM = 'q'
  * the decoding, which is what makes a query containing `&`, `#` or `%` survive
  * the round trip through `hrefFor` unchanged.
  */
-function takeQuery(hash: string): { path: string; search?: string } {
+function takeQuery(hash: string): { path: string; search?: string; ref?: string } {
   const at = hash.indexOf('?')
   if (at === -1) return { path: hash }
 
-  const value = new URLSearchParams(hash.slice(at + 1)).get(QUERY_PARAM)
+  const params = new URLSearchParams(hash.slice(at + 1))
+  const value = params.get(QUERY_PARAM)
+  const ref = params.get(REF_PARAM)
   const path = hash.slice(0, at)
   // `?q=` with nothing after it is a real location and not the same as no `q`
   // at all: it is the search panel, open, with nothing typed into it yet. That
   // is what "search in files" navigates to from the other tabs, and what the
   // panel's own close button navigates away from.
-  return value === null ? { path } : { path, search: value }
+  //
+  // An empty `ref` is not like that: there is no such thing as the empty ref,
+  // so it reads as no ref at all - the checkout's own branch.
+  return {
+    path,
+    ...(value === null ? {} : { search: value }),
+    ...(ref === null || ref === '' ? {} : { ref })
+  }
 }
 
 /**
@@ -183,8 +215,16 @@ export function hrefFor(route: Route): string {
     // No prefix, and not because one was forgotten: see `Route`.
     case 'hosts':
       return `#/${HOSTS_SEGMENT}`
-    case 'repository':
-      return `#/${prefix}repositories/${route.repositoryId}`
+    case 'repository': {
+      let href = `#/${prefix}repositories/${route.repositoryId}`
+      if (route.tab === 'files') {
+        href += `/${FILES_SEGMENT}`
+        // Encoded whole, slashes included, as a review's focus path is.
+        if (route.filePath !== undefined) href += `/${encodeURIComponent(route.filePath)}`
+        if (route.ref !== undefined) href += `?${REF_PARAM}=${encodeURIComponent(route.ref)}`
+      }
+      return href
+    }
     case 'review': {
       let href = `#/${prefix}reviews/${route.reviewId}/${route.tab}`
       if (route.focus) {
@@ -282,7 +322,7 @@ function takeHost(segments: string[]): { host?: string; rest: string[] } {
 }
 
 export function parseRoute(hash: string): Route {
-  const { path, search } = takeQuery(hash)
+  const { path, search, ref } = takeQuery(hash)
   const all = path.replace(/^#\/?/, '').split('/').filter(Boolean)
   const { host, rest: segments } = takeHost(all)
 
@@ -305,8 +345,20 @@ export function parseRoute(hash: string): Route {
 
   if (segments[0] === 'repositories' && segments[1]) {
     const repositoryId = Number(segments[1])
-    if (Number.isInteger(repositoryId) && repositoryId > 0)
-      return { name: 'repository', repositoryId, ...scope }
+    if (Number.isInteger(repositoryId) && repositoryId > 0) {
+      if (segments[2] !== FILES_SEGMENT) return { name: 'repository', repositoryId, ...scope }
+      // The same rules as a review's focus path: decodable, and inside the
+      // repository - a link that names `../` gets the file list instead.
+      const filePath = parseFocus(segments.slice(3, 4))?.filePath
+      return {
+        name: 'repository',
+        repositoryId,
+        tab: FILES_SEGMENT,
+        ...(filePath === undefined ? {} : { filePath }),
+        ...(ref === undefined ? {} : { ref }),
+        ...scope
+      }
+    }
   }
 
   if (segments[0] === 'reviews' && segments[1]) {
