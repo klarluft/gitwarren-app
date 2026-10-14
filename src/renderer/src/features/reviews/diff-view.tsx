@@ -25,7 +25,17 @@
  * shown slightly out of place. A file with a collapsed body still shows its
  * comment count, so a discussion is never hidden behind a fold.
  */
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import {
+  Fragment,
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode
+} from 'react'
 import {
   Check,
   ChevronDown,
@@ -47,6 +57,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Tooltip } from '@/components/ui/tooltip'
+import { whenNearViewport } from '@/lib/near-viewport'
 import { cn } from '@/lib/utils'
 import { CommentComposer } from '../comments/comment-composer'
 import { CommentThreadCard } from '../comments/comment-thread-card'
@@ -87,6 +98,16 @@ export type DiffLayout = 'unified' | 'split'
 
 /** Files longer than this arrive collapsed; see the note above. */
 const COLLAPSE_ABOVE_LINES = 600
+
+/**
+ * The height of one row of the diff, in rem - `leading-5`.
+ *
+ * Only ever used as a guess: the space a body takes before it has been built,
+ * and the size the browser assumes for one it is skipping. A guess that is a
+ * little off moves nothing the reader is looking at, because the browser keeps
+ * the content on screen anchored while what is above it settles.
+ */
+const ROW_REM = 1.25
 
 /** How many lines one nudge of an expander reveals. */
 const EXPAND_STEP = 20
@@ -233,7 +254,13 @@ function isExpandable(file: FileDiff): boolean {
   return !file.isUntracked
 }
 
-export function FileDiffCard({
+/**
+ * Memoised, because a diff can hold hundreds of these and the tab around them
+ * re-renders whenever the reader scrolls onto a new file. Every prop the tab
+ * hands down is kept stable for exactly this reason - see `FileDiffItem` in
+ * `review-files-tab.tsx`.
+ */
+export const FileDiffCard = memo(function FileDiffCard({
   file,
   comments,
   source,
@@ -295,6 +322,29 @@ export function FileDiffCard({
   const isReviewed = reviewed?.isReviewed ?? false
 
   /**
+   * Whether the rows have been built yet.
+   *
+   * A card draws its header at once and its rows only when the reader is nearly
+   * at them - see `lib/near-viewport.ts`. Before this, a four-hundred-file
+   * branch built two million elements before the first one could be seen, and
+   * every scroll after that dragged all of them along.
+   *
+   * Once built, a body stays built. Unmounting on the way past would throw
+   * away whatever the reader had unfolded or half-typed in it, and the browser
+   * already skips laying out a body that is off screen - see `content-visibility`
+   * below - which is most of what unmounting would have saved.
+   */
+  const [bodyBuilt, setBodyBuilt] = useState(false)
+  // Somewhere is being pointed at inside this file, and it cannot wait for a
+  // scroll to bring the rows in - the scroll is aiming at one of them.
+  const mustBuild = search?.active != null || focus !== undefined || marked !== undefined
+  const built = bodyBuilt || mustBuild
+  const placeholder = useRef<HTMLDivElement>(null)
+  // Latched during render, the way the find bar resets its walk: being pointed
+  // at once is reason enough to keep the rows after the pointing moves on.
+  if (mustBuild && !bodyBuilt) setBodyBuilt(true)
+
+  /**
    * Derived rather than stored, so arriving at a line inside a folded file just
    * opens it - no effect, no second render, and a card the reviewer has closed
    * by hand stays closed.
@@ -335,12 +385,13 @@ export function FileDiffCard({
   const canExpand = source !== undefined && isExpandable(file)
   const text = useReviewFile(canExpand ? source.reviewId : null, file.path, source?.changes ?? 'all')
 
-  // Coloured only while the body is on screen; a folded card asks for nothing.
+  // Coloured only once the body is built; a folded or far-off card asks for
+  // nothing, so opening a big branch does not queue a grammar run per file.
   const highlight = useDiffHighlight(
     file.path,
     file.hunks,
     text.content && !text.content.isBinary ? text.content.lines : null,
-    expanded && file.hunks.length > 0
+    expanded && built && file.hunks.length > 0
   )
 
   const reveal = useCallback(
@@ -456,6 +507,7 @@ export function FileDiffCard({
 
   function expandEverything(): void {
     for (const gap of gaps) reveal(gap.start, gap.end ?? gap.start + EXPAND_UNBOUNDED)
+    setBodyBuilt(true)
     setExpanded(true)
   }
 
@@ -473,6 +525,29 @@ export function FileDiffCard({
   const showsImageDiff = expanded && showsImage && source !== undefined
   const showsBinaryNote = expanded && !hasBody && file.isBinary && !showsImage
   const showsBody = showsOrphans || showsDiff || showsImageDiff || showsBinaryNote
+
+  useEffect(() => {
+    const element = placeholder.current
+    if (built || !showsDiff || element === null) return
+    return whenNearViewport(element, () => setBodyBuilt(true))
+  }, [built, showsDiff])
+
+  /**
+   * Roughly how tall the rows will be: one per line, plus one for each band
+   * between hunks. Reserved before the body is built so the page is the right
+   * length from the start - the scrollbar, the file stepping and the progress
+   * strip all measure it.
+   */
+  const estimatedRem = (lineCount + file.hunks.length + (tailGap ? 1 : 0)) * ROW_REM
+  /**
+   * Built bodies the reader has moved away from are skipped by the browser
+   * until they come back - no layout, no paint. `auto` makes it remember the
+   * size it last drew rather than fall back to the estimate.
+   */
+  const bodyStyle: CSSProperties = {
+    contentVisibility: 'auto',
+    containIntrinsicSize: `auto ${estimatedRem}rem`
+  }
 
   return (
     // `clip` rather than `hidden`: both cut the diff to the card's rounded
@@ -506,7 +581,12 @@ export function FileDiffCard({
               read as belonging to it. */}
           <button
             type="button"
-            onClick={() => setExpanded(!expanded)}
+            onClick={() => {
+              // The reader is looking straight at it, so there is nothing to
+              // wait for.
+              if (!expanded) setBodyBuilt(true)
+              setExpanded(!expanded)
+            }}
             disabled={!canToggle}
             aria-expanded={expanded}
             className={cn(
@@ -664,8 +744,17 @@ export function FileDiffCard({
         </div>
       )}
 
-      {showsDiff && !previewing && (
-        <div className={cn(showsOrphans && 'border-t border-border')}>
+      {showsDiff && !previewing && !built && (
+        <div
+          ref={placeholder}
+          aria-hidden
+          className={cn(showsOrphans && 'border-t border-border')}
+          style={{ height: `${estimatedRem}rem` }}
+        />
+      )}
+
+      {showsDiff && !previewing && built && (
+        <div className={cn(showsOrphans && 'border-t border-border')} style={bodyStyle}>
           {/* `@container` makes this element an inline-size container, which is
               what lets a comment inside it be sized to the *visible* width
               rather than to the width of the scrolled code. */}
@@ -748,7 +837,7 @@ export function FileDiffCard({
       )}
     </Card>
   )
-}
+})
 
 /**
  * Copy the path to the clipboard.
@@ -957,8 +1046,8 @@ function ExpanderBand({
   const stepped = hidden === null || hidden > EXPAND_STEP
 
   return (
-    <div className="grid grid-cols-[3rem_3rem_1fr] bg-muted/60 text-muted-foreground">
-      <div className="col-span-2 flex items-center justify-center gap-0.5 border-r border-border">
+    <div className="grid grid-cols-[3rem_3rem_1fr] bg-(--row-tint) text-muted-foreground [--row-tint:color-mix(in_oklab,var(--color-muted)_60%,transparent)]">
+      <div className="diff-gutter left-0 col-span-2 flex items-center justify-center gap-0.5 border-r border-border">
         {/* Down unfolds from the top of the run, next to the code above it; up
             unfolds from the bottom, next to the code below. */}
         {hasAbove && stepped && (
@@ -1098,8 +1187,8 @@ function HunkRows({
   return (
     <>
       {showHeader && (
-        <div className="grid grid-cols-[3rem_3rem_1fr] bg-muted/60 text-muted-foreground">
-          <span className="col-span-2 border-r border-border" />
+        <div className="grid grid-cols-[3rem_3rem_1fr] bg-(--row-tint) text-muted-foreground [--row-tint:color-mix(in_oklab,var(--color-muted)_60%,transparent)]">
+          <span className="diff-gutter left-0 col-span-2 border-r border-border" />
           <span
             className={cn(
               'min-w-0 px-3 py-0.5',
@@ -1173,16 +1262,20 @@ function lineState(side: DiffSide, number: number | null, context: RowContext): 
 }
 
 /**
- * The background a row is drawn on.
+ * The tint a row is drawn on, set as `--row-tint` for the row's own
+ * `bg-(--row-tint)` to paint.
  *
- * Mutually exclusive rather than layered: two background utilities on one
- * element are resolved by stylesheet order, not by the order they are written.
+ * A variable rather than a background because two things paint it: the row,
+ * and its line numbers when they are pinned over code scrolling sideways - see
+ * `diff-gutter` in index.css. Mutually exclusive rather than layered: two
+ * utilities setting one property are resolved by stylesheet order, not by the
+ * order they are written.
  */
 function rowTone(type: DiffLine['type'], state: LineState): string | undefined {
-  if (state.isMarked) return 'bg-warning/25'
-  if (state.selected) return 'bg-primary/15'
-  if (type === 'insert') return 'bg-success/10'
-  if (type === 'delete') return 'bg-destructive/10'
+  if (state.isMarked) return '[--row-tint:color-mix(in_oklab,var(--color-warning)_25%,transparent)]'
+  if (state.selected) return '[--row-tint:color-mix(in_oklab,var(--color-primary)_15%,transparent)]'
+  if (type === 'insert') return '[--row-tint:color-mix(in_oklab,var(--color-success)_10%,transparent)]'
+  if (type === 'delete') return '[--row-tint:color-mix(in_oklab,var(--color-destructive)_10%,transparent)]'
   return undefined
 }
 
@@ -1192,8 +1285,13 @@ function rowTone(type: DiffLine['type'], state: LineState): string | undefined {
  * Built from the same three parts the side-by-side row uses - `CommentCell`,
  * `LineCode` and `ThreadStrip` - so a comment, a search hit and a changed word
  * look and behave the same in either layout.
+ *
+ * Memoised: a built diff can be tens of thousands of these, and most of what
+ * re-renders a card - a thread arriving, the find moving on - changes nothing
+ * about most of its rows. The context arrives spread into separate props, so
+ * the comparison is field by field.
  */
-export function LineRow({ line, ...context }: { line: DiffLine } & RowContext) {
+export const LineRow = memo(function LineRow({ line, ...context }: { line: DiffLine } & RowContext) {
   const { filePath, oneGutter = false } = context
   // Which side a comment on this row belongs to, and the number it carries
   // there. Shared with the search, so a hit is addressed to the row it is on.
@@ -1211,12 +1309,13 @@ export function LineRow({ line, ...context }: { line: DiffLine } & RowContext) {
         data-diff-side={number === null ? undefined : side}
         data-diff-line={number === null ? undefined : number}
         className={cn(
-          'group grid',
+          'group grid bg-(--row-tint)',
           oneGutter ? 'grid-cols-[3rem_minmax(0,1fr)]' : 'grid-cols-[3rem_3rem_minmax(0,1fr)]',
           rowTone(line.type, state),
-          // A box-shadow instead, so the marker for "a comment covers this
-          // line" can sit on top of whichever background won above.
-          state.inThread && 'shadow-[inset_3px_0_0_0_var(--color-primary)]'
+          // "A comment covers this line", drawn down the left edge by the
+          // first gutter cell - pinned, it sits over where the row's own edge
+          // was - on top of whatever tint won above.
+          state.inThread && '[--row-mark:var(--color-primary)]'
         )}
       >
         {!oneGutter && <Gutter value={line.oldNumber} />}
@@ -1227,6 +1326,7 @@ export function LineRow({ line, ...context }: { line: DiffLine } & RowContext) {
           commentable
           state={state}
           context={context}
+          pin={oneGutter ? 'left-0' : 'left-12'}
         />
         <LineCode line={line} side={side} number={number} owner context={context} />
       </div>
@@ -1249,7 +1349,7 @@ export function LineRow({ line, ...context }: { line: DiffLine } & RowContext) {
       )}
     </>
   )
-}
+})
 
 /**
  * One row of the side-by-side diff: the base version on the left, the head
@@ -1267,7 +1367,11 @@ export function LineRow({ line, ...context }: { line: DiffLine } & RowContext) {
  * in the left column, beneath the text it is about, rather than across the
  * whole width where it would cover the version it is not about.
  */
-function SplitLineRow({ row, ...context }: { row: SplitRow } & RowContext) {
+/** Memoised like `LineRow`, with a comparison that sees through the pairing. */
+const SplitLineRow = memo(function SplitLineRow({
+  row,
+  ...context
+}: { row: SplitRow } & RowContext) {
   const left = row.left === null ? null : rowPosition(row.left)
   const right = row.right === null ? null : rowPosition(row.right)
   // The left half of a context row is the same line as the right half, so it
@@ -1309,7 +1413,23 @@ function SplitLineRow({ row, ...context }: { row: SplitRow } & RowContext) {
       )}
     </>
   )
-}
+},
+/**
+ * `splitRows` pairs the lines afresh on every render, so the row object is
+ * always new; what it pairs is not. Compared by its two sides, then the rest
+ * of the context field by field - the same thing `memo` does for `LineRow`.
+ */
+(previous, next) => {
+  for (const key of Object.keys(next) as (keyof typeof next)[]) {
+    if (key === 'row') continue
+    if (!Object.is(previous[key], next[key])) return false
+  }
+  return (
+    Object.keys(previous).length === Object.keys(next).length &&
+    previous.row.left === next.row.left &&
+    previous.row.right === next.row.right
+  )
+})
 
 function SplitHalf({
   line,
@@ -1342,7 +1462,7 @@ function SplitHalf({
       data-diff-side={number === null ? undefined : side}
       data-diff-line={number === null ? undefined : number}
       className={cn(
-        'group grid min-w-0 grid-cols-[3rem_minmax(0,1fr)]',
+        'group grid min-w-0 grid-cols-[3rem_minmax(0,1fr)] bg-(--row-tint)',
         isLeft && 'border-r border-border',
         rowTone(line.type, state),
         state.inThread && 'shadow-[inset_3px_0_0_0_var(--color-primary)]'
@@ -1368,7 +1488,8 @@ function CommentCell({
   display,
   commentable,
   state,
-  context
+  context,
+  pin
 }: {
   side: DiffSide
   number: number | null
@@ -1377,13 +1498,19 @@ function CommentCell({
   commentable: boolean
   state: LineState
   context: RowContext
+  /**
+   * Where the cell sticks when the code beside it scrolls sideways - the unified
+   * row's columns. Absent side by side, which always wraps and never scrolls,
+   * and where a sticky offset would push the left half's numbers right.
+   */
+  pin?: 'left-0' | 'left-12'
 }) {
   const { comments, onSelectStart, onSelectOver, filePath } = context
   const { composing, selected } = state
 
   return (
         <div
-          className="relative border-r border-border"
+          className={cn(pin === undefined ? 'relative' : ['diff-gutter', pin], 'border-r border-border')}
           // Extending a drag has to be caught on the row, not on the button:
           // the pointer is held down, so it never enters another button.
           onPointerEnter={() => {
@@ -1710,7 +1837,7 @@ function LineText({
 
 export function Gutter({ value }: { value: number | null }) {
   return (
-    <span className="select-none border-r border-border px-2 text-right tabular-nums text-muted-foreground/70">
+    <span className="diff-gutter left-0 select-none border-r border-border px-2 text-right tabular-nums text-muted-foreground/70">
       {value ?? ''}
     </span>
   )

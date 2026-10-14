@@ -170,14 +170,64 @@
 }
 
 /*
- * The one keyframe the app defines. Everything else that animates does so
- * through Base UI's `data-[starting-style]`, which needs a primitive to hang
- * off; the back-to-top button is a plain conditional render and has none.
+ * Keyframes. Most things that animate do so through Base UI's
+ * `data-[starting-style]`, which needs a primitive to hang off; these are for
+ * plain conditional renders that have none - the back-to-top button, and the
+ * review progress strip's counter.
  */
 @keyframes rise-in {
   from {
     opacity: 0;
     transform: translateY(0.25rem) scale(0.96);
+  }
+}
+
+/* A slot on the review progress strip, just ticked off: a flare that fades. */
+@keyframes review-tick {
+  from {
+    filter: brightness(1.6);
+    box-shadow: 0 0 0.5rem 0.125rem var(--color-success);
+  }
+  to {
+    filter: none;
+    box-shadow: none;
+    opacity: 0;
+  }
+}
+
+/* The whole strip, once, when the last file in the review is ticked off. */
+@keyframes review-done {
+  0% {
+    box-shadow: 0 0 0 0 var(--color-success);
+  }
+  40% {
+    filter: brightness(1.35);
+    box-shadow: 0 0 0.75rem 0.125rem var(--color-success);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+/*
+ * A line-number cell that stays put while the code beside it scrolls sideways.
+ *
+ * Without it a long line - or the find jumping to a hit far along one - takes
+ * the numbers out of view, and with them the comment button, which is the
+ * one place a comment can be started from. The row's tint is a translucent
+ * colour over the card, so a pinned cell cannot just be transparent: the code
+ * scrolling under it would show through. It paints the same tint over an
+ * opaque card instead, read from `--row-tint` on the row, and carries the
+ * row's left-edge mark (`--row-mark`) because it now covers where that was.
+ */
+@utility diff-gutter {
+  position: sticky;
+  z-index: 1;
+  background:
+    linear-gradient(var(--row-tint, transparent), var(--row-tint, transparent)),
+    var(--color-card);
+  &:first-child {
+    box-shadow: inset 3px 0 0 0 var(--row-mark, transparent);
   }
 }
 

@@ -150,18 +150,31 @@ export function useDiffFind(files: readonly FileDiff[]): DiffFind {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeKey])
 
-  const searchFor = useCallback(
-    (path: string): DiffSearch | undefined =>
-      term === ''
+  /**
+   * The same object for every file the current hit is not in, and one more for
+   * the file it is. A card is only re-rendered when what it is handed changes,
+   * so a fresh object per file per render would redraw the whole diff on every
+   * step through the hits rather than the two files the step moved between.
+   */
+  const passive = useMemo<DiffSearch | undefined>(
+    () => (term === '' ? undefined : { query: term, active: null }),
+    [term]
+  )
+  const pointed = useMemo<DiffSearch | undefined>(
+    () =>
+      term === '' || active === null
         ? undefined
         : {
             query: term,
-            active:
-              active !== null && active.filePath === path
-                ? { side: active.side, line: active.line, occurrence: active.occurrence }
-                : null
+            active: { side: active.side, line: active.line, occurrence: active.occurrence }
           },
     [term, active]
+  )
+
+  const searchFor = useCallback(
+    (path: string): DiffSearch | undefined =>
+      active !== null && active.filePath === path ? pointed : passive,
+    [active, pointed, passive]
   )
 
   return {

@@ -126,7 +126,9 @@ export function DiffSnippet({
           <div className="min-w-max font-mono text-xs leading-5">
             {clipped && (
               <div className="grid grid-cols-[3rem_1fr] text-muted-foreground">
-                <span className="select-none border-r border-border px-2 text-right">…</span>
+                <span className="diff-gutter left-0 select-none border-r border-border px-2 text-right">
+                  …
+                </span>
                 <span className="px-3" />
               </div>
             )}
@@ -138,13 +140,19 @@ export function DiffSnippet({
                 <div
                   key={index}
                   className={cn(
-                    'grid grid-cols-[3rem_1fr]',
-                    snippetLine.type === 'insert' && 'bg-success/10',
-                    snippetLine.type === 'delete' && 'bg-destructive/10',
-                    isAnchor && 'bg-warning/10 font-medium'
+                    'grid grid-cols-[3rem_1fr] bg-(--row-tint)',
+                    // A variable rather than a background, so the pinned line
+                    // number can paint the same tint - see `diff-gutter`.
+                    isAnchor
+                      ? 'font-medium [--row-tint:color-mix(in_oklab,var(--color-warning)_10%,transparent)]'
+                      : snippetLine.type === 'insert'
+                        ? '[--row-tint:color-mix(in_oklab,var(--color-success)_10%,transparent)]'
+                        : snippetLine.type === 'delete'
+                          ? '[--row-tint:color-mix(in_oklab,var(--color-destructive)_10%,transparent)]'
+                          : undefined
                   )}
                 >
-                  <span className="select-none border-r border-border px-2 text-right tabular-nums text-muted-foreground/70">
+                  <span className="diff-gutter left-0 select-none border-r border-border px-2 text-right tabular-nums text-muted-foreground/70">
                     {number ?? ''}
                   </span>
                   <span

@@ -11,6 +11,7 @@
  * answer is cached under its own SWR key so switching back is instant.
  */
 import {
+  memo,
   useCallback,
   useEffect,
   useMemo,
@@ -53,7 +54,8 @@ import { plural } from '@/lib/format'
 import { useApi, useHost, useHostScope } from '@/lib/host-scope'
 import { useNarrow } from '@/lib/narrow'
 import { useStoredFlag, useStoredPreference } from '@/lib/preferences'
-import { revealElement } from '@/lib/reveal'
+import { revealElement, scrollToElement } from '@/lib/reveal'
+import { scrollParent } from '@/lib/scroll-parent'
 import { cn } from '@/lib/utils'
 import { useRegisterCommands, type Command } from '@/features/commands/command-registry'
 import { navigate, replace, type DiffFocus } from '@/lib/router'
@@ -70,8 +72,13 @@ import {
   DiffStat,
   FileDiffCard,
   type AnchoredThread,
+  type DiffComments,
+  type DiffFileSource,
   type DiffLayout
 } from './diff-view'
+import type { DiffSearch } from './diff-search'
+import { ReviewProgress } from './review-progress'
+import { TOP_EDGE_SLACK } from './review-progress-model'
 import {
   DEFAULT_DIFF_CHANGES,
   useEditors,
@@ -87,18 +94,6 @@ import type { DiffChanges, FileDiff as FileDiffData } from '@shared/git'
 import { isSelfReview } from '@shared/schemas'
 import type { CommentThread, Review } from '@shared/schemas'
 
-/**
- * How far below the top of the scroller a file card may still sit and count as
- * the one being read.
- *
- * Larger than it looks like it needs to be, deliberately. `scrollIntoView` does
- * not land exactly on zero - measured, it settles several pixels short - and the
- * cards are separated by a gap of their own. A threshold tighter than that error
- * makes a stepped-to file read as "not reached yet", so the next press aims at
- * the same file again and stepping appears to stick. It only has to stay far
- * below the height of any card to be unambiguous, and it does.
- */
-const TOP_EDGE_SLACK = 24
 
 /**
  * The three views of a review's changes, in the order `u` steps through them.
@@ -131,23 +126,6 @@ function nextChangesAfter(current: DiffChanges): DiffChanges {
 }
 
 /**
- * The element a card actually scrolls inside.
- *
- * The app scrolls in a `<main>` that sits below the title bar, not in the
- * window, so a card resting at the top of the page still reports a viewport
- * offset of the title bar's height. Comparing against the scroller's own top
- * edge instead is what makes "which file is at the top" independent of whatever
- * chrome the shell puts above it.
- */
-function scrollParent(element: HTMLElement): HTMLElement {
-  for (let node = element.parentElement; node !== null; node = node.parentElement) {
-    const overflow = getComputedStyle(node).overflowY
-    if (overflow === 'auto' || overflow === 'scroll') return node
-  }
-  return document.documentElement
-}
-
-/**
  * How far below its scroller a card comes to rest when it is scrolled to -
  * where the reading area starts, rather than where the scroller does.
  *
@@ -168,15 +146,6 @@ function readingInset(card: HTMLElement): number {
 function readingTop(card: HTMLElement): number {
   return scrollParent(card).getBoundingClientRect().top + readingInset(card)
 }
-
-/**
- * The gap the tab leaves between the blocks stacked down it - `gap-3`.
- *
- * Written out here because the sticky offset is arithmetic done in JS: a header
- * parking directly against the underside of the find bar reads as one welded
- * bar, and the gap it rests below is the same one it would have had in the flow.
- */
-const STICKY_GAP = '0.75rem'
 
 /**
  * The height of an element as it changes, for whoever has to leave room for it.
@@ -406,7 +375,7 @@ function useFocusScroll(focus: DiffFocus | undefined, ready: boolean): DiffFocus
       const target = line ?? document.getElementById(fileDomId(focus.filePath))
 
       if (target) {
-        target.scrollIntoView({ block: line ? 'center' : 'start', behavior: 'smooth' })
+        scrollToElement(target, { block: line ? 'center' : 'start', behavior: 'smooth' })
         if (line) {
           setMarked(focus)
           // Long enough to catch the eye after a smooth scroll, short enough
@@ -478,16 +447,19 @@ function useFilesLayout(): {
 
   const selectFile = useCallback(
     (path: string) => {
-      if (narrow) {
+      // Only while the list is the screen. The progress strip picks files too,
+      // and from the diff itself: there the list is already shut, setting it
+      // shut again re-renders nothing, the effect above never runs, and the
+      // jump would silently not happen.
+      if (narrow && listScreen) {
         pending.current = path
         setListScreen(false)
         return
       }
-      document
-        .getElementById(fileDomId(path))
-        ?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+      const element = document.getElementById(fileDomId(path))
+      if (element !== null) scrollToElement(element, { block: 'start', behavior: 'smooth' })
     },
-    [narrow]
+    [narrow, listScreen]
   )
 
   return {
@@ -562,7 +534,7 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
   const files = useMemo(() => data?.files ?? [], [data?.files])
   const paths = useMemo(() => files.map((file) => file.path), [files])
   const find = useDiffFind(files)
-  const [bindFindBar, findBarHeight] = useMeasuredHeight()
+  const [bindPinned, pinnedHeight] = useMeasuredHeight()
 
   /**
    * Take the find bar's query to the whole repository.
@@ -583,11 +555,15 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
    * Where a sticky thing in this tab parks, and how far below the top of the
    * scroller a scrolled-to card comes to rest.
    *
-   * Both shift down by the find bar when it is open, because it is sticky too
-   * and sits above everything else: a file header pinned to the top of the
-   * scroller would spend the whole search hidden behind it.
+   * Both shift down by whatever is pinned above the diff - the progress strip,
+   * and the find bar when it is open - because those sit above everything
+   * else: a file header pinned to the top of the scroller would spend the whole
+   * review hidden behind them.
    */
-  const stickyTop = find.open ? `calc(${findBarHeight}px + ${STICKY_GAP})` : '0px'
+  // The pinned block carries the gap below it as padding of its own, painted
+  // over, so code scrolling up never shows through between the strip and the
+  // header of the file being read. Its measured height already includes it.
+  const stickyTop = `${pinnedHeight}px`
   const stickyStyle = {
     '--diff-sticky-top': stickyTop,
     '--diff-scroll-top': `calc(${stickyTop} + 0.5rem)`
@@ -678,6 +654,22 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
     [digestByPath, setReviewed, paths, scrollToSettled]
   )
 
+  /**
+   * `markReviewed` for the cards, under one identity for the life of the tab.
+   *
+   * The real one is rebuilt with every mark - it closes over the marks - and
+   * handing that to four hundred memoised cards would re-render all of them
+   * each time one file is ticked off. This forwards to whichever is current.
+   */
+  const latestMarkReviewed = useRef(markReviewed)
+  useEffect(() => {
+    latestMarkReviewed.current = markReviewed
+  }, [markReviewed])
+  const onMarkReviewed = useCallback(
+    (path: string, next: boolean) => latestMarkReviewed.current(path, next),
+    []
+  )
+
   /** What the tree shows next to a file: comments still waiting on someone. */
   const unresolvedByFile = useMemo(() => {
     const counts = new Map<string, number>()
@@ -738,6 +730,27 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
       : openOnItsHost
 
   const marked = useFocusScroll(focus, !isLoading && data !== undefined)
+
+  /** What every card's comments share; each card adds its own threads. */
+  const sharedComments = useMemo(
+    () => ({ reviewId: review.id, mutations, changes }),
+    [review.id, mutations, changes]
+  )
+
+  const editorLabel =
+    editors?.editors.find((editor) => editor.id === (editorId ?? editors.defaultId))?.label ?? null
+
+  /** One object for every card, rebuilt only when one of its parts changes. */
+  const source = useMemo<DiffFileSource>(
+    () => ({
+      reviewId: review.id,
+      changes,
+      editorId,
+      editorLabel,
+      onOpenInEditor: openInEditor
+    }),
+    [review.id, changes, editorId, editorLabel, openInEditor]
+  )
 
   /**
    * Which file the reader is on, measured from the layout: the last card whose
@@ -999,17 +1012,6 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
             {plural(data.files.length, 'file')} changed
           </p>
           <DiffStat additions={data.additions} deletions={data.deletions} />
-          {/* Only once there is progress to report; "0 of 12 reviewed" is a
-              statement of the obvious taking up room next to the file count. */}
-          {reviewedPaths.size > 0 && (
-            <p
-              className="flex items-center gap-1.5 text-sm text-muted-foreground"
-              title="Files you have marked as reviewed. A mark clears itself when its file changes."
-            >
-              <CheckCheck className="size-4 text-success" />
-              {reviewedPaths.size} of {data.files.length} reviewed
-            </p>
-          )}
         </div>
 
         {/* On a phone the three buttons keep their icons and lose their words,
@@ -1122,8 +1124,26 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
         </div>
       </div>
 
-      {find.open && (
-        <DiffFindBar ref={bindFindBar} find={find} onSearchRepository={searchRepository} />
+      {/* Pinned above the diff as one block, measured as one, so the card
+          headers below know how far down to park. The strip is only worth its
+          room once there is more than one file to be part of the way through. */}
+      {(find.open || data.files.length > 1) && (
+        // `pb-3 -mb-3` is the tab's own gap, moved inside the block so it is
+        // opaque; the flow below is spaced exactly as before.
+        <div
+          ref={bindPinned}
+          className="sticky top-0 z-20 -mb-3 flex flex-col gap-2 bg-background pb-3"
+        >
+          {find.open && <DiffFindBar find={find} onSearchRepository={searchRepository} />}
+          {data.files.length > 1 && (
+            <ReviewProgress
+              files={data.files}
+              reviewedPaths={reviewedPaths}
+              changedSincePaths={changedSincePaths}
+              onSelect={selectFile}
+            />
+          )}
+        </div>
       )}
 
       {changes !== 'committed' && data.workingTree?.isDirty && (
@@ -1286,48 +1306,24 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
             )}
           >
             {data.files.map((file) => (
-              <div
+              <FileDiffItem
                 key={`${file.oldPath ?? ''}:${file.path}`}
-                id={fileDomId(file.path)}
-                data-file-path={file.path}
-                className="scroll-mt-[var(--diff-scroll-top,0.5rem)]"
-              >
-                <FileDiffCard
-                  // Remounted when the view changes: that is a different diff
-                  // with different line numbers, so anything unfolded against
-                  // the old one has to go.
-                  key={changes}
-                  file={file}
-                  // Only the card that owns the line hears about it, so one
-                  // arriving link cannot light up the same number in every file.
-                  focus={focus?.filePath === file.path ? focus : undefined}
-                  search={find.searchFor(file.path)}
-                  layout={layout}
-                  wrap={wrap}
-                  marked={marked?.filePath === file.path ? focusedLine(marked) : undefined}
-                  reviewed={{
-                    isReviewed: reviewedPaths.has(file.path),
-                    hasChangedSince: changedSincePaths.has(file.path),
-                    onChange: (next) => markReviewed(file.path, next)
-                  }}
-                  comments={{
-                    reviewId: review.id,
-                    threads: threadsByFile.get(file.path) ?? [],
-                    mutations,
-                    changes
-                  }}
-                  source={{
-                    reviewId: review.id,
-                    changes,
-                    editorId,
-                    editorLabel:
-                      editors?.editors.find(
-                        (editor) => editor.id === (editorId ?? editors.defaultId)
-                      )?.label ?? null,
-                    onOpenInEditor: openInEditor
-                  }}
-                />
-              </div>
+                file={file}
+                changes={changes}
+                // Only the card that owns the line hears about it, so one
+                // arriving link cannot light up the same number in every file.
+                focus={focus?.filePath === file.path ? focus : undefined}
+                search={find.searchFor(file.path)}
+                layout={layout}
+                wrap={wrap}
+                marked={marked?.filePath === file.path ? marked : undefined}
+                isReviewed={reviewedPaths.has(file.path)}
+                hasChangedSince={changedSincePaths.has(file.path)}
+                onMarkReviewed={onMarkReviewed}
+                threads={threadsByFile.get(file.path) ?? NO_THREADS}
+                comments={sharedComments}
+                source={source}
+              />
             ))}
           </div>
         </div>
@@ -1341,6 +1337,84 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
     </div>
   )
 }
+
+const NO_THREADS: AnchoredThread[] = []
+
+/**
+ * One file in the diff, and the reason the tab can be scrolled at all on a big
+ * branch.
+ *
+ * The tab re-renders whenever the reader scrolls onto a new file - the file
+ * list's highlight moves - and before this every one of those re-rendered every
+ * card and every line in it. Memoised, and handed only values that keep their
+ * identity, a card now re-renders when something about *that file* changed:
+ * its mark, its threads, a search hit in it.
+ */
+const FileDiffItem = memo(function FileDiffItem({
+  file,
+  changes,
+  focus,
+  search,
+  layout,
+  wrap,
+  marked,
+  isReviewed,
+  hasChangedSince,
+  onMarkReviewed,
+  threads,
+  comments,
+  source
+}: {
+  file: FileDiffData
+  changes: DiffChanges
+  focus: DiffFocus | undefined
+  search: DiffSearch | undefined
+  layout: DiffLayout
+  wrap: boolean
+  marked: DiffFocus | undefined
+  isReviewed: boolean
+  hasChangedSince: boolean
+  onMarkReviewed: (path: string, next: boolean) => void
+  threads: AnchoredThread[]
+  comments: Omit<DiffComments, 'threads'>
+  source: DiffFileSource
+}) {
+  const path = file.path
+  const reviewed = useMemo(
+    () => ({
+      isReviewed,
+      hasChangedSince,
+      onChange: (next: boolean) => onMarkReviewed(path, next)
+    }),
+    [isReviewed, hasChangedSince, onMarkReviewed, path]
+  )
+  const fileComments = useMemo(() => ({ ...comments, threads }), [comments, threads])
+  const markedLine = useMemo(() => focusedLine(marked), [marked])
+
+  return (
+    <div
+      id={fileDomId(path)}
+      data-file-path={path}
+      className="scroll-mt-[var(--diff-scroll-top,0.5rem)]"
+    >
+      <FileDiffCard
+        // Remounted when the view changes: that is a different diff with
+        // different line numbers, so anything unfolded against the old one has
+        // to go.
+        key={changes}
+        file={file}
+        focus={focus}
+        search={search}
+        layout={layout}
+        wrap={wrap}
+        marked={markedLine}
+        reviewed={reviewed}
+        comments={fileComments}
+        source={source}
+      />
+    </div>
+  )
+})
 
 /**
  * Which of the three views of the changes is on screen.

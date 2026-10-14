@@ -18,7 +18,7 @@
  * same ranking, the same name-first result row - means the gesture that finds a
  * file is one gesture in this app rather than one per tab.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { Check, ChevronDown, ChevronRight, History } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { plural } from '@/lib/format'
@@ -200,7 +200,7 @@ export function ChangedFilesTree({
               key={match.path}
               file={byPath.get(match.path) as FileDiff}
               indices={match.indices}
-              {...rowProps}
+              {...rowState(match.path, rowProps)}
             />
           ))}
           {matches.total > matches.shown.length && (
@@ -228,7 +228,8 @@ function TreeRows({
   const [open, setOpen] = useState(true)
   // Indent by nesting depth, but stop growing it before the column runs out of
   // room; a path fifteen directories deep should still show its file name.
-  const indent = { paddingLeft: `${Math.min(depth, 6) * 0.75 + 0.25}rem` }
+  const paddingLeft = `${Math.min(depth, 6) * 0.75 + 0.25}rem`
+  const indent = { paddingLeft }
 
   if (node.kind === 'directory') {
     return (
@@ -264,36 +265,60 @@ function TreeRows({
   }
 
   // Always present: the tree was built from these very paths.
-  return <FileRow file={byPath.get(node.path) as FileDiff} indent={indent} {...rowProps} />
+  return (
+    <FileRow
+      file={byPath.get(node.path) as FileDiff}
+      paddingLeft={paddingLeft}
+      {...rowState(node.path, rowProps)}
+    />
+  )
 }
 
-function FileRow({
+/**
+ * What one row needs to know, boiled down to values that compare equal when
+ * nothing about that row changed - which is what lets `FileRow` skip the
+ * re-render. Scrolling onto a new file moves the highlight between two rows,
+ * and on a branch of four hundred files the other three hundred and ninety-eight
+ * have no reason to be drawn again.
+ */
+function rowState(path: string, props: Omit<ChangedFilesTreeProps, 'files' | 'follow'>) {
+  return {
+    isActive: path === props.activePath,
+    isReviewed: props.reviewedPaths.has(path),
+    hasChangedSince: props.changedSincePaths.has(path),
+    unresolved: props.unresolvedByFile.get(path) ?? 0,
+    onSelect: props.onSelect
+  }
+}
+
+const FileRow = memo(function FileRow({
   file,
   indices,
-  indent,
-  activePath,
-  onSelect,
-  unresolvedByFile,
-  reviewedPaths,
-  changedSincePaths
+  paddingLeft,
+  isActive,
+  isReviewed,
+  hasChangedSince,
+  unresolved,
+  onSelect
 }: {
   file: FileDiff
   /** Set on a filter row: which characters of the path the query hit. */
   indices?: number[]
   /** Set on a tree row, where the depth is what the indent is measuring. */
-  indent?: { paddingLeft: string }
-} & Omit<ChangedFilesTreeProps, 'files' | 'follow'>) {
+  paddingLeft?: string
+  isActive: boolean
+  isReviewed: boolean
+  hasChangedSince: boolean
+  unresolved: number
+  onSelect: (path: string) => void
+}) {
   const path = file.path
-  const unresolved = unresolvedByFile.get(path) ?? 0
-  const isActive = path === activePath
-  const isReviewed = reviewedPaths.has(path)
-  const hasChangedSince = changedSincePaths.has(path)
 
   return (
     <button
       type="button"
       onClick={() => onSelect(path)}
-      style={indent ?? { paddingLeft: '0.25rem' }}
+      style={{ paddingLeft: paddingLeft ?? '0.25rem' }}
       aria-current={isActive ? 'true' : undefined}
       className={cn(
         'flex w-full items-start gap-1.5 rounded py-1 pr-1 text-left transition-colors',
@@ -341,4 +366,4 @@ function FileRow({
       )}
     </button>
   )
-}
+})
