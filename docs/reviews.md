@@ -195,6 +195,8 @@ In both layouts, a line that was edited rather than rewritten highlights only
 the words that changed. This matters most for prose, where a paragraph is one
 long line and a single changed word would otherwise colour all of it.
 
+<img src="side-by-side.png" alt="A README diff in split layout: the old lines on the left, the new on the right, and on the rewritten lines only the words that changed are marked" width="800" />
+
 **Wrap** lets a long line break onto the next row instead of scrolling the card
 sideways. The `+`/`-` marker hangs in the margin so continuation rows sit under
 the code, and the line number stays on the first row. Code starts unwrapped and
@@ -216,6 +218,8 @@ and inside an edited paragraph the removed words are struck out and the added
 ones highlighted in place, the way tracked changes look in a word processor.
 In split layout it shows the old document beside the new one. Unchanged
 stretches fold.
+
+<img src="markdown-preview.png" alt="The same README change as a rendered preview: the old bullet struck through on a red bar, the new bullet and its sub-list on a green bar, and the unchanged blocks folded above" width="800" />
 
 You can comment on a paragraph from the preview. It is the same call as
 dragging a comment over those lines in the diff, so the thread is anchored by
@@ -263,6 +267,8 @@ files included, and a ref picker reads any branch or tag instead. Markdown
 files get the same Source | Preview switch. There is no comment gutter, because
 a comment belongs to a review. The file and the ref are part of the address
 (`#/repositories/3/files/<path>?ref=<ref>`).
+
+<img src="repository-files.png" alt="A repository's Files tab: the file tree on the left, a TypeScript file highlighted on the right, read from the checkout on disk at its current branch" width="800" />
 
 ## Refreshing
 
@@ -362,3 +368,5 @@ switch in the top-right corner of the home screen — **Match system**, **Light*
 from any screen. The choice is kept per device in the browser's storage rather
 than in the database, so a phone reading a review from another machine keeps
 its own.
+
+<img src="light-theme.png" alt="The files-changed tab of a review in the light theme, with the uncommitted-changes banner and the highlighted diff" width="800" />
