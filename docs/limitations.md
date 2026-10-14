@@ -47,14 +47,18 @@
   step.
   HTTPS is a tailnet-wide setting: with it off, your machines are reachable over
   plain HTTP inside the tailnet, which WireGuard is encrypting either way.
-- **Repo-relative images are not rendered.** `![](docs/arch.png)` in a comment
-  stays as written rather than resolving against the repository — it needs a
-  second protocol host and repository context threaded into the renderer. Such a
-  URL is left alone rather than copied into the attachment store, since a
-  committed file is git's and reading it live is the rule everywhere else here.
+- **Repo-relative images are not rendered in comments.** `![](docs/arch.png)`
+  in a comment stays as written rather than resolving against the repository —
+  a comment has no file it sits in to resolve a path against. Such a URL is
+  left alone rather than copied into the attachment store, since a committed
+  file is git's and reading it live is the rule everywhere else here. The
+  preview of a Markdown *file* does draw them, from the repository.
 - **Remote images are shown as links, never inlined**, and raw HTML in markdown
   is not rendered at all. Both are deliberate; see
-  [Images in comments](agents.md#images-in-comments).
+  [Images in comments](agents.md#images-in-comments). The one exception is in
+  the preview of a Markdown file, where `<img>` and `<a href>` tags are read
+  into ordinary Markdown images and links rather than shown as text; nothing
+  else in the HTML is used.
 - **Mermaid and other diagram syntax are not rendered.** Fenced code is syntax
   highlighted when the fence names a language GitWarren has a grammar for; a
   diagram stays as its source.
@@ -64,8 +68,6 @@
   pasted into a composer that is then abandoned sits on disk until the next
   launch of the GUI. The sweep runs only there, never in the MCP server, which
   may be one of several concurrent processes.
-- **Diffs are unified, not side-by-side**, and have no word-level intra-line
-  highlighting.
 - **Syntax highlighting covers about sixty languages, not every one.** The
   grammars are a curated set (`src/renderer/src/lib/highlight/languages.ts`)
   rather than Shiki's full catalogue of ten megabytes; a file in any other
