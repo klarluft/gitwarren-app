@@ -33,10 +33,25 @@
  *
  * It runs in that direction and not the other because of what each list costs.
  * This machine's repositories are one local SQLite read, free from anywhere;
- * another machine's are a connection, and a home screen that annotated its rows
- * with "also on ..." would have to open an `ssh` session to every host in the
- * list in order to render - which is exactly the thing `core/hosts/pool.ts`
- * exists to avoid. The comparison is made where it is free.
+ * another machine's are a connection. The comparison is made where it is free.
+ *
+ * ## Other machines' rows, on this machine's list
+ *
+ * For a long time the home screen deliberately showed only this computer's
+ * repositories, for the reason just given: listing another machine's means an
+ * `ssh` session (or a socket) to it, and a home screen that opened one to every
+ * host in order to render was exactly what `core/hosts/pool.ts` exists to
+ * avoid. That changed because the person using the app asked for it - "all my
+ * repositories in one place" is worth more to them than the connection costs -
+ * so the local list now ends with a section per host, each its own read (see
+ * `remote-repositories.tsx`), and the cost is opt-*out* rather than avoided.
+ *
+ * Which is what the "Other machines" switch is for. It is not decoration: off,
+ * the sections are not mounted, so no host is asked anything and the screen is
+ * back to one local SQLite read. Somebody with a host that is slow to wake, or
+ * on a metered link, turns it off once and it stays off. Only hosts that have
+ * been reached at least once are listed - one with no instance id yet has no
+ * route to link a row to.
  */
 import { useCallback, useMemo, useState } from 'react'
 import useSWR from 'swr'
@@ -48,31 +63,33 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { api, CACHE_KEYS } from '@/lib/api'
 import { errorCode, errorMessage, isDisconnection, isUnknownHost } from '@/lib/errors'
 import { UnknownHostCard } from '@/features/hosts/unknown-host-card'
+import { Switch } from '@/components/ui/switch'
 import { useHost } from '@/lib/host-scope'
+import { useStoredFlag } from '@/lib/preferences'
 import { useRegisterCommands, type Command } from '@/features/commands/command-registry'
+import { useHosts } from '@/features/hosts/use-hosts'
+import { RemoteRepositories } from './remote-repositories'
 import { RepositoryCard, type Elsewhere } from './repository-card'
 import { RepositoryFormDialog } from './repository-form-dialog'
 import { RemoveRepositoryDialog } from './remove-repository-dialog'
 import { useRepositories } from './use-repositories'
-import type { RepositoryWithGitState } from '@shared/schemas'
+import type { HostWithState, RepositoryWithGitState } from '@shared/schemas'
 
 /**
  * The local clone of each of these, by root commit.
  *
- * Empty when the list already *is* this computer's - a row is not "also" where
- * it already is. Repositories with no commits yet have no root and are not a
- * group: two empty repositories are two empty repositories.
+ * Only ever looked up for rows that are *not* this computer's - a host's own
+ * screen, or the other-machine sections at the end of this one - because a row
+ * is not "also" where it already is. Repositories with no commits yet have no
+ * root and are not a group: two empty repositories are two empty repositories.
  *
  * First match wins where a machine has the same project checked out twice. The
  * card carries one line, and "one of the places this also is" is a more useful
  * thing to be told than nothing.
  */
-function localClonesByRoot(
-  host: string | undefined,
-  local: RepositoryWithGitState[] | undefined
-): Map<string, Elsewhere> {
+function localClonesByRoot(local: RepositoryWithGitState[] | undefined): Map<string, Elsewhere> {
   const byRoot = new Map<string, Elsewhere>()
-  if (host === undefined || !local) return byRoot
+  if (!local) return byRoot
 
   for (const repository of local) {
     const root = repository.git.rootCommit
@@ -98,10 +115,25 @@ export function RepositoryList() {
     CACHE_KEYS.repositories(),
     () => api.repositories.list()
   )
-  const clones = useMemo(
-    () => localClonesByRoot(host, localRepositories),
-    [host, localRepositories]
+  const clones = useMemo(() => localClonesByRoot(localRepositories), [localRepositories])
+
+  // The hosts are one local read, like the list above; it is their
+  // *repositories* that cost a connection each, and those are only asked for
+  // while the switch is on - see the note at the top of this file.
+  const { hosts } = useHosts()
+  const [showRemote, setShowRemote] = useStoredFlag('repositories-show-remote', true)
+  const reachedHosts = useMemo(
+    () =>
+      (hosts ?? []).filter(
+        (candidate): candidate is HostWithState & { instanceId: string } =>
+          candidate.instanceId !== null
+      ),
+    [hosts]
   )
+  // Only on this computer's list. A host's screen is already somebody else's
+  // repositories, and hanging a third machine's off the end of it would be a
+  // list belonging to nobody.
+  const offersRemote = host === undefined && reachedHosts.length > 0
 
   // The rows stay when the machine that served them goes away; `ErrorState`
   // below is for having nothing to show, not for having something old. See the
@@ -176,7 +208,20 @@ export function RepositoryList() {
               : `${repositories?.length ?? 0} tracked${isRefreshing ? ' · refreshing…' : ''}`}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {offersRemote && (
+            <label
+              className="flex cursor-pointer select-none items-center gap-2 text-sm text-muted-foreground"
+              title={
+                showRemote
+                  ? 'Hide the repositories on your other machines. Nothing is asked of them while hidden.'
+                  : 'Also list the repositories on your other machines. Each one is asked over its own connection.'
+              }
+            >
+              <Switch checked={showRemote} onCheckedChange={setShowRemote} />
+              Other machines
+            </label>
+          )}
           <Tooltip label="Re-read git state">
             <Button
               variant="outline"
@@ -214,7 +259,8 @@ export function RepositoryList() {
                 onEdit={openEdit}
                 onRemove={setRemoving}
                 alsoHere={
-                  repository.git.rootCommit === null
+                  // On this computer's own list every row would find itself.
+                  host === undefined || repository.git.rootCommit === null
                     ? undefined
                     : clones.get(repository.git.rootCommit)
                 }
@@ -223,6 +269,15 @@ export function RepositoryList() {
           ))}
         </ul>
       )}
+
+      {/* Not mounted at all while the switch is off, which is what keeps the
+          promise the switch makes: no section, no `useRepositories`, no SWR
+          key, no connection to anybody. */}
+      {offersRemote &&
+        showRemote &&
+        reachedHosts.map((remote) => (
+          <RemoteRepositories key={remote.id} host={remote} clones={clones} />
+        ))}
 
       <RepositoryFormDialog open={formOpen} onOpenChange={setFormOpen} repository={editing} />
       <RemoveRepositoryDialog

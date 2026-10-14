@@ -362,9 +362,8 @@ export function ReviewBrowseTab({
                 // and nothing the reader unfolded or half-typed about the last
                 // one belongs to this one.
                 key={selectedPath}
-                reviewId={review.id}
+                source={{ kind: 'review', reviewId: review.id, changes }}
                 path={selectedPath}
-                changes={changes}
                 threads={threadsByFile.get(selectedPath) ?? []}
                 comments={{ reviewId: review.id, mutations, changes }}
                 isChanged={changedPaths.has(selectedPath)}

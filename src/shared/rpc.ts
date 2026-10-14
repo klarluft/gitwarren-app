@@ -62,6 +62,8 @@ import type {
   ReplyToThreadInput,
   Repository,
   RepositoryRefsInput,
+  RepositoryFileInput,
+  RepositoryTreeInput,
   RepositoryWithGitState,
   Review,
   ReviewCommitsInput,
@@ -404,6 +406,18 @@ export interface RpcMethods {
   'repositories.update': { params: UpdateRepositoryInput; result: Repository }
   'repositories.remove': { params: RemoveRepositoryInput; result: { id: number } }
   'repositories.refs': { params: RepositoryRefsInput; result: RepositoryRefs }
+  /**
+   * The repository's files, its text and its images, with no review involved.
+   *
+   * The same three reads the browse tab makes through a review - and the same
+   * functions behind them - for the repository screen, where reading a file
+   * should not first require inventing a comparison to read it through. A
+   * remote daemon older than these methods answers with an unknown-method
+   * error, which the screen reports as it would any other failed read.
+   */
+  'repositories.tree': { params: RepositoryTreeInput; result: ReviewTree }
+  'repositories.file': { params: RepositoryFileInput; result: FileContent }
+  'repositories.image': { params: RepositoryFileInput; result: FileImage }
 
   'reviews.list': { params: ListReviewsInput; result: Review[] }
   /** The coarse one. See `ReviewOpen`. */
@@ -532,6 +546,9 @@ export const READ_METHODS: ReadonlySet<RpcMethod> = new Set<RpcMethod>([
   'repositories.list',
   'repositories.get',
   'repositories.refs',
+  'repositories.tree',
+  'repositories.file',
+  'repositories.image',
   'reviews.list',
   'reviews.open',
   'reviews.get',

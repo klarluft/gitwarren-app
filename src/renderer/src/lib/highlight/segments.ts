@@ -104,3 +104,57 @@ export function segmentLine(
   }
   return segments
 }
+
+export interface MarkedPiece extends Piece {
+  /** True when this text is part of a changed word, inside a changed line. */
+  changed: boolean
+}
+
+export interface MarkedSegment {
+  match: number | null
+  pieces: MarkedPiece[]
+}
+
+/**
+ * Cut the pieces once more, at the edges of the words that changed.
+ *
+ * A third thing that wants to wrap parts of a line - see `lib/word-diff.ts` -
+ * and it nests no better than the other two: a changed word can start inside a
+ * keyword's colour and end inside a search hit. So it is applied the same way,
+ * as one more set of cuts, and a piece learns whether it lies inside a change.
+ * `ranges` are in order and do not overlap, which is how `changedRanges`
+ * produces them.
+ */
+export function markChanged(
+  segments: readonly Segment[],
+  ranges: readonly Range[]
+): MarkedSegment[] {
+  let offset = 0
+  let range = 0
+
+  return segments.map((segment) => {
+    const pieces: MarkedPiece[] = []
+    for (const piece of segment.pieces) {
+      const end = offset + piece.text.length
+      let cursor = offset
+      while (cursor < end) {
+        // Skip changes that finished before this point.
+        while (range < ranges.length && (ranges[range] as Range).end <= cursor) range += 1
+        const next = ranges[range]
+        if (next === undefined || next.start >= end) {
+          pieces.push({ ...piece, text: piece.text.slice(cursor - offset), changed: false })
+          cursor = end
+        } else if (next.start > cursor) {
+          pieces.push({ ...piece, text: piece.text.slice(cursor - offset, next.start - offset), changed: false })
+          cursor = next.start
+        } else {
+          const stop = Math.min(next.end, end)
+          pieces.push({ ...piece, text: piece.text.slice(cursor - offset, stop - offset), changed: true })
+          cursor = stop
+        }
+      }
+      offset = end
+    }
+    return { match: segment.match, pieces }
+  })
+}

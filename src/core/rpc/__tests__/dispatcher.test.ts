@@ -428,6 +428,29 @@ function contract(carrier: Carrier): void {
     await expectError('DUPLICATE_REPOSITORY', () => carrier.call('repositories.add', { path: checkout }))
   })
 
+  test(`[${carrier.name}] a repository's files are read with no review in between`, async () => {
+    // No ref: whatever the checkout has checked out, from disk. That is
+    // `feature` here, which is the branch with `b.txt` and the capital TWO.
+    const own = await carrier.call('repositories.tree', { id: repositoryId })
+    assert.equal(own.error, null)
+    assert.equal(own.source, 'worktree')
+    assert.deepEqual(own.paths, ['a.txt', 'b.txt'])
+    const text = await carrier.call('repositories.file', { id: repositoryId, path: 'a.txt' })
+    assert.deepEqual(text.lines, ['one', 'TWO', 'three'])
+
+    // A named ref no worktree holds is read from its commit.
+    const trunk = await carrier.call('repositories.tree', { id: repositoryId, ref: 'main' })
+    assert.equal(trunk.source, 'commit')
+    assert.deepEqual(trunk.paths, ['a.txt'])
+    const old = await carrier.call('repositories.file', { id: repositoryId, ref: 'main', path: 'a.txt' })
+    assert.deepEqual(old.lines, ['one', 'two', 'three'])
+
+    // The same refusal a review's read gives a path that climbs out.
+    const escape = await carrier.call('repositories.file', { id: repositoryId, path: '../secret' })
+    assert.notEqual(escape.error, null)
+    assert.deepEqual(escape.lines, [])
+  })
+
   test(`[${carrier.name}] a mark set through the dispatcher is a mark reviews.open reports`, async () => {
     await carrier.call('reviews.setFileReviewed', { reviewId, filePath: 'a.txt', contentDigest: 'v1' })
     assert.equal((await carrier.call('reviews.open', { id: reviewId })).reviewedFiles.length, 1)

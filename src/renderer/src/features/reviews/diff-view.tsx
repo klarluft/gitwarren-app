@@ -69,13 +69,21 @@ import { errorMessage } from '@/lib/errors'
 import { matchOffsets, rowPosition, type DiffSearch } from './diff-search'
 import { useLineSelection, type LineRange } from './line-selection'
 import { useDiffHighlight } from './diff-highlight'
+import { MarkdownDiffPreview, MarkdownViewToggle, type MarkdownView } from './markdown-preview'
+import { isMarkdownPath, isProsePath } from '@/lib/prose'
+import { useStoredPreference } from '@/lib/preferences'
 import type { LineHighlighter } from '@/lib/highlight/diff-blocks'
-import { segmentLine } from '@/lib/highlight/segments'
+import { markChanged, segmentLine, type MarkedPiece } from '@/lib/highlight/segments'
+import type { Range } from '@/lib/word-diff'
+import { splitRows, wordChangesFor, type SplitRow } from './split-rows'
 import { renderPieces } from '@/lib/highlight/use-highlight'
 import type { LineTokens } from '@/lib/highlight/tokenize'
 import { imageMediaType } from '@shared/git'
 import type { DiffChanges, DiffHunk, DiffLine, FileChangeStatus, FileDiff } from '@shared/git'
 import type { CommentThread } from '@shared/schemas'
+
+/** How the diff is laid out: one column, or the two versions side by side. */
+export type DiffLayout = 'unified' | 'split'
 
 /** Files longer than this arrive collapsed; see the note above. */
 const COLLAPSE_ABOVE_LINES = 600
@@ -233,7 +241,8 @@ export function FileDiffCard({
   marked,
   reviewed,
   search,
-  wrap = false
+  layout = 'unified',
+  wrap: wrapChosen = false
 }: {
   file: FileDiff
   comments?: DiffComments
@@ -251,10 +260,31 @@ export function FileDiffCard({
   reviewed?: ReviewedMark
   /** The find running over the whole diff, as it applies to this file. */
   search?: DiffSearch
-  /** Long lines wrap inside the card instead of scrolling sideways. */
+  /** One column or two. See `split-rows.ts`. */
+  layout?: DiffLayout
+  /**
+   * Long lines wrap inside the card instead of scrolling sideways - the
+   * reader's Wrap toggle. Side by side and prose wrap whatever it says; see
+   * `wrap` below.
+   */
   wrap?: boolean
 }) {
   const lineCount = file.hunks.reduce((total, hunk) => total + hunk.lines.length, 0)
+  /**
+   * Whether a Markdown file is shown as its diff or as the rendered document.
+   *
+   * Remembered as the default for the next file and the next visit, but held
+   * per card once it is open: flipping one chapter to its preview should not
+   * re-render every other card on the page under the reader.
+   */
+  const canPreview = source !== undefined && isMarkdownPath(file.path) && !file.isBinary
+  const [storedView, storeView] = useStoredPreference('markdown-view', 'diff')
+  const [view, setView] = useState<MarkdownView>(storedView === 'preview' ? 'preview' : 'diff')
+  const previewing = canPreview && view === 'preview'
+  const chooseView = (next: MarkdownView): void => {
+    setView(next)
+    storeView(next)
+  }
   /** Null until the reviewer opens or closes the card themselves. */
   const [toggled, setToggled] = useState<boolean | null>(null)
   /** Head-side line numbers unfolded out of the gaps between the hunks. */
@@ -368,6 +398,25 @@ export function FileDiffCard({
     return lines
   }, [threads])
 
+  // Only while the body is on screen, like the colours above: a folded card
+  // does no comparing.
+  const wordChanges = useMemo(
+    () => (expanded ? wordChangesFor(file.hunks) : undefined),
+    [expanded, file.hunks]
+  )
+  /**
+   * Whether long lines wrap: the reader's toggle, or two cases that wrap
+   * regardless.
+   *
+   * Side by side, because each version has half the card and no scrollbar of
+   * its own - a long line could only push its column wider than half, which
+   * is the one thing the layout exists not to do. Prose, because a paragraph
+   * of Markdown is a single line, and a toggle that is off by default for the
+   * sake of code would leave every chapter scrolling sideways a screen at a
+   * time until somebody found it.
+   */
+  const wrap = wrapChosen || layout === 'split' || isProsePath(file.path)
+
   const rowContext: RowContext = {
     placed,
     comments,
@@ -381,6 +430,8 @@ export function FileDiffCard({
     filePath: file.path,
     search: search ?? null,
     highlight,
+    layout,
+    wordChanges,
     wrap
   }
 
@@ -552,10 +603,13 @@ export function FileDiffCard({
             </label>
           )}
 
+          {canPreview && <MarkdownViewToggle view={view} onChange={chooseView} />}
+
           <FileActions
             file={file}
             source={source}
-            canExpand={gaps.length > 0}
+            // A rendered document has no folded lines to unfold.
+            canExpand={gaps.length > 0 && !previewing}
             onExpandAll={expandEverything}
           />
         </div>
@@ -598,7 +652,19 @@ export function FileDiffCard({
         </div>
       )}
 
-      {showsDiff && (
+      {showsDiff && previewing && source && (
+        <div className={cn(showsOrphans && 'border-t border-border')}>
+          <MarkdownDiffPreview
+            file={file}
+            reviewId={source.reviewId}
+            changes={source.changes}
+            layout={layout}
+            comments={comments}
+          />
+        </div>
+      )}
+
+      {showsDiff && !previewing && (
         <div className={cn(showsOrphans && 'border-t border-border')}>
           {/* `@container` makes this element an inline-size container, which is
               what lets a comment inside it be sized to the *visible* width
@@ -853,13 +919,8 @@ function GapRows({
           })
         }
 
-        return (
-          <Fragment key={`context-${segment.start}`}>
-            {revealedLines.map((line) => (
-              <LineRow key={`context-${line.newNumber}`} line={line} {...rows} />
-            ))}
-          </Fragment>
-        )
+        return <DiffRows key={`context-${segment.start}`} lines={revealedLines} {...rows} />
+
       })}
     </>
   )
@@ -1010,13 +1071,21 @@ export interface RowContext {
    * green and red.
    */
   highlight?: LineHighlighter
+  /** Unified or side by side. A file card is always unified. */
+  layout?: DiffLayout
+  /**
+   * The words that changed inside each edited line, from `wordChangesFor`. A
+   * line with no entry is drawn whole.
+   */
+  wordChanges?: ReadonlyMap<DiffLine, Range[]>
   /**
    * Long lines wrap at the card's edge instead of scrolling it sideways.
    *
    * Off by default: in code the line breaks are the author's, and a wrapped
    * line can pass for two. On for the minified config, the long string, the
    * Markdown paragraph that is one line - where scrolling sideways to read a
-   * change is most of the work of reading it.
+   * change is most of the work of reading it. Side by side and prose files
+   * wrap whatever the toggle says; see `FileDiffCard`.
    */
   wrap?: boolean
 }
@@ -1041,50 +1110,95 @@ function HunkRows({
           </span>
         </div>
       )}
-      {hunk.lines.map((line, index) => (
-        <LineRow key={index} line={line} {...context} />
+      <DiffRows lines={hunk.lines} {...context} />
+    </>
+  )
+}
+
+/**
+ * A run of diff lines in whichever layout the reader picked.
+ *
+ * The one place the two layouts part ways. Everything above this - hunks,
+ * gaps, expanders, the card - is the same in both, which is what keeps unfolded
+ * context, comments and the find working identically whichever way round the
+ * diff is being read.
+ */
+function DiffRows({ lines, ...context }: { lines: readonly DiffLine[] } & RowContext) {
+  if (context.layout === 'split') {
+    return (
+      <>
+        {splitRows(lines).map((row) => (
+          <SplitLineRow
+            key={`${row.left?.oldNumber ?? ''}:${row.right?.newNumber ?? ''}`}
+            row={row}
+            {...context}
+          />
+        ))}
+      </>
+    )
+  }
+  return (
+    <>
+      {lines.map((line) => (
+        <LineRow key={`${line.oldNumber ?? ''}:${line.newNumber ?? ''}`} line={line} {...context} />
       ))}
     </>
   )
 }
 
-export function LineRow({
-  line,
-  placed,
-  comments,
-  composingOn,
-  onCompose,
-  onSelectStart,
-  onSelectOver,
-  selection,
-  covered,
-  marked,
-  filePath,
-  search,
-  oneGutter = false,
-  highlight,
-  wrap = false
-}: { line: DiffLine } & RowContext) {
+/** Everything a row needs to know about the line at one address. */
+interface LineState {
+  threads: AnchoredThread[]
+  /** The composer is open with this line as the last of its range. */
+  composing: boolean
+  selected: boolean
+  isMarked: boolean
+  inThread: boolean
+}
+
+function lineState(side: DiffSide, number: number | null, context: RowContext): LineState {
+  if (number === null) {
+    return { threads: [], composing: false, selected: false, isMarked: false, inThread: false }
+  }
+  const { placed, composingOn, selection, marked, covered } = context
+  return {
+    threads: placed.get(`${side}:${number}`) ?? [],
+    // The composer opens under the *last* line of the range, where the eye is
+    // after dragging down it.
+    composing: composingOn?.side === side && composingOn.line === number,
+    selected: selection?.side === side && number >= selection.startLine && number <= selection.line,
+    isMarked: marked?.side === side && marked.line === number,
+    inThread: covered.has(`${side}:${number}`)
+  }
+}
+
+/**
+ * The background a row is drawn on.
+ *
+ * Mutually exclusive rather than layered: two background utilities on one
+ * element are resolved by stylesheet order, not by the order they are written.
+ */
+function rowTone(type: DiffLine['type'], state: LineState): string | undefined {
+  if (state.isMarked) return 'bg-warning/25'
+  if (state.selected) return 'bg-primary/15'
+  if (type === 'insert') return 'bg-success/10'
+  if (type === 'delete') return 'bg-destructive/10'
+  return undefined
+}
+
+/**
+ * One line of the unified diff - or of a whole file, with `oneGutter`.
+ *
+ * Built from the same three parts the side-by-side row uses - `CommentCell`,
+ * `LineCode` and `ThreadStrip` - so a comment, a search hit and a changed word
+ * look and behave the same in either layout.
+ */
+export function LineRow({ line, ...context }: { line: DiffLine } & RowContext) {
+  const { filePath, oneGutter = false } = context
   // Which side a comment on this row belongs to, and the number it carries
   // there. Shared with the search, so a hit is addressed to the row it is on.
   const { side, number } = rowPosition(line)
-
-  const threads = number === null ? [] : (placed.get(`${side}:${number}`) ?? [])
-  // The composer opens under the *last* line of the range, where the eye is
-  // after dragging down it.
-  const composing = number !== null && composingOn?.side === side && composingOn.line === number
-  const selected =
-    number !== null &&
-    selection?.side === side &&
-    number >= selection.startLine &&
-    number <= selection.line
-  const isMarked = number !== null && marked?.side === side && marked.line === number
-  const inThread = number !== null && covered.has(`${side}:${number}`)
-
-  const rangeLabel =
-    composingOn && composingOn.startLine < composingOn.line
-      ? `lines ${composingOn.startLine}–${composingOn.line}`
-      : `line ${number ?? ''}`
+  const state = lineState(side, number, context)
 
   return (
     <>
@@ -1098,25 +1212,176 @@ export function LineRow({
         data-diff-line={number === null ? undefined : number}
         className={cn(
           'group grid',
-          oneGutter ? 'grid-cols-[3rem_1fr]' : 'grid-cols-[3rem_3rem_1fr]',
-          // Backgrounds are mutually exclusive rather than layered: two
-          // background utilities on one element are resolved by stylesheet
-          // order, not by the order they are written here.
-          isMarked
-            ? 'bg-warning/25'
-            : selected
-              ? 'bg-primary/15'
-              : line.type === 'insert'
-                ? 'bg-success/10'
-                : line.type === 'delete'
-                  ? 'bg-destructive/10'
-                  : undefined,
+          oneGutter ? 'grid-cols-[3rem_minmax(0,1fr)]' : 'grid-cols-[3rem_3rem_minmax(0,1fr)]',
+          rowTone(line.type, state),
           // A box-shadow instead, so the marker for "a comment covers this
           // line" can sit on top of whichever background won above.
-          inThread && 'shadow-[inset_3px_0_0_0_var(--color-primary)]'
+          state.inThread && 'shadow-[inset_3px_0_0_0_var(--color-primary)]'
         )}
       >
         {!oneGutter && <Gutter value={line.oldNumber} />}
+        <CommentCell
+          side={side}
+          number={number}
+          display={line.newNumber}
+          commentable
+          state={state}
+          context={context}
+        />
+        <LineCode line={line} side={side} number={number} owner context={context} />
+      </div>
+
+      {(state.threads.length > 0 || state.composing) && context.comments && (
+        // Breaks out of the monospace diff grid: a discussion is prose, and
+        // reading it in a 12px mono column inside a horizontally scrolling
+        // container is miserable. The width is the *visible* width of that
+        // container (`cqi`), not the width of its scrolled contents, so the
+        // discussion stays inside the file card however long the lines are.
+        // On a phone the two layers of padding - this strip's and the card's
+        // inside it - came to a tenth of the screen's width on each side.
+        <ThreadStrip
+          side={side}
+          number={number}
+          state={state}
+          context={context}
+          className="sticky left-0 w-[min(48rem,100cqi)] border-y"
+        />
+      )}
+    </>
+  )
+}
+
+/**
+ * One row of the side-by-side diff: the base version on the left, the head
+ * version on the right.
+ *
+ * Each half is addressed on its own, so dragging a range down the left column
+ * selects removed lines and down the right selects added ones - the same two
+ * sides a unified diff already distinguishes, just laid out where they can be
+ * seen at once. A context line is on both sides and belongs to the head, as it
+ * does in the unified diff: its left half shows the old number for reference
+ * but offers no comment button, so a context line cannot be commented on twice
+ * under two different addresses.
+ *
+ * Discussions go under the half they are about. A thread on a removed line sits
+ * in the left column, beneath the text it is about, rather than across the
+ * whole width where it would cover the version it is not about.
+ */
+function SplitLineRow({ row, ...context }: { row: SplitRow } & RowContext) {
+  const left = row.left === null ? null : rowPosition(row.left)
+  const right = row.right === null ? null : rowPosition(row.right)
+  // The left half of a context row is the same line as the right half, so it
+  // owns nothing - no id, no threads, no composer.
+  const leftOwns = row.left !== null && row.left.type === 'delete'
+  const leftState = left === null ? null : lineState(left.side, left.number, context)
+  const rightState = right === null ? null : lineState(right.side, right.number, context)
+
+  const leftStrip =
+    leftOwns && leftState !== null && (leftState.threads.length > 0 || leftState.composing)
+  const rightStrip =
+    rightState !== null && (rightState.threads.length > 0 || rightState.composing)
+
+  return (
+    <>
+      <div className="grid grid-cols-2">
+        <SplitHalf line={row.left} owns={leftOwns} state={leftState} context={context} isLeft />
+        <SplitHalf line={row.right} owns state={rightState} context={context} isLeft={false} />
+      </div>
+
+      {(leftStrip || rightStrip) && context.comments && (
+        <div className="grid grid-cols-2 border-y border-border">
+          <div className="min-w-0 border-r border-border">
+            {leftStrip && left !== null && leftState !== null && (
+              <ThreadStrip side={left.side} number={left.number} state={leftState} context={context} />
+            )}
+          </div>
+          <div className="min-w-0">
+            {rightStrip && right !== null && rightState !== null && (
+              <ThreadStrip
+                side={right.side}
+                number={right.number}
+                state={rightState}
+                context={context}
+              />
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
+
+function SplitHalf({
+  line,
+  owns,
+  state,
+  context,
+  isLeft
+}: {
+  line: DiffLine | null
+  /** False for the left half of a context row - see `SplitLineRow`. */
+  owns: boolean
+  state: LineState | null
+  context: RowContext
+  isLeft: boolean
+}) {
+  if (line === null || state === null) {
+    // Nothing on this side: the other one added or removed a line. Drawn as a
+    // muted strip rather than left blank, so it reads as "no line here" and not
+    // as an empty line.
+    return <div className={cn('bg-muted/50', isLeft && 'border-r border-border')} />
+  }
+
+  const { side, number } = rowPosition(line)
+
+  return (
+    <div
+      id={owns && number !== null ? lineDomId(context.filePath, side, number) : undefined}
+      // Every half reports its address, the non-owning one too: a drag down the
+      // left of a run of context lines is still a drag over those lines.
+      data-diff-side={number === null ? undefined : side}
+      data-diff-line={number === null ? undefined : number}
+      className={cn(
+        'group grid min-w-0 grid-cols-[3rem_minmax(0,1fr)]',
+        isLeft && 'border-r border-border',
+        rowTone(line.type, state),
+        state.inThread && 'shadow-[inset_3px_0_0_0_var(--color-primary)]'
+      )}
+    >
+      <CommentCell
+        side={side}
+        number={number}
+        display={isLeft ? line.oldNumber : line.newNumber}
+        commentable={owns}
+        state={state}
+        context={context}
+      />
+      <LineCode line={line} side={side} number={number} owner={owns} context={context} />
+    </div>
+  )
+}
+
+/** The line-number cell, with the comment button that lives in it. */
+function CommentCell({
+  side,
+  number,
+  display,
+  commentable,
+  state,
+  context
+}: {
+  side: DiffSide
+  number: number | null
+  /** The number printed, which is not always the one commented on. */
+  display: number | null
+  commentable: boolean
+  state: LineState
+  context: RowContext
+}) {
+  const { comments, onSelectStart, onSelectOver, filePath } = context
+  const { composing, selected } = state
+
+  return (
         <div
           className="relative border-r border-border"
           // Extending a drag has to be caught on the row, not on the button:
@@ -1129,11 +1394,11 @@ export function LineRow({
               button never hides: with the button against the left edge, that is
               what keeps a four-digit number clear of it. */}
           <span className="block select-none px-2 text-right tabular-nums text-muted-foreground/70 [@media(hover:none)]:pr-1">
-            {line.newNumber ?? ''}
+            {display ?? ''}
           </span>
           {/* Only appears on hover, so it never competes with the code for
               attention, and only when there is somewhere to put the comment. */}
-          {comments && number !== null && (
+          {comments && commentable && number !== null && (
             <button
               type="button"
               onPointerDown={(event) => {
@@ -1216,102 +1481,153 @@ export function LineRow({
             </button>
           )}
         </div>
-        <span
-          data-selectable
-          onPointerEnter={() => {
-            if (number !== null) onSelectOver(side, number)
-          }}
-          className={cn(
-            'min-w-0 px-3',
-            // Wrapped, the marker hangs in the padding so the continuation
-            // lines start under the code rather than under the `+`.
-            wrap
-              ? 'whitespace-pre-wrap pl-[calc(0.75rem+1ch)] -indent-[1ch] [overflow-wrap:anywhere]'
-              : 'whitespace-pre',
-            // With syntax colours the text keeps them, the way it does on
-            // GitHub: the row's tint and the marker say added or removed, and
-            // green text over a coloured keyword would say neither clearly.
-            highlight === undefined && line.type === 'insert' && 'text-success',
-            highlight === undefined && line.type === 'delete' && 'text-destructive'
-          )}
-        >
-          <span
-            aria-hidden
-            className={cn(
-              'select-none opacity-60',
-              line.type === 'insert' && 'text-success',
-              line.type === 'delete' && 'text-destructive'
-            )}
-          >
-            {line.type === 'insert' ? '+' : line.type === 'delete' ? '-' : ' '}
-          </span>
-          <LineText
-            content={line.content}
-            tokens={highlight?.(line) ?? null}
-            query={search?.query ?? null}
-            activeOccurrence={
-              number !== null &&
-              search?.active != null &&
-              search.active.side === side &&
-              search.active.line === number
-                ? search.active.occurrence
-                : null
-            }
+  )
+}
+
+/**
+ * The text of one line: its `+`/`-` marker, its syntax colours, the find's
+ * hits, and - where the line was edited rather than replaced - the words that
+ * changed.
+ *
+ * `owner` is false for the left half of a side-by-side context row, which is a
+ * copy of the line on the right. The copy is drawn the same but is not where
+ * the find's current hit lives: one element carries that id, and it is the one
+ * the reader would comment on.
+ */
+function LineCode({
+  line,
+  side,
+  number,
+  owner,
+  context
+}: {
+  line: DiffLine
+  side: DiffSide
+  number: number | null
+  owner: boolean
+  context: RowContext
+}) {
+  const { onSelectOver, highlight, search, wordChanges, wrap = false } = context
+
+  return (
+    <span
+      data-selectable
+      onPointerEnter={() => {
+        if (number !== null) onSelectOver(side, number)
+      }}
+      className={cn(
+        'min-w-0 px-3',
+        // Wrapped, the marker hangs in the padding so the continuation lines
+        // start under the text rather than under the `+`. `overflow-wrap:
+        // anywhere` so a long URL breaks rather than pushing the column wider
+        // than the card - which side by side would mean wider than its half.
+        wrap
+          ? 'whitespace-pre-wrap pl-[calc(0.75rem+1ch)] -indent-[1ch] [overflow-wrap:anywhere]'
+          : 'whitespace-pre',
+        // With syntax colours the text keeps them, the way it does on
+        // GitHub: the row's tint and the marker say added or removed, and
+        // green text over a coloured keyword would say neither clearly.
+        highlight === undefined && line.type === 'insert' && 'text-success',
+        highlight === undefined && line.type === 'delete' && 'text-destructive'
+      )}
+    >
+      <span
+        aria-hidden
+        className={cn(
+          'select-none opacity-60',
+          line.type === 'insert' && 'text-success',
+          line.type === 'delete' && 'text-destructive'
+        )}
+      >
+        {line.type === 'insert' ? '+' : line.type === 'delete' ? '-' : ' '}
+      </span>
+      <LineText
+        content={line.content}
+        tokens={highlight?.(line) ?? null}
+        query={search?.query ?? null}
+        changes={wordChanges?.get(line) ?? null}
+        tone={line.type === 'delete' ? 'delete' : 'insert'}
+        activeOccurrence={
+          owner &&
+          number !== null &&
+          search?.active != null &&
+          search.active.side === side &&
+          search.active.line === number
+            ? search.active.occurrence
+            : null
+        }
+      />
+    </span>
+  )
+}
+
+/** The threads under one line, and the composer when it is open there. */
+function ThreadStrip({
+  side,
+  number,
+  state,
+  context,
+  className
+}: {
+  side: DiffSide
+  number: number | null
+  state: LineState
+  context: RowContext
+  className?: string
+}) {
+  const { comments, composingOn, onCompose, filePath } = context
+  if (!comments) return null
+
+  const rangeLabel =
+    composingOn && composingOn.startLine < composingOn.line
+      ? `lines ${composingOn.startLine}–${composingOn.line}`
+      : `line ${number ?? ''}`
+
+  return (
+    <div
+      className={cn(
+        'flex flex-col gap-2 border-border bg-muted/20 p-3 font-sans text-sm max-sm:gap-1.5 max-sm:p-1.5',
+        className
+      )}
+    >
+      {state.threads.map((thread) => (
+        <CommentThreadCard
+          key={thread.id}
+          thread={thread}
+          mutations={comments.mutations}
+          anchorState={thread.anchor.state}
+          location={
+            thread.anchor.startLine !== null && thread.anchor.line !== null ? (
+              <span className="font-mono text-xs text-muted-foreground">
+                lines {thread.anchor.startLine}–{thread.anchor.line}
+              </span>
+            ) : null
+          }
+        />
+      ))}
+
+      {state.composing && number !== null && composingOn && (
+        <div className="rounded-lg border border-border bg-card p-3 max-sm:p-2">
+          <CommentComposer
+            autoFocus
+            placeholder={`Comment on ${rangeLabel}`}
+            onCancel={() => onCompose(null)}
+            onSubmit={async (body) => {
+              await comments.mutations.createThread({
+                reviewId: comments.reviewId,
+                body,
+                filePath,
+                side,
+                line: number,
+                changes: comments.changes,
+                ...(composingOn.startLine < number ? { startLine: composingOn.startLine } : {})
+              })
+              onCompose(null)
+            }}
           />
-        </span>
-      </div>
-
-      {(threads.length > 0 || composing) && comments && (
-        // Breaks out of the monospace diff grid: a discussion is prose, and
-        // reading it in a 12px mono column inside a horizontally scrolling
-        // container is miserable. The width is the *visible* width of that
-        // container (`cqi`), not the width of its scrolled contents, so the
-        // discussion stays inside the file card however long the lines are.
-        // On a phone the two layers of padding - this strip's and the card's
-        // inside it - came to a tenth of the screen's width on each side.
-        <div className="sticky left-0 flex w-[min(48rem,100cqi)] flex-col gap-2 border-y border-border bg-muted/20 p-3 font-sans text-sm max-sm:gap-1.5 max-sm:p-1.5">
-          {threads.map((thread) => (
-            <CommentThreadCard
-              key={thread.id}
-              thread={thread}
-              mutations={comments.mutations}
-              anchorState={thread.anchor.state}
-              location={
-                thread.anchor.startLine !== null && thread.anchor.line !== null ? (
-                  <span className="font-mono text-xs text-muted-foreground">
-                    lines {thread.anchor.startLine}–{thread.anchor.line}
-                  </span>
-                ) : null
-              }
-            />
-          ))}
-
-          {composing && number !== null && composingOn && (
-            <div className="rounded-lg border border-border bg-card p-3 max-sm:p-2">
-              <CommentComposer
-                autoFocus
-                placeholder={`Comment on ${rangeLabel}`}
-                onCancel={() => onCompose(null)}
-                onSubmit={async (body) => {
-                  await comments.mutations.createThread({
-                    reviewId: comments.reviewId,
-                    body,
-                    filePath,
-                    side,
-                    line: number,
-                    changes: comments.changes,
-                    ...(composingOn.startLine < number
-                      ? { startLine: composingOn.startLine }
-                      : {})
-                  })
-                  onCompose(null)
-                }}
-              />
-            </div>
-          )}
         </div>
       )}
-    </>
+    </div>
   )
 }
 
@@ -1331,22 +1647,47 @@ function LineText({
   content,
   tokens,
   query,
-  activeOccurrence
+  activeOccurrence,
+  changes = null,
+  tone = 'insert'
 }: {
   content: string
   tokens: LineTokens | null
   query: string | null
   /** Index of the hit *in this row* that the reader is being pointed at. */
   activeOccurrence: number | null
+  /** The words that changed, when this line was edited rather than replaced. */
+  changes?: readonly Range[] | null
+  /** Which colour a changed word is picked out in. */
+  tone?: 'insert' | 'delete'
 }) {
   const offsets = query === null ? [] : matchOffsets(content, query)
-  if ((query === null || offsets.length === 0) && (tokens === null || tokens.length === 0)) {
+  if (
+    (query === null || offsets.length === 0) &&
+    (tokens === null || tokens.length === 0) &&
+    (changes === null || changes.length === 0)
+  ) {
     return <>{content}</>
   }
 
   const matches = query === null ? [] : offsets.map((start) => ({ start, end: start + query.length }))
-  const parts: ReactNode[] = segmentLine(content, tokens, matches).map((segment, index) => {
-    if (segment.match === null) return <Fragment key={index}>{renderPieces(segment.pieces)}</Fragment>
+  const segments = markChanged(segmentLine(content, tokens, matches), changes ?? [])
+  // Stronger than the row's own tint, in the same hue, so the changed words
+  // stand out of a line that is already coloured as changed.
+  const changedClass = tone === 'delete' ? 'bg-destructive/25' : 'bg-success/25'
+  const draw = (pieces: MarkedPiece[]): ReactNode[] =>
+    pieces.map((piece, index) =>
+      piece.changed ? (
+        <span key={index} className={changedClass}>
+          {renderPieces([piece])}
+        </span>
+      ) : (
+        <Fragment key={index}>{renderPieces([piece])}</Fragment>
+      )
+    )
+
+  const parts: ReactNode[] = segments.map((segment, index) => {
+    if (segment.match === null) return <Fragment key={index}>{draw(segment.pieces)}</Fragment>
     const isActive = segment.match === activeOccurrence
     return (
       <mark
@@ -1359,7 +1700,7 @@ function LineText({
           isActive ? 'bg-warning/60 shadow-[0_0_0_1px_var(--color-warning)]' : 'bg-warning/25'
         )}
       >
-        {renderPieces(segment.pieces)}
+        {draw(segment.pieces)}
       </mark>
     )
   })

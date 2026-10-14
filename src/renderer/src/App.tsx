@@ -138,7 +138,12 @@ export function App() {
               {route.name === 'agent' && <AgentAccessPage />}
               {route.name === 'hosts' && <HostsPage />}
               {route.name === 'repository' && (
-                <RepositoryDetail repositoryId={route.repositoryId} />
+                <RepositoryDetail
+                  repositoryId={route.repositoryId}
+                  tab={route.tab}
+                  filePath={route.filePath}
+                  gitRef={route.ref}
+                />
               )}
               {route.name === 'review' && (
                 <ReviewDetail

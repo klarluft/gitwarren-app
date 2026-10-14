@@ -295,3 +295,42 @@ test('a query string on any other location is ignored rather than honoured', () 
     repositoryId: 7
   })
 })
+
+// ---------------------------------------------------------------------------
+// The repository's own files
+// ---------------------------------------------------------------------------
+
+test("a repository's files tab, with a file and a ref, round-trips", () => {
+  const route: Route = {
+    name: 'repository',
+    repositoryId: 7,
+    tab: 'files',
+    filePath: 'docs/chapter one.md',
+    ref: 'feature/draft',
+    host: HOST
+  }
+  assert.equal(
+    hrefFor(route),
+    `#/h/${HOST}/repositories/7/files/docs%2Fchapter%20one.md?ref=feature%2Fdraft`
+  )
+  assert.deepEqual(parseRoute(hrefFor(route)), route)
+})
+
+test('the files tab with nothing open is its own place; a plain repository link is unchanged', () => {
+  assert.deepEqual(parseRoute('#/repositories/7/files'), {
+    name: 'repository',
+    repositoryId: 7,
+    tab: 'files'
+  })
+  assert.equal(hrefFor({ name: 'repository', repositoryId: 7 }), '#/repositories/7')
+  // A ref belongs to the files tab; on the reviews list it means nothing.
+  assert.deepEqual(parseRoute('#/repositories/7?ref=main'), { name: 'repository', repositoryId: 7 })
+})
+
+test('a files path that climbs out of the repository opens the file list instead', () => {
+  assert.deepEqual(parseRoute(`#/repositories/7/files/${encodeURIComponent('../etc/passwd')}`), {
+    name: 'repository',
+    repositoryId: 7,
+    tab: 'files'
+  })
+})

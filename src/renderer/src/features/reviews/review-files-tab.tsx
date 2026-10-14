@@ -25,11 +25,13 @@ import {
   CheckCheck,
   ChevronDown,
   ChevronUp,
+  Columns2,
   FileDiff,
   GitCompareArrows,
   PanelLeft,
   PanelLeftClose,
   RefreshCw,
+  Rows2,
   Search,
   WrapText,
   X
@@ -63,7 +65,13 @@ import { DiffFindBar, useDiffFind } from './diff-find-bar'
 import { CompareErrorCard, NoWorktreeNotice, WorkingTreeBanner } from './compare-notices'
 import { fileDomId, lineDomId } from './dom-ids'
 import { DiffSnippet } from './diff-snippet'
-import { DENSE_LABEL, DiffStat, FileDiffCard, type AnchoredThread } from './diff-view'
+import {
+  DENSE_LABEL,
+  DiffStat,
+  FileDiffCard,
+  type AnchoredThread,
+  type DiffLayout
+} from './diff-view'
 import {
   DEFAULT_DIFF_CHANGES,
   useEditors,
@@ -503,6 +511,18 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
   const [wrap, setWrap] = useStoredFlag('diff-wrap', false)
   const [openError, setOpenError] = useState<unknown>(null)
   const { narrow, listOpen, setListOpen, selectFile } = useFilesLayout()
+  /**
+   * One column or two, remembered across reviews: it is a way of reading, not
+   * a fact about this branch.
+   *
+   * A phone always gets one column whatever was chosen. Two columns of code on
+   * a screen that width are two columns of a dozen characters each, which is
+   * no way to read either version - and the choice is kept, not overwritten,
+   * so the same review on a desktop is still side by side.
+   */
+  const [storedLayout, storeLayout] = useStoredPreference('diff-layout', 'unified')
+  const chosenLayout: DiffLayout = storedLayout === 'split' ? 'split' : 'unified'
+  const layout: DiffLayout = narrow ? 'unified' : chosenLayout
   const { data, error, isLoading, isRefreshing, refresh } = useReviewDiff(review.id, changes)
   const { threads } = useReviewComments(review.id)
   const mutations = useCommentMutations()
@@ -834,6 +854,18 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
           run: () => setChanges(nextChanges)
         },
         {
+          id: 'files:layout',
+          label: chosenLayout === 'split' ? 'Show the diff unified' : 'Show the diff side by side',
+          group: 'Files changed',
+          keys: 's',
+          keywords: 'split unified layout columns two side-by-side inline view',
+          icon: chosenLayout === 'split' ? Rows2 : Columns2,
+          // A narrow window is always unified; a key that changed nothing on
+          // screen would read as a broken one.
+          disabled: paths.length === 0 || narrow,
+          run: () => storeLayout(chosenLayout === 'split' ? 'unified' : 'split')
+        },
+        {
           id: 'files:reviewed',
           label:
             activePath !== null && reviewedPaths.has(activePath)
@@ -915,7 +947,10 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
         activePath,
         reviewedPaths,
         toggleCurrentReviewed,
-        find
+        find,
+        chosenLayout,
+        storeLayout,
+        narrow
       ]
     )
   )
@@ -1010,14 +1045,25 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
             </Button>
           )}
 
+          {/* Side by side always wraps - see `FileDiffCard` - so there the
+              button says so rather than offering a choice it would ignore.
+              The stored preference is left alone for when the diff is
+              unified again. */}
           {data.files.length > 0 && (
             <Button
-              variant={wrap ? 'secondary' : 'ghost'}
+              variant={wrap || layout === 'split' ? 'secondary' : 'ghost'}
               size="sm"
               className="max-sm:px-2"
               onClick={() => setWrap(!wrap)}
-              title={wrap ? 'Stop wrapping long lines' : 'Wrap long lines'}
-              aria-pressed={wrap}
+              disabled={layout === 'split'}
+              title={
+                layout === 'split'
+                  ? 'Side by side always wraps long lines'
+                  : wrap
+                    ? 'Stop wrapping long lines'
+                    : 'Wrap long lines'
+              }
+              aria-pressed={wrap || layout === 'split'}
             >
               <WrapText />
               <span className={DENSE_LABEL}>Wrap</span>
@@ -1048,6 +1094,11 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
                 ))}
               </SelectContent>
             </Select>
+          )}
+
+          {/* Not offered where it cannot apply - see `layout` above. */}
+          {data.files.length > 0 && !narrow && (
+            <LayoutToggle layout={chosenLayout} onChange={storeLayout} />
           )}
 
           <ChangesToggle
@@ -1251,6 +1302,7 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
                   // arriving link cannot light up the same number in every file.
                   focus={focus?.filePath === file.path ? focus : undefined}
                   search={find.searchFor(file.path)}
+                  layout={layout}
                   wrap={wrap}
                   marked={marked?.filePath === file.path ? focusedLine(marked) : undefined}
                   reviewed={{
@@ -1352,6 +1404,53 @@ function ChangesToggle({
           </button>
         )
       })}
+    </div>
+  )
+}
+
+/**
+ * Unified or side by side.
+ *
+ * Icons with the words beside them, the same segmented shape as the changes
+ * toggle next to it, because it is the same kind of choice: how to read what
+ * is on screen, not what is on screen.
+ */
+function LayoutToggle({
+  layout,
+  onChange
+}: {
+  layout: DiffLayout
+  onChange: (next: DiffLayout) => void
+}) {
+  const options = [
+    { value: 'unified', label: 'Unified', icon: Rows2, title: 'One column: removed lines above the lines that replaced them' },
+    { value: 'split', label: 'Split', icon: Columns2, title: 'Side by side: the old version on the left, the new on the right' }
+  ] as const
+
+  return (
+    <div
+      role="group"
+      aria-label="How to lay out the diff"
+      className="flex items-center rounded-md border border-border p-0.5"
+    >
+      {options.map(({ value, label, icon: Icon, title }) => (
+        <button
+          key={value}
+          type="button"
+          onClick={() => onChange(value)}
+          aria-pressed={layout === value}
+          title={`${title} (${formatStep('s')})`}
+          className={cn(
+            'flex items-center gap-1 rounded px-2 py-1 text-xs transition-colors [&_svg]:size-3.5',
+            layout === value
+              ? 'bg-accent font-medium text-accent-foreground'
+              : 'text-muted-foreground hover:text-foreground'
+          )}
+        >
+          <Icon />
+          {label}
+        </button>
+      ))}
     </div>
   )
 }

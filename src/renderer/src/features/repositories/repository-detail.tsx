@@ -12,7 +12,8 @@
  * repository is a write to whoever owns it and travels perfectly well.
  */
 import { useMemo, useState } from 'react'
-import { AlertCircle, ArrowLeft, FolderOpen, Pencil } from 'lucide-react'
+import { AlertCircle, ArrowLeft, FolderOpen, FolderTree, GitPullRequest, Pencil } from 'lucide-react'
+import { Tabs, TabsList, TabsPanel, TabsTab } from '@/components/ui/tabs'
 import useSWR from 'swr'
 import { Breakable } from '@/components/breakable'
 import { Button } from '@/components/ui/button'
@@ -25,13 +26,24 @@ import { useApi, useHost, useHostScope } from '@/lib/host-scope'
 import { UnknownHostCard } from '@/features/hosts/unknown-host-card'
 import { useRevealPath } from '@/lib/reveal-path'
 import { useRegisterCommands, type Command } from '@/features/commands/command-registry'
-import { navigate } from '@/lib/router'
+import { navigate, replace } from '@/lib/router'
 import { ReviewList } from '@/features/reviews/review-list'
 import { GitStateBadge } from './git-state'
+import { RepositoryFilesTab } from './repository-files-tab'
 import { RepositoryFormDialog } from './repository-form-dialog'
 import type { RepositoryWithGitState } from '@shared/schemas'
 
-export function RepositoryDetail({ repositoryId }: { repositoryId: number }) {
+export function RepositoryDetail({
+  repositoryId,
+  tab,
+  filePath,
+  gitRef
+}: {
+  repositoryId: number
+  tab?: 'files'
+  filePath?: string
+  gitRef?: string
+}) {
   const api = useApi()
   const host = useHost()
   const scope = useHostScope()
@@ -206,7 +218,39 @@ export function RepositoryDetail({ repositoryId }: { repositoryId: number }) {
         </div>
       </div>
 
-      <ReviewList repositoryId={repository.id} />
+      {/* Reviews first and the default, as before: it is what every existing
+          link to this screen means. Files is the repository read directly -
+          see `repository-files-tab.tsx`. */}
+      <Tabs
+        value={tab ?? 'reviews'}
+        onValueChange={(next) =>
+          replace({
+            name: 'repository',
+            repositoryId,
+            ...(next === 'files' ? { tab: 'files' as const } : {}),
+            ...scope
+          })
+        }
+      >
+        <TabsList>
+          <TabsTab value="reviews">
+            <GitPullRequest />
+            Reviews
+          </TabsTab>
+          <TabsTab value="files" disabled={missing}>
+            <FolderTree />
+            Files
+          </TabsTab>
+        </TabsList>
+        <TabsPanel value="reviews">
+          <ReviewList repositoryId={repository.id} />
+        </TabsPanel>
+        <TabsPanel value="files">
+          {tab === 'files' && (
+            <RepositoryFilesTab repository={repository} filePath={filePath} gitRef={gitRef} />
+          )}
+        </TabsPanel>
+      </Tabs>
 
       <RepositoryFormDialog open={editing} onOpenChange={setEditing} repository={repository} />
     </div>

@@ -316,6 +316,74 @@ export function useRepositoryRefs(repositoryId: number | null): ListState<Reposi
   )
 }
 
+/**
+ * A repository's files with no review in between - the repository screen's
+ * Files tab. `ref` null is the checkout's own branch, read from disk.
+ *
+ * Beside the review reads rather than in `use-repositories.ts` because they
+ * are the same reads with a different key: the same options, the same state
+ * shape, and the same `FileSourceCard` on the other end of them.
+ */
+export function useRepositoryTree(repositoryId: number, ref: string | null): ListState<ReviewTree> {
+  const api = useApi()
+  const host = useHost()
+  return toState(
+    useSWR<ReviewTree, unknown>(
+      CACHE_KEYS.repositoryTree(repositoryId, ref, host),
+      () => api.repositories.tree({ id: repositoryId, ...(ref === null ? {} : { ref }) }),
+      LIVE_READ_OPTIONS
+    )
+  )
+}
+
+/**
+ * One file of a repository, whole.
+ *
+ * Read as soon as it is asked for - there is no diff here whose expanders it
+ * waits on - so `load` exists only to give the card the same shape whichever
+ * source it reads from. Null skips the read, for the card reading a review.
+ */
+export function useRepositoryFile(
+  repositoryId: number | null,
+  ref: string | null,
+  path: string
+): FileContentState {
+  const api = useApi()
+  const host = useHost()
+  const result = useSWR<FileContent, unknown>(
+    repositoryId === null ? null : CACHE_KEYS.repositoryFile(repositoryId, ref, path, host),
+    () =>
+      api.repositories.file({ id: repositoryId as number, path, ...(ref === null ? {} : { ref }) }),
+    LIVE_READ_OPTIONS
+  )
+  return {
+    content: result.data,
+    error: result.error,
+    isLoading: result.isLoading,
+    requested: repositoryId !== null,
+    load: NO_OP
+  }
+}
+
+/** One image of a repository, for a document that draws it. */
+export function useRepositoryImage(
+  repositoryId: number,
+  ref: string | null,
+  path: string
+): { image: FileImage | undefined; error: unknown; isLoading: boolean } {
+  const api = useApi()
+  const host = useHost()
+  const result = useSWR<FileImage, unknown>(
+    CACHE_KEYS.repositoryImage(repositoryId, ref, path, host),
+    () =>
+      api.repositories.image({ id: repositoryId, path, ...(ref === null ? {} : { ref }) }),
+    LIVE_READ_OPTIONS
+  )
+  return { image: result.data, error: result.error, isLoading: result.isLoading }
+}
+
+function NO_OP(): void {}
+
 const NO_REVIEWED_FILES: ReviewedFile[] = []
 
 export interface ReviewedFilesState {

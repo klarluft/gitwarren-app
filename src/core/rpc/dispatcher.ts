@@ -188,6 +188,9 @@ const handlers: {
   'repositories.update': (params) => repositoriesService.update(params),
   'repositories.remove': (params) => repositoriesService.remove(params),
   'repositories.refs': (params) => repositoriesService.refs(params),
+  'repositories.tree': (params) => repositoriesService.tree(params),
+  'repositories.file': (params) => repositoriesService.file(params),
+  'repositories.image': (params) => repositoriesService.image(params),
 
   'reviews.list': (params) => reviewsService.list(params),
   'reviews.open': (params) => openReview(params),
