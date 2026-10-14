@@ -141,6 +141,17 @@ function useReadingPosition(
 function useJustReviewed(reviewedPaths: ReadonlySet<string>): ReadonlySet<string> {
   const previous = useRef(reviewedPaths)
   const [glowing, setGlowing] = useState<ReadonlySet<string>>(() => new Set())
+  // One timer per glow, cleared only when the strip goes away. Clearing it on
+  // the next change instead - the obvious effect cleanup - left a file ticked
+  // a moment before another glowing for good, because its timer never ran.
+  const timers = useRef(new Set<number>())
+
+  useEffect(() => {
+    const pending = timers.current
+    return () => {
+      for (const timer of pending) window.clearTimeout(timer)
+    }
+  }, [])
 
   useEffect(() => {
     const before = previous.current
@@ -150,13 +161,14 @@ function useJustReviewed(reviewedPaths: ReadonlySet<string>): ReadonlySet<string
 
     setGlowing((current) => new Set([...current, ...added]))
     const timer = window.setTimeout(() => {
+      timers.current.delete(timer)
       setGlowing((current) => {
         const next = new Set(current)
         for (const path of added) next.delete(path)
         return next
       })
     }, TICK_GLOW_MS)
-    return () => window.clearTimeout(timer)
+    timers.current.add(timer)
   }, [reviewedPaths])
 
   return glowing
@@ -254,7 +266,8 @@ export const ReviewProgress = memo(function ReviewProgress({
 
           {[...glowing].map((path) => {
             const index = paths.indexOf(path)
-            if (index === -1) return null
+            // A tick taken back while it is still glowing stops glowing with it.
+            if (index === -1 || !reviewedPaths.has(path)) return null
             return (
               <div
                 key={path}
