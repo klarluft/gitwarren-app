@@ -1202,6 +1202,7 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
                 reviewedPaths={reviewedPaths}
                 changedSincePaths={changedSincePaths}
                 onSelect={selectFile}
+                follow={!narrow}
               />
             </SidebarColumn>
           )}
