@@ -25,6 +25,7 @@ import { Button } from '@/components/ui/button'
 import { Tooltip } from '@/components/ui/tooltip'
 import { api } from '@/lib/api'
 import { useRevealPath } from '@/lib/reveal-path'
+import { cn } from '@/lib/utils'
 import { FilePath } from './file-path'
 import { folderName } from './folder-name'
 import type { GitWorktree } from '@shared/git'
@@ -51,7 +52,10 @@ export function WorktreeLocation({ worktree }: { worktree: GitWorktree }) {
           <FilePath path={worktree.path} className="font-mono" />
         </span>
       </span>
-      <PathActions path={worktree.path} source={pathRef} />
+      {/* Half the overhang of a 24px button on a 16px line: the path is
+          nudged down by `mt-0.5`, so the buttons give up only the other half
+          and centre on the text instead of riding above it. */}
+      <PathActions path={worktree.path} source={pathRef} className="-my-0.5" />
     </p>
   )
 }
@@ -72,7 +76,8 @@ export function WorktreeFolder({ path }: { path: string }) {
       <span ref={nameRef} data-selectable className="min-w-0 break-words" title={path}>
         {folderName(path)}
       </span>
-      <PathActions path={path} source={nameRef} />
+      {/* The whole overhang, so the buttons add nothing to the row's height. */}
+      <PathActions path={path} source={nameRef} className="-my-1" />
     </span>
   )
 }
@@ -85,10 +90,13 @@ export function WorktreeFolder({ path }: { path: string }) {
  */
 function PathActions({
   path,
-  source
+  source,
+  className
 }: {
   path: string
   source: React.RefObject<HTMLElement | null>
+  /** The vertical overhang, which depends on the line the buttons sit on. */
+  className: string
 }) {
   // Null on a remote host this machine cannot name the path on; the button is
   // then absent rather than disabled, for the reason `useRevealPath` gives.
@@ -98,7 +106,7 @@ function PathActions({
 
   return (
     <span
-      className="-my-1 inline-flex shrink-0 items-center"
+      className={cn('inline-flex shrink-0 items-center', className)}
       onClick={(event) => event.stopPropagation()}
       onKeyDown={(event) => event.stopPropagation()}
       role="presentation"
