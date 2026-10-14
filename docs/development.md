@@ -30,6 +30,7 @@ Other scripts:
 | `npm run db:generate` | Regenerate migrations after editing the Drizzle schema |
 | `npm run mcp:dev` | Run the MCP server from source against your dev database |
 | `npm run serve:dev` | Run the headless daemon from source, protocol on stdin/stdout |
+| `npm run listen:dev` | Run `gitwarren serve` from source: the review UI in a browser tab |
 | `npm run package` | Build installers for the current platform, no publish |
 | `npm run release` | Build **and publish** to GitHub Releases |
 
@@ -49,6 +50,7 @@ src/
 │   ├── actors.ts        who wrote a comment; Human vs "<tool> (AI)"
 │   ├── comment-anchors.ts  re-finding a comment's lines after the branch moves
 │   ├── diff-gaps.ts     where a diff's hidden lines are, for unfolding them
+│   ├── diff-digest.ts   the fingerprint behind a file's Reviewed mark
 │   ├── validation.ts    one zod-error → AppError conversion, used everywhere
 │   ├── errors.ts        AppError + the error-code vocabulary
 │   ├── routes.ts        the hash grammar, as data — parsed by three processes
@@ -65,16 +67,23 @@ src/
 │   ├── git-exec.ts      the one place `git` is spawned
 │   ├── git.ts           live repository state; root resolution
 │   ├── git-compare.ts   worktrees, refs, commits, diffs, dirty state
+│   ├── git-search.ts    find in files: `git grep`, globs → pathspecs
 │   ├── diff-parser.ts   unified diff → files/hunks/lines
 │   ├── attachment-ingest.ts  rewrite a body's local image paths to tokens
+│   ├── hosts/           other machines: ssh, wsl.exe and WebSocket carriers,
+│   │                    the connection pool, the installer
+│   ├── web/             the web view: HTTP handler, token, static files
+│   ├── tailnet.ts       what Tailscale knows, asked rather than assumed
 │   ├── db/              drizzle schema, client (WAL), migration resolution
 │   └── services/        repositories.ts, reviews.ts, comments.ts,
-│                        attachments.ts — the one implementation of each
-│                        operation
+│                        attachments.ts, reviewed-files.ts, hosts.ts, fs.ts
+│                        — the one implementation of each operation
 │
 ├── main/              Electron main process
 │   ├── index.ts         window lifecycle
-│   ├── ipc.ts           thin delegations to core/services
+│   ├── ipc.ts           the Electron carrier into core/rpc, plus the shell's
+│   │                    own capabilities (pickers, reveal, editors, updater)
+│   ├── web-view.ts      the app serving the browser UI under /app/ on 41427
 │   ├── attachment-protocol.ts  serves gitwarren:// attachment images
 │   ├── deep-link.ts     receives gitwarren:// URLs from the OS
 │   ├── link-server.ts   the loopback page holding the "Open GitWarren" button
@@ -86,9 +95,14 @@ src/
 │   └── mcp-launch.ts    maintains ~/.gitwarren/bin/gitwarren-mcp
 │
 ├── preload/           The only bridge into the renderer
+├── cli/               The `gitwarren` command
+│   ├── gitwarren.ts     argv, signals, exit code → out/daemon/gitwarren.cjs
+│   ├── router.ts        argv to a subcommand, and the usage text
+│   └── …                service, update, doctor, uninstall, agent-setup
 ├── daemon/            The core with a pipe instead of a window
-│   ├── serve.ts         argv, signals, exit code → out/daemon/serve.cjs
-│   └── daemon.ts        opens the database, picks a carrier
+│   ├── daemon.ts        opens the database, picks a carrier
+│   └── listen.ts        `serve --listen`: the browser tab's server
+├── web/               The browser shell: a WebSocket carrier in place of IPC
 ├── mcp/               stdio MCP server
 │   ├── server.ts        tool definitions
 │   ├── gui-link.ts      the `guiUrl` on every review and comment payload —
@@ -99,8 +113,9 @@ src/
         ├── assets/          logo.png, inlined as a data: URI by the CSP
         ├── components/      markdown.tsx + ui/ (shadcn-style, on Base UI)
         ├── features/        repositories/, reviews/, comments/, agent/,
-        │                     settings/
-        └── lib/             api access, error helpers, hash router
+        │                     hosts/, commands/, settings/
+        └── lib/             api access, error helpers, hash router,
+                              highlighting, preferences, theme
 ```
 
 `shared/schemas.ts` holds zod schemas; `shared/git.ts` holds plain types. The
@@ -138,7 +153,7 @@ notices, and one that does the starting:
 | Path | What |
 | --- | --- |
 | `skills/gitwarren/SKILL.md` | The note that teaches the agent one habit — open a review when a task that changed code is done, hand over the link, read the comments before the next task. Also what `npx skills add klarluft/gitwarren-app` installs on its own. |
-| `commands/gitwarren.md` | `/gitwarren`, which opens the review on demand. |
+| `commands/review.md` | `/gitwarren:review`, which opens the review on demand. |
 | `agents/gitwarren-reviewer.md` | The reviewer that reads a change with git and leaves its findings as line comments, attributed as machine-written. |
 | `packaging/plugin/start.mjs` | The starter behind `.mcp.json`: the launcher of a GitWarren that is *listening* on this machine if there is one, `npx gitwarren mcp --serve` if there is not. Its header has the reasoning. |
 

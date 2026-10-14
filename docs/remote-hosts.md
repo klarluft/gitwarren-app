@@ -20,8 +20,25 @@ Five rules hold this together, and every screen below follows from them:
    reading real paths. The daemon exists for the human elsewhere, not for the
    agent next to the code.
 
-**Other machines** is where all of it is driven, in both directions: the
-machines this one reaches, and whether this one can be reached back.
+The **Hosts** screen (the card on the home screen, or `g s`) is where all of it
+is driven, in both directions: the machines this one reaches, and whether this
+one can be reached back.
+
+## On the home screen
+
+After this machine's repositories, the home screen lists each other machine's,
+one section per host, each row marked with the machine it is on. Opening a row,
+editing it or removing it acts on that machine, never on a repository here that
+happens to have the same id. Where a repository on another machine is a clone
+of one on this machine — the two share a root commit — the row links to the
+local one. Each section is its own read, so a machine that is asleep costs its
+section one grey line and holds up nothing else.
+
+Listing another machine's repositories means opening a connection to it, so the
+**Other machines** switch above the list turns the sections off. While they are
+off, no host is contacted at all, and the screen is one local read again — the
+setting for a host that is slow to wake or on a metered link. Only hosts that
+have answered at least once are listed.
 
 ## Over SSH
 
@@ -72,10 +89,20 @@ event costs seconds, never correctness.
 
 ## The phone
 
-Nothing was built for it. The web view is reachable at the host's `webUrl` from
-any device on the tailnet, and `tailscale serve` supplies the identity, so there
-is no token to get onto a phone. Below `lg` the files list and the diff become
-separate screens and the composer sits above the keyboard.
+There is no phone app, and none is needed. The web view is reachable at the
+host's `webUrl` from any device on the tailnet, and `tailscale serve` supplies
+the identity, so there is no token to get onto a phone.
+
+The review screens are laid out to be used there, not only looked at: anything
+that can be done on the desktop can be done on a phone. Below 1024 pixels the
+file list and the diff become separate screens and the diff is always unified.
+At phone width the headers and toolbars shrink to icons, the comment composer
+is short enough to leave the line in view and sits above the keyboard, and its
+text is large enough that iOS does not zoom the page when you start typing. The
+per-line comment button is a faint outline until you pick a line, since there
+is no hover to hide it behind. Line numbers stay pinned while code scrolls
+sideways, the progress strip can be scrubbed with a thumb, and an attached
+image opens full size when tapped.
 
 MCP results carry that `webUrl` alongside the always-present loopback `guiUrl`
 whenever the host is listening — so a link an agent prints can be opened on the

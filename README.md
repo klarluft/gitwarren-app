@@ -27,12 +27,17 @@ Linux.
 
 Tell GitWarren which local git repositories you care about, then open **reviews**
 against them — a review is a comparison of two refs, presented the way a pull
-request is, with *conversation*, *commits* and *files changed* tabs.
+request is, with *conversation*, *commits* and *files changed* tabs, and a
+*browse files* tab for the code the change did not touch.
 
 - **Review work before it is a commit.** If the branch you are reviewing is
   checked out in a worktree, GitWarren finds that worktree — wherever it is — and
   folds its staged, unstaged and untracked changes into the diff. That is exactly
   when review is most useful, and it is the part that makes this worth having.
+- **Prose as well as code.** Diffs read unified or side by side, with the
+  changed words picked out of a changed line. A Markdown file can be read
+  rendered, with its edits marked like tracked changes, and commented on
+  paragraph by paragraph.
 - **Nothing is cached.** Every branch name, commit and diff on screen is read
   from git at the moment it is shown.
 - **Nothing leaves your machine.** Reviews live in one SQLite file in your
@@ -46,7 +51,8 @@ request is, with *conversation*, *commits* and *files changed* tabs.
   renderer either way; the shell is the only thing that differs.
 - **Your other machines too.** A machine with no screen at all — a VPS, a WSL
   distro, a box an agent works on — runs the headless half and is reviewed from
-  somewhere else, over SSH, over `wsl.exe`, or over your own tailnet. Reviews
+  somewhere else, over SSH, over `wsl.exe`, or over your own tailnet, and its
+  repositories are listed on the same home screen as this machine's. Reviews
   live on the machine the code is on and stay there; nothing is replicated or
   relayed anywhere but the computers you already own.
 
@@ -104,7 +110,7 @@ screens. See [Installing it as a plugin](docs/agents.md#installing-it-as-a-plugi
 
 | Guide | What is in it |
 | --- | --- |
-| [Reviews](docs/reviews.md) | What a review is, how uncommitted work is found, reading and navigating a large diff, marking files reviewed, opening a file in your editor |
+| [Reviews](docs/reviews.md) | What a review is, how uncommitted work is found, reading and navigating a large diff, side by side and wrapped lines, Markdown previews, browsing and searching the repository, marking files reviewed, opening a file in your editor, keyboard shortcuts |
 | [Agent access (MCP)](docs/agents.md) | The MCP tools, installing the plugin, how an agent links you back into the app, comment threads, images |
 | [The `gitwarren` command line](docs/cli.md) | `serve`, `service install`, the four ways to install the CLI, updating and removing it |
 | [Your other machines](docs/remote-hosts.md) | Reaching a repository over SSH, over `wsl.exe` from Windows, on your tailnet, and from a phone |

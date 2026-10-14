@@ -1922,6 +1922,11 @@ to every machine on the list in order to render — which is precisely what
 `core/hosts/pool.ts` exists to avoid, and what M4.2 already refused to do for a
 version number. One host, one visit, one connection.
 
+*Later, in 1.0.0:* this was reversed at the user's request. The home screen now
+ends with one section per reached host, each its own read, behind an **Other
+machines** switch that contacts no host while it is off. See
+[On the home screen](remote-hosts.md#on-the-home-screen).
+
 **The host rides on the envelope.** `RpcRequest.host` is an instance id, and it
 is deliberately not a `hostId` field on every input schema. *Where* a request
 goes is not part of what a method means — `reviews.diff` has one meaning and it

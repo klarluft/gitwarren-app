@@ -82,6 +82,42 @@ EOF
 git add -A
 commit 60 'Describe only the rendered lines in a whole-file hunk header'
 
+# A Markdown file in the diff, for the rendered preview with its changes
+# marked. On this branch rather than the shortcuts one, where README.md would
+# sort first and push the code the hero is about off the top of the page.
+node - README.md <<'EOF'
+const fs = require('node:fs')
+const file = process.argv.at(-1)
+let source = fs.readFileSync(file, 'utf8')
+// The limitation above it is long gone from the real app, and a screenshot of
+// a side-by-side diff should not have it in the context lines.
+const stale =
+  '- **Diffs are unified, not side-by-side**, and have no syntax highlighting or\n' +
+  '  word-level intra-line highlighting.\n'
+if (!source.includes(stale)) throw new Error(`Anchor not found in ${file}: ${stale}`)
+source = source.replace(stale, '')
+const from =
+  '- **Large diffs are clipped.** A file\'s patch stops rendering past 4,000 lines\n' +
+  '  and untracked files over 512 KB are listed without content, though the\n' +
+  '  add/delete counts stay honest. Commit lists stop at 500.\n'
+if (!source.includes(from)) throw new Error(`Anchor not found in ${file}`)
+source = source.replace(
+  from,
+  '- **Large diffs are clipped, and say so.** A file\'s patch stops rendering past 4,000 lines\n' +
+    '  and untracked files over 512 KB are listed without content, though the\n' +
+    '  add/delete counts stay honest. Commit lists stop at 1,000.\n\n' +
+    '  A clipped file says so in its own header rather than ending mid-hunk:\n\n' +
+    '  - the `@@` header describes the lines **actually rendered**, not the whole\n' +
+    '    file, so a comment on the last visible line anchors where it was left;\n' +
+    '  - an untracked file that is cut short keeps its real line count in the\n' +
+    '    file header, next to the add/delete totals.\n\n' +
+    '  Opening the file in your editor is still the way to read the rest.\n'
+)
+fs.writeFileSync(file, source)
+EOF
+git add -A
+commit 58 'Say what a clipped file looks like in the diff'
+
 # ---- chore/pin-node-22 (closed in the seed) -------------------------------------
 
 git checkout -q main

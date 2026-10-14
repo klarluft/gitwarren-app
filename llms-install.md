@@ -83,5 +83,5 @@ Before the next task, `list_reviews` with status `open`, then
 `reply_to_review_comment` and resolve what you fixed with
 `resolve_review_comment`.
 
-More: https://github.com/klarluft/gitwarren-app#agent-access-mcp and
+More: https://github.com/klarluft/gitwarren-app/blob/main/docs/agents.md and
 https://gitwarren.com.

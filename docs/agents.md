@@ -262,6 +262,11 @@ The diff marks every line a range covers with a bar in the gutter, and the
 thread itself renders under the last line — where the eye already is after
 dragging down to it.
 
+A comment left on a paragraph of a rendered Markdown preview is a range comment
+of exactly this kind, over the paragraph's lines on the head side, so an agent
+sees it as one and needs nothing new to read it. See
+[Markdown files](reviews.md#markdown-files).
+
 ## Getting from the conversation back to the code
 
 Clicking a thread's file header in *Conversation* opens *Files changed*
@@ -299,6 +304,11 @@ Images that *are* rendered come from the app's own store:
   renderer    <img src="gitwarren://…">  ─────────────┘  custom protocol
   agent       attachments[].path  →  /Users/…/attachments/ab/abc….png
 ```
+
+Clicking a drawn image opens it in a viewer, fitted to the screen, and clicking
+again shows it at actual size. In a browser tab the viewer also offers to open
+the image in a new tab; in the desktop window it does not, because the
+image's `gitwarren:` address is not one an outside browser can open.
 
 **Humans** paste, drop or pick an image; it is copied in and the markdown is
 inserted at the cursor. **Agents** write a file to disk and reference it as an

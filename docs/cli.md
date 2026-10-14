@@ -15,6 +15,7 @@ gitwarren service status        # what is running, and where the data is
 
 # Let a coding agent in
 gitwarren agent-setup           # print the one sentence to give an agent so it can reach this GitWarren
+gitwarren mcp [--serve]         # the MCP server itself, on stdin/stdout; --serve adds the review page beside it
 
 # Keep it current, or remove it
 gitwarren update                # move to the newest release (--check only says whether there is one)

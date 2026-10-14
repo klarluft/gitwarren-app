@@ -78,6 +78,15 @@ const SHOTS = [
     // The panel is collapsed by default. Open it: the MCP block it prints is
     // the concrete answer to "how do my agents get at this".
     click: 'text:Agent access',
+    // A GitWarren already running on the capture machine holds the link port,
+    // and the page says so - true of this machine, not of the product. And the
+    // database row would print the throwaway data directory the seed wrote,
+    // and an unpackaged build reports its version as "(dev)".
+    hideText: [
+      { text: 'Another program is using port' },
+      { text: '/gitwarren.db', upTo: 'Database' },
+      { text: '(dev)', upTo: 'Version' }
+    ],
     note: 'The MCP server config, as the app prints it for this install.'
   },
   {
@@ -113,6 +122,39 @@ const SHOTS = [
     note: 'Additions and deletions together, with a line comment anchored inline.'
   },
   {
+    name: '12-side-by-side',
+    // The Markdown file, because it carries the one rewritten line in the
+    // demo: side by side is about the words that changed, not added code.
+    hash: '#/reviews/2/files',
+    size: WIDE,
+    prefs: { 'diff-layout': 'split' },
+    scrollTo: 'file:README.md',
+    offset: -40,
+    note: 'A diff side by side, with only the changed words marked on a rewritten line.'
+  },
+  {
+    name: '13-markdown-preview',
+    hash: '#/reviews/2/files',
+    size: WIDE,
+    prefs: { 'markdown-view': 'preview' },
+    scrollTo: 'file:README.md',
+    offset: -40,
+    note: 'A changed Markdown file rendered, with its additions and removals marked.'
+  },
+  {
+    name: '14-repository-files',
+    hash: `#/repositories/1/files/${encodeURIComponent('src/renderer/src/lib/shortcuts.ts')}`,
+    size: WIDE,
+    note: "The repository's own Files tab: the checkout as it is on disk, highlighted."
+  },
+  {
+    name: '15-light-theme',
+    hash: '#/reviews/1/files',
+    size: WIDE,
+    theme: 'light',
+    note: 'The hero view again, in the light theme.'
+  },
+  {
     name: '06-conversation-narrow',
     hash: '#/reviews/1/conversation',
     size: NARROW,
@@ -140,6 +182,21 @@ async function main() {
       mobile: false
     })
 
+    // View preferences are read when a screen mounts (`lib/preferences.ts`),
+    // so write them first and pass through the home screen to remount the
+    // one being captured. The theme is the `.dark` class on <html>, which
+    // everything - the highlighter included - follows (`lib/theme.ts`).
+    if (shot.prefs || shot.theme) {
+      await cdp.evaluate(`(() => {
+        for (const [key, value] of Object.entries(${JSON.stringify(shot.prefs ?? {})})) {
+          localStorage.setItem('gitwarren:' + key, value)
+        }
+        document.documentElement.classList.toggle('dark', ${JSON.stringify(shot.theme ?? 'dark')} === 'dark')
+        location.hash = '#/'
+      })()`)
+      await wait(300)
+    }
+
     // Setting the hash re-routes in place rather than reloading, so SWR keeps
     // what it already has and only the new screen's reads have to land.
     await cdp.evaluate(`location.hash = ${JSON.stringify(shot.hash)}`)
@@ -161,6 +218,33 @@ async function main() {
       if (clicked !== 'ok') console.warn(`  (click: ${clicked})`)
       await wait(400)
       await settle(cdp)
+    }
+
+    for (const { text, upTo } of shot.hideText ?? []) {
+      // The smallest element holding the text, widened either to the first
+      // ancestor that also holds `upTo` (a label beside a value), or to the
+      // outermost one that holds nothing else - the whole notice, border
+      // included.
+      const hidden = await cdp.evaluate(`(() => {
+        const needle = ${JSON.stringify(text)}
+        const upTo = ${JSON.stringify(upTo ?? null)}
+        let node = [...document.querySelectorAll('*')]
+          .filter((el) => el.textContent?.includes(needle))
+          .sort((a, b) => a.textContent.length - b.textContent.length)[0]
+        if (!node) return 'not found: ' + needle
+        if (upTo) {
+          while (node.parentElement && !node.textContent.includes(upTo)) node = node.parentElement
+        } else {
+          const own = node.textContent.trim()
+          while (node.parentElement && node.parentElement.textContent.trim() === own) {
+            node = node.parentElement
+          }
+        }
+        node.style.display = 'none'
+        return 'ok'
+      })()`)
+      if (hidden !== 'ok') console.warn(`  (hide: ${hidden})`)
+      await wait(200)
     }
 
     if (shot.scrollTo) {
@@ -206,6 +290,18 @@ async function main() {
     const file = join(OUT_DIR, `${shot.name}.png`)
     await writeFile(file, Buffer.from(data, 'base64'))
     console.log(`${file}  ${shot.size.width}x${shot.size.height} @2x  - ${shot.note}`)
+
+    // Put the defaults back, so the next shot sees the app as installed.
+    if (shot.prefs || shot.theme) {
+      await cdp.evaluate(`(() => {
+        for (const key of ${JSON.stringify(Object.keys(shot.prefs ?? {}))}) {
+          localStorage.removeItem('gitwarren:' + key)
+        }
+        document.documentElement.classList.add('dark')
+        location.hash = '#/'
+      })()`)
+      await wait(300)
+    }
   }
 
   await cdp.send('Emulation.clearDeviceMetricsOverride')
