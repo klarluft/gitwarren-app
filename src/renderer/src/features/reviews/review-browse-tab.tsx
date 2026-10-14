@@ -38,7 +38,7 @@
  * wrong, and reading the branch as it actually stands on disk is the only
  * answer anybody wants from a file browser.
  */
-import { useCallback, useMemo } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import {
   AlertCircle,
   FolderTree,
@@ -57,10 +57,12 @@ import { formatStep } from '@/lib/keys'
 import { useHost, useApi } from '@/lib/host-scope'
 import { useHostScope } from '@/lib/host-scope'
 import { useNarrow } from '@/lib/narrow'
+import { useLineWrap } from '@/lib/line-wrap'
 import { useStoredFlag, useStoredPreference } from '@/lib/preferences'
-import { replace, type DiffFocus } from '@/lib/router'
+import { navigate, replace, type DiffFocus } from '@/lib/router'
 import { useCommentMutations, useReviewComments } from '../comments/use-comments'
 import { FileSearchPanel } from './file-search-panel'
+import { fileForLink } from './document-links'
 import { FileSourceCard } from './file-source-view'
 import { RepositoryFilesTree } from './repository-files-tree'
 import { SidebarColumn } from './sidebar-column'
@@ -95,8 +97,8 @@ export function ReviewBrowseTab({
   const narrow = useNarrow()
   const [treeOpen, setTreeOpen] = useStoredFlag('browse-tree', true)
   const [editorId] = useStoredPreference('editor', null)
-  // The same switch as the files tab's, under the same key.
-  const [wrap, setWrap] = useStoredFlag('diff-wrap', false)
+  // The same switch as the files tab's, under the same keys.
+  const lineWrap = useLineWrap()
 
   const changes = DEFAULT_DIFF_CHANGES
   const tree = useReviewTree(review.id, changes)
@@ -109,6 +111,8 @@ export function ReviewBrowseTab({
   const localEditors = useEditors()
 
   const selectedPath = focus?.filePath ?? null
+  /** What the button shows and flips: whether the file on screen wraps. */
+  const wrap = selectedPath === null ? lineWrap.code : lineWrap.wrapFor(selectedPath)
   /** Whether the sidebar is showing the search rather than the file list. */
   const searching = search !== undefined
 
@@ -141,6 +145,9 @@ export function ReviewBrowseTab({
     (path: string) => go({ focus: { filePath: path } }),
     [go]
   )
+
+  /** The heading a link asked for, until its file is open - see the repository files tab. */
+  const [anchor, setAnchor] = useState<{ path: string; fragment: string } | null>(null)
 
   /**
    * Open a file at the line a search result names.
@@ -238,6 +245,18 @@ export function ReviewBrowseTab({
   }
 
   const paths = tree.data?.paths ?? []
+
+  /**
+   * Follow a link in a Markdown file to another file of the repository -
+   * pushed, so Back returns to the page the link was on. The search is left
+   * behind: the word it marks was found in the file the reader just left.
+   */
+  const openPath = (path: string, fragment: string | null): void => {
+    const target = fileForLink(paths, path)
+    setAnchor(fragment === null ? null : { path: target, fragment })
+    navigate({ name: 'review', reviewId: review.id, tab: 'browse', focus: { filePath: target }, ...scope })
+  }
+
   const listOpen = narrow ? selectedPath === null || treeOpen : treeOpen
 
   return (
@@ -275,7 +294,7 @@ export function ReviewBrowseTab({
         <Button
           variant={wrap ? 'secondary' : 'outline'}
           size="sm"
-          onClick={() => setWrap(!wrap)}
+          onClick={() => lineWrap.setWrap(!wrap)}
           aria-pressed={wrap}
           title={wrap ? 'Stop wrapping long lines' : 'Wrap long lines'}
         >
@@ -386,6 +405,8 @@ export function ReviewBrowseTab({
                 editorLabel={editors?.editors.find((editor) => editor.id === editorId)?.label ?? null}
                 onOpenInEditor={openInEditor}
                 wrap={wrap}
+                onOpenPath={openPath}
+                anchor={anchor?.path === selectedPath ? anchor.fragment : null}
               />
             )}
           </div>

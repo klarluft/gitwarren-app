@@ -38,7 +38,7 @@ import { RepositoryDetail } from './features/repositories/repository-detail'
 import { RepositoryList } from './features/repositories/repository-list'
 import { ReviewDetail } from './features/reviews/review-detail'
 import { HostScopeProvider } from './lib/host-scope'
-import { useRoute, type ReviewTab } from './lib/router'
+import { useRoute, type ReviewTab, type Route } from './lib/router'
 import { cn } from './lib/utils'
 
 /**
@@ -69,6 +69,20 @@ const WIDE_TABS = new Set<ReviewTab>(['files', 'browse'])
 
 function reviewWidth(tab: ReviewTab): string {
   return WIDE_TABS.has(tab) ? 'max-w-[110rem]' : 'max-w-5xl'
+}
+
+/**
+ * How much of the window a screen is allowed to use.
+ *
+ * A repository's Files tab is the review's Browse tab without the review - the
+ * same tree, the same file card - so it asks the same question and gets the same
+ * answer. It sat at the list screens' `max-w-3xl` by the same inheritance the
+ * browse tab once did, which left a file tree and a file sharing 768px.
+ */
+function screenWidth(route: Route): string {
+  if (route.name === 'review') return reviewWidth(route.tab)
+  if (route.name === 'repository' && route.tab === 'files') return 'max-w-[110rem]'
+  return 'max-w-3xl'
 }
 
 export function App() {
@@ -109,7 +123,7 @@ export function App() {
                 // Half the gutter on a phone, where every pixel of it is a column of
                 // code that has to be scrolled sideways to instead.
                 'mx-auto w-full flex-1 overflow-y-auto px-6 pb-10 outline-none max-sm:px-3',
-                route.name === 'review' ? reviewWidth(route.tab) : 'max-w-3xl'
+                screenWidth(route)
               )}
             >
               {/* `gap-3` so the two can be on screen at once; an empty box is
