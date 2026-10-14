@@ -13,7 +13,7 @@
  * which is honest about when the app looks at the disk.
  */
 import useSWR, { useSWRConfig, type SWRResponse } from 'swr'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState, useSyncExternalStore } from 'react'
 import { api, CACHE_KEYS, CACHE_PREFIXES } from '@/lib/api'
 import { useApi, useHost } from '@/lib/host-scope'
 import type { EditorList } from '@shared/api'
@@ -53,6 +53,70 @@ export interface ListState<T> {
   /** True during a background refresh, when stale data is still on screen. */
   isRefreshing: boolean
   refresh: () => Promise<unknown>
+}
+
+/**
+ * How many times a review's or a repository's files have been asked to be read
+ * again.
+ *
+ * A Refresh re-reads the diff, or the repository's file list - and nothing
+ * else. Every file's text and every image is cached under a key of its own, so
+ * after a commit landed the diff was new and the files behind it were not: a
+ * Markdown preview went on comparing the new diff against the old text, and an
+ * unfolded hunk showed lines that were no longer there. Invalidating those keys
+ * by prefix would only reach the ones on screen; a file opened afterwards would
+ * still find its old copy in the cache.
+ *
+ * So the number is part of every one of those keys. A Refresh bumps it once the
+ * new diff (or list) has arrived, every file read on screen re-runs, and one
+ * opened later is read fresh because its key has never been seen. Bumped
+ * *after* the diff rather than with it, so a preview never pairs a new file
+ * with the diff it was not taken from.
+ */
+const readGenerations = new Map<string, number>()
+const generationListeners = new Set<() => void>()
+
+function subscribeGenerations(listener: () => void): () => void {
+  generationListeners.add(listener)
+  return () => generationListeners.delete(listener)
+}
+
+function bumpReadGeneration(scope: string): void {
+  readGenerations.set(scope, (readGenerations.get(scope) ?? 0) + 1)
+  for (const listener of generationListeners) listener()
+}
+
+/**
+ * `useSWR` over a key that carries its scope's read generation.
+ *
+ * While a re-read is in flight the answer from the generation before stays on
+ * screen, so a Refresh never flashes a skeleton over a document someone is
+ * halfway down. It is that same key's answer and no other - SWR's own
+ * `keepPreviousData` would let one file's text stand in for the next file's.
+ */
+function useFreshRead<T>(
+  key: string | null,
+  scope: string,
+  fetcher: () => Promise<T>
+): { data: T | undefined; error: unknown; isLoading: boolean } {
+  const { cache } = useSWRConfig()
+  const generation = useSyncExternalStore(subscribeGenerations, () => readGenerations.get(scope) ?? 0)
+  const previous =
+    key === null || generation === 0
+      ? undefined
+      : (cache.get(`${key}#${generation - 1}`)?.data as T | undefined)
+  const result = useSWR<T, unknown>(key === null ? null : `${key}#${generation}`, fetcher, {
+    ...LIVE_READ_OPTIONS,
+    fallbackData: previous,
+    // SWR counts a fallback as data, and `revalidateIfStale: false` would then
+    // never read the new generation at all.
+    ...(previous === undefined ? {} : { revalidateOnMount: true })
+  })
+  return {
+    data: result.data,
+    error: result.error,
+    isLoading: result.isLoading && result.data === undefined
+  }
 }
 
 function toState<T>(result: {
@@ -149,13 +213,21 @@ export const DEFAULT_DIFF_CHANGES: DiffChanges = 'all'
 export function useReviewDiff(reviewId: number, changes: DiffChanges): ListState<ReviewDiff> {
   const api = useApi()
   const host = useHost()
-  return toState(
+  const state = toState(
     useSWR<ReviewDiff, unknown>(
       CACHE_KEYS.reviewDiff(reviewId, changes, host),
       () => api.reviews.diff({ id: reviewId, changes }),
       LIVE_READ_OPTIONS
     )
   )
+  const { refresh: refreshDiff } = state
+  // The files behind the diff are read again too - see `readGenerations`.
+  const refresh = useCallback(async () => {
+    const result = await refreshDiff()
+    bumpReadGeneration(CACHE_KEYS.review(reviewId, host))
+    return result
+  }, [refreshDiff, reviewId, host])
+  return { ...state, refresh }
 }
 
 /**
@@ -252,10 +324,10 @@ export function useReviewFile(
   const api = useApi()
   const host = useHost()
   const [requested, setRequested] = useState(false)
-  const result = useSWR<FileContent, unknown>(
+  const result = useFreshRead<FileContent>(
     requested && reviewId !== null ? CACHE_KEYS.reviewFile(reviewId, path, changes, host) : null,
-    () => api.reviews.file({ id: reviewId as number, path, changes }),
-    LIVE_READ_OPTIONS
+    CACHE_KEYS.review(reviewId ?? 0, host),
+    () => api.reviews.file({ id: reviewId as number, path, changes })
   )
 
   return {
@@ -283,10 +355,10 @@ export function useReviewImage(
 ): { image: FileImage | undefined; error: unknown; isLoading: boolean } {
   const api = useApi()
   const host = useHost()
-  const result = useSWR<FileImage, unknown>(
+  const result = useFreshRead<FileImage>(
     path === null ? null : CACHE_KEYS.reviewImage(reviewId, path, side, changes, host),
-    () => api.reviews.image({ id: reviewId, path: path as string, side, changes }),
-    LIVE_READ_OPTIONS
+    CACHE_KEYS.review(reviewId, host),
+    () => api.reviews.image({ id: reviewId, path: path as string, side, changes })
   )
 
   return { image: result.data, error: result.error, isLoading: result.isLoading }
@@ -327,13 +399,21 @@ export function useRepositoryRefs(repositoryId: number | null): ListState<Reposi
 export function useRepositoryTree(repositoryId: number, ref: string | null): ListState<ReviewTree> {
   const api = useApi()
   const host = useHost()
-  return toState(
+  const state = toState(
     useSWR<ReviewTree, unknown>(
       CACHE_KEYS.repositoryTree(repositoryId, ref, host),
       () => api.repositories.tree({ id: repositoryId, ...(ref === null ? {} : { ref }) }),
       LIVE_READ_OPTIONS
     )
   )
+  const { refresh: refreshTree } = state
+  // The open file and its images are read again too - see `readGenerations`.
+  const refresh = useCallback(async () => {
+    const result = await refreshTree()
+    bumpReadGeneration(CACHE_KEYS.repository(repositoryId, host))
+    return result
+  }, [refreshTree, repositoryId, host])
+  return { ...state, refresh }
 }
 
 /**
@@ -350,11 +430,11 @@ export function useRepositoryFile(
 ): FileContentState {
   const api = useApi()
   const host = useHost()
-  const result = useSWR<FileContent, unknown>(
+  const result = useFreshRead<FileContent>(
     repositoryId === null ? null : CACHE_KEYS.repositoryFile(repositoryId, ref, path, host),
+    CACHE_KEYS.repository(repositoryId ?? 0, host),
     () =>
-      api.repositories.file({ id: repositoryId as number, path, ...(ref === null ? {} : { ref }) }),
-    LIVE_READ_OPTIONS
+      api.repositories.file({ id: repositoryId as number, path, ...(ref === null ? {} : { ref }) })
   )
   return {
     content: result.data,
@@ -373,11 +453,11 @@ export function useRepositoryImage(
 ): { image: FileImage | undefined; error: unknown; isLoading: boolean } {
   const api = useApi()
   const host = useHost()
-  const result = useSWR<FileImage, unknown>(
+  const result = useFreshRead<FileImage>(
     CACHE_KEYS.repositoryImage(repositoryId, ref, path, host),
+    CACHE_KEYS.repository(repositoryId, host),
     () =>
-      api.repositories.image({ id: repositoryId, path, ...(ref === null ? {} : { ref }) }),
-    LIVE_READ_OPTIONS
+      api.repositories.image({ id: repositoryId, path, ...(ref === null ? {} : { ref }) })
   )
   return { image: result.data, error: result.error, isLoading: result.isLoading }
 }
