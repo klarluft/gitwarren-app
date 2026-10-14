@@ -1046,8 +1046,8 @@ function ExpanderBand({
   const stepped = hidden === null || hidden > EXPAND_STEP
 
   return (
-    <div className="grid grid-cols-[3rem_3rem_1fr] bg-muted/60 text-muted-foreground">
-      <div className="col-span-2 flex items-center justify-center gap-0.5 border-r border-border">
+    <div className="grid grid-cols-[3rem_3rem_1fr] bg-(--row-tint) text-muted-foreground [--row-tint:color-mix(in_oklab,var(--color-muted)_60%,transparent)]">
+      <div className="diff-gutter left-0 col-span-2 flex items-center justify-center gap-0.5 border-r border-border">
         {/* Down unfolds from the top of the run, next to the code above it; up
             unfolds from the bottom, next to the code below. */}
         {hasAbove && stepped && (
@@ -1187,8 +1187,8 @@ function HunkRows({
   return (
     <>
       {showHeader && (
-        <div className="grid grid-cols-[3rem_3rem_1fr] bg-muted/60 text-muted-foreground">
-          <span className="col-span-2 border-r border-border" />
+        <div className="grid grid-cols-[3rem_3rem_1fr] bg-(--row-tint) text-muted-foreground [--row-tint:color-mix(in_oklab,var(--color-muted)_60%,transparent)]">
+          <span className="diff-gutter left-0 col-span-2 border-r border-border" />
           <span
             className={cn(
               'min-w-0 px-3 py-0.5',
@@ -1262,16 +1262,20 @@ function lineState(side: DiffSide, number: number | null, context: RowContext): 
 }
 
 /**
- * The background a row is drawn on.
+ * The tint a row is drawn on, set as `--row-tint` for the row's own
+ * `bg-(--row-tint)` to paint.
  *
- * Mutually exclusive rather than layered: two background utilities on one
- * element are resolved by stylesheet order, not by the order they are written.
+ * A variable rather than a background because two things paint it: the row,
+ * and its line numbers when they are pinned over code scrolling sideways - see
+ * `diff-gutter` in index.css. Mutually exclusive rather than layered: two
+ * utilities setting one property are resolved by stylesheet order, not by the
+ * order they are written.
  */
 function rowTone(type: DiffLine['type'], state: LineState): string | undefined {
-  if (state.isMarked) return 'bg-warning/25'
-  if (state.selected) return 'bg-primary/15'
-  if (type === 'insert') return 'bg-success/10'
-  if (type === 'delete') return 'bg-destructive/10'
+  if (state.isMarked) return '[--row-tint:color-mix(in_oklab,var(--color-warning)_25%,transparent)]'
+  if (state.selected) return '[--row-tint:color-mix(in_oklab,var(--color-primary)_15%,transparent)]'
+  if (type === 'insert') return '[--row-tint:color-mix(in_oklab,var(--color-success)_10%,transparent)]'
+  if (type === 'delete') return '[--row-tint:color-mix(in_oklab,var(--color-destructive)_10%,transparent)]'
   return undefined
 }
 
@@ -1305,12 +1309,13 @@ export const LineRow = memo(function LineRow({ line, ...context }: { line: DiffL
         data-diff-side={number === null ? undefined : side}
         data-diff-line={number === null ? undefined : number}
         className={cn(
-          'group grid',
+          'group grid bg-(--row-tint)',
           oneGutter ? 'grid-cols-[3rem_minmax(0,1fr)]' : 'grid-cols-[3rem_3rem_minmax(0,1fr)]',
           rowTone(line.type, state),
-          // A box-shadow instead, so the marker for "a comment covers this
-          // line" can sit on top of whichever background won above.
-          state.inThread && 'shadow-[inset_3px_0_0_0_var(--color-primary)]'
+          // "A comment covers this line", drawn down the left edge by the
+          // first gutter cell - pinned, it sits over where the row's own edge
+          // was - on top of whatever tint won above.
+          state.inThread && '[--row-mark:var(--color-primary)]'
         )}
       >
         {!oneGutter && <Gutter value={line.oldNumber} />}
@@ -1321,6 +1326,7 @@ export const LineRow = memo(function LineRow({ line, ...context }: { line: DiffL
           commentable
           state={state}
           context={context}
+          pin={oneGutter ? 'left-0' : 'left-12'}
         />
         <LineCode line={line} side={side} number={number} owner context={context} />
       </div>
@@ -1456,7 +1462,7 @@ function SplitHalf({
       data-diff-side={number === null ? undefined : side}
       data-diff-line={number === null ? undefined : number}
       className={cn(
-        'group grid min-w-0 grid-cols-[3rem_minmax(0,1fr)]',
+        'group grid min-w-0 grid-cols-[3rem_minmax(0,1fr)] bg-(--row-tint)',
         isLeft && 'border-r border-border',
         rowTone(line.type, state),
         state.inThread && 'shadow-[inset_3px_0_0_0_var(--color-primary)]'
@@ -1482,7 +1488,8 @@ function CommentCell({
   display,
   commentable,
   state,
-  context
+  context,
+  pin
 }: {
   side: DiffSide
   number: number | null
@@ -1491,13 +1498,19 @@ function CommentCell({
   commentable: boolean
   state: LineState
   context: RowContext
+  /**
+   * Where the cell sticks when the code beside it scrolls sideways - the unified
+   * row's columns. Absent side by side, which always wraps and never scrolls,
+   * and where a sticky offset would push the left half's numbers right.
+   */
+  pin?: 'left-0' | 'left-12'
 }) {
   const { comments, onSelectStart, onSelectOver, filePath } = context
   const { composing, selected } = state
 
   return (
         <div
-          className="relative border-r border-border"
+          className={cn(pin === undefined ? 'relative' : ['diff-gutter', pin], 'border-r border-border')}
           // Extending a drag has to be caught on the row, not on the button:
           // the pointer is held down, so it never enters another button.
           onPointerEnter={() => {
@@ -1824,7 +1837,7 @@ function LineText({
 
 export function Gutter({ value }: { value: number | null }) {
   return (
-    <span className="select-none border-r border-border px-2 text-right tabular-nums text-muted-foreground/70">
+    <span className="diff-gutter left-0 select-none border-r border-border px-2 text-right tabular-nums text-muted-foreground/70">
       {value ?? ''}
     </span>
   )
