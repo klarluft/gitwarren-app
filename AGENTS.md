@@ -27,3 +27,27 @@ in the description instead of leaving the reviewer to wonder.
   branch moves.
 - Say what each picture is showing in a line above it. A screenshot without a
   caption makes the reviewer guess which part of it changed.
+
+## Every UI change works on a phone too
+
+GitWarren is used from phones - the web build is served over the tailnet - so a
+change is not done until it has been checked at a phone's size, and the pull
+request shows it there as well as on the desktop.
+
+- Check at a phone viewport, 390×844, with touch emulated - not a narrowed
+  desktop window. Over CDP that is `Emulation.setDeviceMetricsOverride`
+  (`mobile: true`), `Emulation.setTouchEmulationEnabled`, and
+  `Emulation.setEmulatedMedia` with `hover: none` and `pointer: coarse`, so the
+  `(hover: none)` styles the app relies on actually apply. Drive it with
+  `Input.dispatchTouchEvent`, not mouse events.
+- Attach mobile screenshots beside the desktop ones, and a GIF for any gesture.
+- Everything that can be done on the desktop must be doable on a phone. Smaller
+  elements are fine, and so is rearranging the layout for a narrow screen -
+  dropping a label to its icon, wrapping a row, moving something behind a
+  screen of its own. Losing a capability is not. Hover in particular does not
+  exist on a phone: anything a hover reveals needs a touch way to reach it.
+- Touch targets can be smaller than they look, but not smaller than a thumb:
+  extend the hit area with an invisible pseudo-element rather than making the
+  control bigger.
+- Nothing on the page may scroll sideways at 390px except code, inside its own
+  container.
