@@ -447,7 +447,11 @@ function useFilesLayout(): {
 
   const selectFile = useCallback(
     (path: string) => {
-      if (narrow) {
+      // Only while the list is the screen. The progress strip picks files too,
+      // and from the diff itself: there the list is already shut, setting it
+      // shut again re-renders nothing, the effect above never runs, and the
+      // jump would silently not happen.
+      if (narrow && listScreen) {
         pending.current = path
         setListScreen(false)
         return
@@ -455,7 +459,7 @@ function useFilesLayout(): {
       const element = document.getElementById(fileDomId(path))
       if (element !== null) scrollToElement(element, { block: 'start', behavior: 'smooth' })
     },
-    [narrow]
+    [narrow, listScreen]
   )
 
   return {

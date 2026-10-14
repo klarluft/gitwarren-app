@@ -88,6 +88,10 @@ function useReadingPosition(
         firstPath === undefined ? null : document.getElementById(fileDomId(firstPath))
       const margin =
         firstCard === null ? 0 : parseFloat(getComputedStyle(firstCard).scrollMarginTop) || 0
+      // The diff is hidden behind the file list on a phone. Every card then
+      // measures zero and the page reads as finished, so the strip would claim
+      // the last file; it keeps where the reader actually was instead.
+      if (firstCard !== null && firstCard.offsetParent === null) return
       const top = isDocument ? 0 : scroller.getBoundingClientRect().top
       const line = top + margin + TOP_EDGE_SLACK
       const atEnd = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2
@@ -207,6 +211,21 @@ export const ReviewProgress = memo(function ReviewProgress({
         ? 100
         : Math.min(99, Math.max(1, Math.round((reviewed / count) * 100)))
 
+  /**
+   * A finger on the track, being dragged along it.
+   *
+   * A touch screen has no hover, so the hover card - which file a slot is,
+   * before going there - would be the one thing the strip could do on a desktop
+   * and not on a phone. Pressing on the track and sliding along it shows the
+   * same card under the finger, and lifting goes to the file it names: the
+   * scrubber gesture a video player taught everyone. A tap is the same gesture
+   * with no slide, so it still jumps straight to the slot it lands on.
+   */
+  const [scrubbing, setScrubbing] = useState(false)
+  // The click a finger's release produces after a scrub, which has already
+  // jumped. Without this a tap would go to its file twice.
+  const swallowClick = useRef(false)
+
   function pointAt(event: MouseEvent<HTMLDivElement>): number {
     const box = event.currentTarget.getBoundingClientRect()
     return fileAt(count, event.clientX - box.left, box.width)
@@ -221,7 +240,8 @@ export const ReviewProgress = memo(function ReviewProgress({
     >
       {/* The track. A pointer target as a shortcut - the file list and `[`/`]`
           are the ways in that do not need one - so it is a progress bar to
-          assistive technology, and the jump is a bonus for a mouse. */}
+          assistive technology, and the jump is a bonus for a mouse or a
+          finger. */}
       <div
         ref={track}
         role="progressbar"
@@ -230,10 +250,43 @@ export const ReviewProgress = memo(function ReviewProgress({
         aria-valuemax={count}
         aria-valuenow={reviewed}
         aria-valuetext={`${reviewed} of ${count} files reviewed; reading file ${current}`}
-        className="relative h-4.5 min-w-16 flex-1 cursor-pointer"
-        onPointerMove={(event) => setHovered(pointAt(event))}
-        onPointerLeave={() => setHovered(null)}
+        className={cn(
+          'relative h-4.5 min-w-16 flex-1 cursor-pointer',
+          // Sliding a finger along the track scrubs rather than scrolls the
+          // page, and the target is taller than it looks: eighteen pixels is
+          // plenty for a mouse and too few for a thumb. The extra is an
+          // invisible band above and below, so nothing on screen moves for it.
+          'touch-none [@media(pointer:coarse)]:after:absolute [@media(pointer:coarse)]:after:inset-x-0 [@media(pointer:coarse)]:after:-inset-y-2'
+        )}
+        onPointerDown={(event) => {
+          if (event.pointerType === 'mouse') return
+          event.currentTarget.setPointerCapture(event.pointerId)
+          setScrubbing(true)
+          setHovered(pointAt(event))
+        }}
+        onPointerMove={(event) => {
+          if (event.pointerType === 'mouse' || scrubbing) setHovered(pointAt(event))
+        }}
+        onPointerUp={(event) => {
+          if (!scrubbing) return
+          setScrubbing(false)
+          setHovered(null)
+          swallowClick.current = true
+          const path = paths[pointAt(event)]
+          if (path !== undefined) onSelect(path)
+        }}
+        onPointerCancel={() => {
+          setScrubbing(false)
+          setHovered(null)
+        }}
+        onPointerLeave={(event) => {
+          if (event.pointerType === 'mouse') setHovered(null)
+        }}
         onClick={(event) => {
+          if (swallowClick.current) {
+            swallowClick.current = false
+            return
+          }
           const path = paths[pointAt(event)]
           if (path !== undefined) onSelect(path)
         }}
@@ -315,13 +368,19 @@ export const ReviewProgress = memo(function ReviewProgress({
             count={count}
             isReviewed={reviewedPaths.has(hoveredFile.path)}
             hasChangedSince={changedSincePaths.has(hoveredFile.path)}
+            underFinger={scrubbing}
           />
         )}
       </div>
 
       <p className="flex shrink-0 items-center gap-2 whitespace-nowrap text-xs tabular-nums text-muted-foreground">
-        <span className="max-sm:hidden">
-          File {current} of {count}
+        {/* Shorter on a phone rather than gone: where you are matters there
+            just as much, and "3/5" is a third of the width of the words. */}
+        <span>
+          File {current}
+          <span className="max-sm:hidden"> of </span>
+          <span className="sm:hidden">/</span>
+          {count}
         </span>
         {done ? (
           <span className="flex items-center gap-1 font-medium text-success">
@@ -338,7 +397,7 @@ export const ReviewProgress = memo(function ReviewProgress({
             <span key={reviewed} className="motion-safe:animate-[rise-in_0.3s_ease-out]">
               {reviewed}/{count}
             </span>
-            <span className="text-muted-foreground">· {share}%</span>
+            <span className="text-muted-foreground max-sm:hidden">· {share}%</span>
           </span>
         )}
       </p>
@@ -357,13 +416,16 @@ function HoverCard({
   index,
   count,
   isReviewed,
-  hasChangedSince
+  hasChangedSince,
+  underFinger
 }: {
   file: FileDiff
   index: number
   count: number
   isReviewed: boolean
   hasChangedSince: boolean
+  /** Dropped further below the track, clear of the thumb that is on it. */
+  underFinger: boolean
 }) {
   const centre = (index + 0.5) / count
   const align = centre < 0.2 ? 'start' : centre > 0.8 ? 'end' : 'middle'
@@ -372,6 +434,7 @@ function HoverCard({
     <div
       className={cn(
         'pointer-events-none absolute top-full z-30 mt-2 flex w-max max-w-[min(28rem,80vw)] items-start gap-1.5 rounded-md border border-border bg-card px-2 py-1.5 text-xs text-card-foreground shadow-md',
+        underFinger && 'mt-12 text-sm',
         align === 'middle' && '-translate-x-1/2',
         align === 'end' && '-translate-x-full'
       )}
