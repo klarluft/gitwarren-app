@@ -114,6 +114,8 @@ export interface FileSourceCardProps {
   search?: DiffSearch
   editorLabel?: string | null
   onOpenInEditor?: (path: string, line: number) => void
+  /** Long lines wrap inside the card instead of scrolling sideways. */
+  wrap?: boolean
 }
 
 const NO_THREADS: CommentThread[] = []
@@ -127,7 +129,8 @@ export function FileSourceCard({
   marked,
   search,
   editorLabel,
-  onOpenInEditor
+  onOpenInEditor,
+  wrap = false
 }: FileSourceCardProps) {
   // Both reads are always called - hooks cannot be conditional - and the one
   // that does not apply is handed a null id and reads nothing.
@@ -252,7 +255,8 @@ export function FileSourceCard({
     // column of nothing down the whole document.
     oneGutter: true,
     highlight,
-    wrap: isProsePath(path)
+    // The reader's Wrap toggle, or prose regardless - see `FileDiffCard`.
+    wrap: wrap || isProsePath(path)
   }
 
   const renderImage = useSourceImages(source)

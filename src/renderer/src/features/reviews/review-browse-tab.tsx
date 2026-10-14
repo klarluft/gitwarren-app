@@ -39,7 +39,15 @@
  * answer anybody wants from a file browser.
  */
 import { useCallback, useMemo } from 'react'
-import { AlertCircle, FolderTree, ListTree, PanelLeftClose, PanelLeftOpen, Search } from 'lucide-react'
+import {
+  AlertCircle,
+  FolderTree,
+  ListTree,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Search,
+  WrapText
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -87,6 +95,8 @@ export function ReviewBrowseTab({
   const narrow = useNarrow()
   const [treeOpen, setTreeOpen] = useStoredFlag('browse-tree', true)
   const [editorId] = useStoredPreference('editor', null)
+  // The same switch as the files tab's, under the same key.
+  const [wrap, setWrap] = useStoredFlag('diff-wrap', false)
 
   const changes = DEFAULT_DIFF_CHANGES
   const tree = useReviewTree(review.id, changes)
@@ -262,6 +272,16 @@ export function ReviewBrowseTab({
           <Search />
           Search in files
         </Button>
+        <Button
+          variant={wrap ? 'secondary' : 'outline'}
+          size="sm"
+          onClick={() => setWrap(!wrap)}
+          aria-pressed={wrap}
+          title={wrap ? 'Stop wrapping long lines' : 'Wrap long lines'}
+        >
+          <WrapText />
+          Wrap lines
+        </Button>
         <p className="text-xs text-muted-foreground">
           {plural(paths.length, 'file')} at <span className="font-mono">{review.headRef}</span>
           {tree.data?.truncated === true && ' (listing cut short)'}
@@ -365,6 +385,7 @@ export function ReviewBrowseTab({
                 }
                 editorLabel={editors?.editors.find((editor) => editor.id === editorId)?.label ?? null}
                 onOpenInEditor={openInEditor}
+                wrap={wrap}
               />
             )}
           </div>

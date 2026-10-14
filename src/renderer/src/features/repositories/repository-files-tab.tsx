@@ -25,7 +25,15 @@
  * button here, which `LineRow` already does when it is given no comments.
  */
 import { useCallback, useMemo } from 'react'
-import { AlertCircle, FolderTree, ListTree, PanelLeftClose, PanelLeftOpen, RefreshCw } from 'lucide-react'
+import {
+  AlertCircle,
+  FolderTree,
+  ListTree,
+  PanelLeftClose,
+  PanelLeftOpen,
+  RefreshCw,
+  WrapText
+} from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -60,6 +68,7 @@ export function RepositoryFilesTab({
   const scope = useHostScope()
   const narrow = useNarrow()
   const [treeOpen, setTreeOpen] = useStoredFlag('repository-files-tree', true)
+  const [wrap, setWrap] = useStoredFlag('diff-wrap', false)
   const ref = gitRef ?? null
   const tree = useRepositoryTree(repository.id, ref)
   const refs = useRepositoryRefs(repository.id)
@@ -114,6 +123,19 @@ export function RepositoryFilesTab({
             disabled={refs.data === undefined}
           />
         </div>
+
+        {/* The same preference as the review's Browse files and Files
+            changed, so the choice follows the reader between screens. */}
+        <Button
+          variant={wrap ? 'secondary' : 'outline'}
+          size="sm"
+          onClick={() => setWrap(!wrap)}
+          aria-pressed={wrap}
+          title={wrap ? 'Stop wrapping long lines' : 'Wrap long lines'}
+        >
+          <WrapText />
+          Wrap lines
+        </Button>
 
         {tree.data !== undefined && (
           <p className="text-xs text-muted-foreground">
@@ -203,6 +225,7 @@ export function RepositoryFilesTab({
                     source={source}
                     path={selectedPath}
                     isChanged={false}
+                    wrap={wrap}
                   />
                 )}
               </div>

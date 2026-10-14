@@ -21,6 +21,7 @@ import logo from './assets/logo.png?inline'
 import { ConnectionBanner } from './components/connection-banner'
 import { DesktopAppHint } from './components/desktop-app-hint'
 import { ScrollToTop } from './components/scroll-to-top'
+import { ThemeSwitch } from './components/theme-switch'
 import { Kbd } from './components/ui/kbd'
 import { TooltipProvider } from './components/ui/tooltip'
 import { UpdateBanner } from './components/update-banner'
@@ -182,6 +183,10 @@ function HomeScreen() {
           <Kbd binding="mod+k" />
           <span className="hidden sm:inline">to search</span>
         </p>
+        {/* In the corner of the screen that already holds this install's
+            settings, and nowhere else on screen - from anywhere else it is a
+            palette command. See `components/theme-switch.tsx`. */}
+        <ThemeSwitch />
       </div>
 
       <div className="flex flex-col gap-6">

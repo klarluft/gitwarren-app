@@ -7,7 +7,8 @@
  *    horizontally inside their own container - the page itself never scrolls
  *    sideways.
  *  - Whitespace is preserved with `whitespace-pre`, because in a diff the
- *    indentation *is* the content.
+ *    indentation *is* the content. Wrapping is the reader's choice (`wrap`),
+ *    and a wrapped row keeps its whitespace too - `pre-wrap`, not `normal`.
  *  - Very large files start collapsed. The reviewer opens what they care about,
  *    and a vendored bundle does not cost a thousand DOM nodes on arrival.
  *
@@ -240,7 +241,8 @@ export function FileDiffCard({
   marked,
   reviewed,
   search,
-  layout = 'unified'
+  layout = 'unified',
+  wrap: wrapChosen = false
 }: {
   file: FileDiff
   comments?: DiffComments
@@ -260,6 +262,12 @@ export function FileDiffCard({
   search?: DiffSearch
   /** One column or two. See `split-rows.ts`. */
   layout?: DiffLayout
+  /**
+   * Long lines wrap inside the card instead of scrolling sideways - the
+   * reader's Wrap toggle. Side by side and prose wrap whatever it says; see
+   * `wrap` below.
+   */
+  wrap?: boolean
 }) {
   const lineCount = file.hunks.reduce((total, hunk) => total + hunk.lines.length, 0)
   /**
@@ -396,7 +404,18 @@ export function FileDiffCard({
     () => (expanded ? wordChangesFor(file.hunks) : undefined),
     [expanded, file.hunks]
   )
-  const wrap = layout === 'split' || isProsePath(file.path)
+  /**
+   * Whether long lines wrap: the reader's toggle, or two cases that wrap
+   * regardless.
+   *
+   * Side by side, because each version has half the card and no scrollbar of
+   * its own - a long line could only push its column wider than half, which
+   * is the one thing the layout exists not to do. Prose, because a paragraph
+   * of Markdown is a single line, and a toggle that is off by default for the
+   * sake of code would leave every chapter scrolling sideways a screen at a
+   * time until somebody found it.
+   */
+  const wrap = wrapChosen || layout === 'split' || isProsePath(file.path)
 
   const rowContext: RowContext = {
     placed,
@@ -651,9 +670,6 @@ export function FileDiffCard({
               what lets a comment inside it be sized to the *visible* width
               rather than to the width of the scrolled code. */}
           <div className={cn('@container overflow-x-auto', isDragging && 'select-none')}>
-            {/* `min-w-max` lets a long line of code push the grid wider than
-                the card, so it scrolls; wrapped text must not, or it would
-                never wrap. */}
             <div className={cn('font-mono text-xs leading-5', !wrap && 'min-w-max')}>
               {file.hunks.map((hunk, index) => {
                 const gap = gapByHunk.get(index)
@@ -866,6 +882,7 @@ function GapRows({
         hasBelow={false}
         header={header}
         controls={controls}
+        wrap={rows.wrap}
       />
     )
   }
@@ -885,6 +902,7 @@ function GapRows({
               hasBelow={index < segments.length - 1 || gap.end !== null}
               header={index === segments.length - 1 ? header : null}
               controls={controls}
+              wrap={rows.wrap}
             />
           )
         }
@@ -921,7 +939,8 @@ function ExpanderBand({
   hasAbove,
   hasBelow,
   header,
-  controls
+  controls,
+  wrap = false
 }: {
   start: number
   /** Null when the file has not been read and its end is unknown. */
@@ -930,6 +949,7 @@ function ExpanderBand({
   hasBelow: boolean
   header: string | null
   controls: ExpandControls
+  wrap?: boolean
 }) {
   const hidden = end === null ? null : end - start + 1
   // A run of unknown length is stepped too: the tail of a file nobody has read
@@ -964,7 +984,12 @@ function ExpanderBand({
           icon={<UnfoldVertical />}
         />
       </div>
-      <span className="flex items-center gap-3 whitespace-pre px-3 py-0.5">
+      <span
+        className={cn(
+          'flex min-w-0 items-center gap-3 px-3 py-0.5',
+          wrap ? 'flex-wrap gap-y-0 whitespace-pre-wrap [overflow-wrap:anywhere]' : 'whitespace-pre'
+        )}
+      >
         {header}
         {controls.error !== null ? (
           <span className="font-sans text-[0.6875rem] text-destructive">{controls.error}</span>
@@ -1053,7 +1078,15 @@ export interface RowContext {
    * line with no entry is drawn whole.
    */
   wordChanges?: ReadonlyMap<DiffLine, Range[]>
-  /** Wrap long lines instead of scrolling them - true for prose. */
+  /**
+   * Long lines wrap at the card's edge instead of scrolling it sideways.
+   *
+   * Off by default: in code the line breaks are the author's, and a wrapped
+   * line can pass for two. On for the minified config, the long string, the
+   * Markdown paragraph that is one line - where scrolling sideways to read a
+   * change is most of the work of reading it. Side by side and prose files
+   * wrap whatever the toggle says; see `FileDiffCard`.
+   */
   wrap?: boolean
 }
 
@@ -1067,7 +1100,14 @@ function HunkRows({
       {showHeader && (
         <div className="grid grid-cols-[3rem_3rem_1fr] bg-muted/60 text-muted-foreground">
           <span className="col-span-2 border-r border-border" />
-          <span className="whitespace-pre px-3 py-0.5">{hunk.header}</span>
+          <span
+            className={cn(
+              'min-w-0 px-3 py-0.5',
+              context.wrap ? 'whitespace-pre-wrap [overflow-wrap:anywhere]' : 'whitespace-pre'
+            )}
+          >
+            {hunk.header}
+          </span>
         </div>
       )}
       <DiffRows lines={hunk.lines} {...context} />
@@ -1375,8 +1415,9 @@ function CommentCell({
               title={`Comment on ${side === 'head' ? 'line' : 'removed line'} ${number} — drag or shift-click for several`}
               aria-label={`Comment on line ${number} of ${filePath}`}
               className={cn(
-                // Centred on the first line rather than on the row, so it stays beside
-                // the line number when a wrapped line runs to several rows.
+                // Centred on the row's *first* line rather than on the row: a
+                // wrapped row is several lines tall, and its number sits at
+                // the top. On a row of one line the two are the same place.
                 'absolute left-0.5 top-2.5 flex -translate-y-1/2 items-center justify-center rounded',
                 // `touch-none` is what lets a finger drag the range out at all:
                 // whether a touch scrolls the page or becomes a pointer drag is
@@ -1475,14 +1516,14 @@ function LineCode({
         if (number !== null) onSelectOver(side, number)
       }}
       className={cn(
-        'px-3',
-        // Prose is read, not scanned for indentation, so it wraps: a paragraph
-        // of Markdown is one line, and scrolling sideways through it a screen
-        // at a time is what made long text so hard to review. Code keeps
-        // `whitespace-pre`, because there the indentation *is* the content.
-        // `overflow-wrap: anywhere` so a long URL breaks rather than pushing
-        // the column wider than the card.
-        wrap ? 'whitespace-pre-wrap [overflow-wrap:anywhere]' : 'whitespace-pre',
+        'min-w-0 px-3',
+        // Wrapped, the marker hangs in the padding so the continuation lines
+        // start under the text rather than under the `+`. `overflow-wrap:
+        // anywhere` so a long URL breaks rather than pushing the column wider
+        // than the card - which side by side would mean wider than its half.
+        wrap
+          ? 'whitespace-pre-wrap pl-[calc(0.75rem+1ch)] -indent-[1ch] [overflow-wrap:anywhere]'
+          : 'whitespace-pre',
         // With syntax colours the text keeps them, the way it does on
         // GitHub: the row's tint and the marker say added or removed, and
         // green text over a coloured keyword would say neither clearly.

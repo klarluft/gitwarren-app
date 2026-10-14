@@ -58,6 +58,8 @@
     "src/renderer/src/features/reviews/__tests__/markdown-diff.test.ts",
     "src/renderer/src/features/reviews/remark-change-marks.ts",
     "src/renderer/src/features/reviews/__tests__/remark-change-marks.test.ts",
+    "src/renderer/src/features/reviews/folder-name.ts",
+    "src/renderer/src/features/reviews/__tests__/folder-name.test.ts",
     "src/web/loopback-fragment.ts",
     "src/web/__tests__/loopback-fragment.test.ts",
     "src/web/wire.ts",
