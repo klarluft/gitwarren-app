@@ -49,7 +49,7 @@ everything this server needs.
 **Build steps**
 
 ```json
-["npm install -g gitwarren@1.0.0"]
+["npm install -g gitwarren@1.0.1"]
 ```
 
 **CMD arguments**
