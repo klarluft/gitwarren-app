@@ -31,6 +31,7 @@ import {
   PanelLeftClose,
   RefreshCw,
   Search,
+  WrapText,
   X
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -452,6 +453,9 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
   const scope = useHostScope()
   const [changes, setChanges] = useState<DiffChanges>(DEFAULT_DIFF_CHANGES)
   const [editorId, setEditorId] = useStoredPreference('editor', null)
+  // Shared with the browse tab: whether a long line should wrap is about the
+  // reader's window and their taste, not about which tab they are reading in.
+  const [wrap, setWrap] = useStoredFlag('diff-wrap', false)
   const [openError, setOpenError] = useState<unknown>(null)
   const { narrow, listOpen, setListOpen, selectFile } = useFilesLayout()
   const { data, error, isLoading, isRefreshing, refresh } = useReviewDiff(review.id, changes)
@@ -958,6 +962,20 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
             </Button>
           )}
 
+          {data.files.length > 0 && (
+            <Button
+              variant={wrap ? 'secondary' : 'ghost'}
+              size="sm"
+              className="max-sm:px-2"
+              onClick={() => setWrap(!wrap)}
+              title={wrap ? 'Stop wrapping long lines' : 'Wrap long lines'}
+              aria-pressed={wrap}
+            >
+              <WrapText />
+              <span className={DENSE_LABEL}>Wrap</span>
+            </Button>
+          )}
+
           {/* Only worth asking when the machine actually has a choice. */}
           {editors !== undefined && editors.editors.length > 1 && (
             <Select
@@ -1184,6 +1202,7 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
                   // arriving link cannot light up the same number in every file.
                   focus={focus?.filePath === file.path ? focus : undefined}
                   search={find.searchFor(file.path)}
+                  wrap={wrap}
                   marked={marked?.filePath === file.path ? focusedLine(marked) : undefined}
                   reviewed={{
                     isReviewed: reviewedPaths.has(file.path),

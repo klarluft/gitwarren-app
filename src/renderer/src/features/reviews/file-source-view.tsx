@@ -82,6 +82,8 @@ export interface FileSourceCardProps {
   search?: DiffSearch
   editorLabel?: string | null
   onOpenInEditor?: (path: string, line: number) => void
+  /** Long lines wrap inside the card instead of scrolling sideways. */
+  wrap?: boolean
 }
 
 export function FileSourceCard({
@@ -94,7 +96,8 @@ export function FileSourceCard({
   marked,
   search,
   editorLabel,
-  onOpenInEditor
+  onOpenInEditor,
+  wrap = false
 }: FileSourceCardProps) {
   const text = useReviewFile(reviewId, path, changes)
   const selection = useLineSelection()
@@ -194,7 +197,8 @@ export function FileSourceCard({
     // A file has one set of line numbers; the diff's second gutter would be a
     // column of nothing down the whole document.
     oneGutter: true,
-    highlight
+    highlight,
+    wrap
   }
 
   const orphans = anchored.filter((thread) => thread.anchor.line === null)
@@ -346,7 +350,7 @@ export function FileSourceCard({
         <div
           className={cn('@container overflow-x-auto', selection.isDragging && 'select-none')}
         >
-          <div className="min-w-max font-mono text-xs leading-5">
+          <div className={cn('font-mono text-xs leading-5', !wrap && 'min-w-max')}>
             {rows.map((line) => (
               <LineRow key={line.newNumber} line={line} {...rowContext} />
             ))}
