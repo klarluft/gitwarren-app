@@ -15,7 +15,7 @@
  * that moved on while the window was in the background.
  */
 import { useSWRConfig } from 'swr'
-import { useCallback } from 'react'
+import { useCallback, useMemo } from 'react'
 import { CACHE_PREFIXES } from '@/lib/api'
 import { useApi } from '@/lib/host-scope'
 import { useReviewThreads } from '@/features/reviews/use-reviews'
@@ -65,44 +65,51 @@ export function useCommentMutations(): CommentMutations {
     [mutate]
   )
 
-  return {
-    createThread: useCallback(
+  const createThread: CommentMutations['createThread'] = useCallback(
       async (input) => {
         const thread = await api.comments.createThread(input)
         await revalidate()
         return thread
       },
       [api, revalidate]
-    ),
-    reply: useCallback(
+    )
+  const reply: CommentMutations['reply'] = useCallback(
       async (input) => {
         const comment = await api.comments.reply(input)
         await revalidate()
         return comment
       },
       [api, revalidate]
-    ),
-    edit: useCallback(
+    )
+  const edit: CommentMutations['edit'] = useCallback(
       async (id, body) => {
         const comment = await api.comments.update({ id, body })
         await revalidate()
         return comment
       },
       [api, revalidate]
-    ),
-    remove: useCallback(
+    )
+  const remove: CommentMutations['remove'] = useCallback(
       async (id) => {
         await api.comments.remove({ id })
         await revalidate()
       },
       [api, revalidate]
-    ),
-    setResolved: useCallback(
+    )
+  const setResolved: CommentMutations['setResolved'] = useCallback(
       async (threadId, resolved) => {
         await api.comments.setResolved({ threadId, resolved })
         await revalidate()
       },
       [api, revalidate]
     )
-  }
+
+  // One object for as long as the callbacks in it are the same ones. The files
+  // tab hands it to every file card, and a fresh object on each render would
+  // re-render all of them - every line of a four-hundred-file diff - whenever
+  // the reader scrolled onto a new file.
+  return useMemo(
+    () => ({ createThread, reply, edit, remove, setResolved }),
+    [createThread, reply, edit, remove, setResolved]
+  )
 }
