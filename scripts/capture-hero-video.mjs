@@ -10,12 +10,12 @@
  * keyboard wherever the app allows it, and the one pointer gesture (opening a
  * line comment) shows its hover state without a pointer to explain it.
  *
- * The story, in about twenty seconds:
+ * The story, in about twenty-five seconds:
  *
  *   1. A review that already includes uncommitted work: the amber badge, the
  *      "1 staged, 1 unstaged, 1 untracked" banner.
- *   2. `u` folds the working tree out - this is what every other tool shows -
- *      and back in.
+ *   2. `u` steps through the three views: only the uncommitted work, only the
+ *      commits - which is what every other tool shows - and both again.
  *   3. `]` steps to a file that exists only on disk.
  *   4. A line comment is written on it.
  *   5. The agent's reply lands, with the (AI) attribution.
@@ -387,13 +387,14 @@ async function main() {
   await wait(300)
   await settle(cdp)
 
-  // Warm both diffs so `u` flips between two cached answers instead of showing
-  // a skeleton while git is asked again; the recording should show the
-  // product, not the fetch.
-  await press(cdp, 'u', 'KeyU', 85)
-  await settle(cdp)
-  await press(cdp, 'u', 'KeyU', 85)
-  await settle(cdp)
+  // Warm all three diffs so `u` steps between cached answers instead of
+  // showing a skeleton while git is asked again; the recording should show the
+  // product, not the fetch. `u` cycles all -> uncommitted -> committed -> all
+  // (`CHANGES_CYCLE` in review-files-tab.tsx), so three presses come back.
+  for (let step = 0; step < 3; step++) {
+    await press(cdp, 'u', 'KeyU', 85)
+    await settle(cdp)
+  }
 
   // Park the pointer where it hovers nothing, and start from the top.
   await moveMouse(cdp, SIZE.width - 12, SIZE.height - 12)
@@ -406,7 +407,9 @@ async function main() {
   // 1. The review as it is: uncommitted work already folded in.
   await wait(2600)
 
-  // 2. Without the working tree, and with it again.
+  // 2. Only the working tree, then only the commits, then both again.
+  await press(cdp, 'u', 'KeyU', 85)
+  await wait(1900)
   await press(cdp, 'u', 'KeyU', 85)
   await wait(1900)
   await press(cdp, 'u', 'KeyU', 85)
