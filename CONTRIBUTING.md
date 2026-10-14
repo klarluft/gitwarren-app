@@ -176,6 +176,12 @@ differently.
   pull requests.
 - **Describe the behaviour, not just the code.** What was wrong, what is right
   now, and how you checked.
+- **Show anything that can be seen.** A change to the UI comes with screenshots
+  (light and dark where the theme matters, before and after where something
+  moved), and a change to how something moves or animates comes with a short
+  video or GIF. A reviewer can judge a picture in seconds; reconstructing the
+  same thing from a diff of class names takes far longer and is easier to get
+  wrong.
 - **Match the surrounding style.** The codebase has a consistent voice in both
   its code and its comments — comments explain *why*, not *what*. ESLint covers
   the mechanical part; the rest is a matter of reading the neighbours.
