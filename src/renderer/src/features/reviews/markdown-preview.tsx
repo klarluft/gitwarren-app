@@ -27,13 +27,16 @@
  * under the block in the preview, so the discussion is never on the other side
  * of a toggle.
  */
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Eye, FileCode, MessageSquarePlus, UnfoldVertical } from 'lucide-react'
 import type { Components } from 'react-markdown'
 import { Markdown } from '@/components/markdown'
 import { Skeleton } from '@/components/ui/skeleton'
 import { errorMessage } from '@/lib/errors'
 import { plural } from '@/lib/format'
+import { useHostScope } from '@/lib/host-scope'
+import { revealElement } from '@/lib/reveal'
+import { navigate } from '@/lib/router'
 import { cn } from '@/lib/utils'
 import { CommentComposer } from '../comments/comment-composer'
 import { CommentThreadCard } from '../comments/comment-thread-card'
@@ -50,6 +53,8 @@ import {
   type PreviewRow
 } from './markdown-diff'
 import { remarkChangeMarks } from './remark-change-marks'
+import { documentLink, resolveDocumentPath } from './document-links'
+import { headingDomId, remarkHeadingIds, remarkHtmlImages } from './remark-document'
 import { useReviewFile, useReviewImage } from './use-reviews'
 import type { DiffSide } from '@shared/comment-anchors'
 import { imageMediaType } from '@shared/git'
@@ -61,7 +66,9 @@ export type MarkdownView = 'diff' | 'preview'
 /** Blocks of unchanged text kept either side of a change before the rest folds. */
 const FOLD_CONTEXT = 2
 
-const CHANGE_PLUGINS = [remarkChangeMarks]
+/** Run on every block: see `remark-document.ts`. */
+const DOCUMENT_PLUGINS = [remarkHtmlImages, remarkHeadingIds]
+const CHANGE_PLUGINS = [...DOCUMENT_PLUGINS, remarkChangeMarks]
 
 /**
  * Which way a Markdown file is shown.
@@ -172,6 +179,15 @@ export function MarkdownDiffPreview({
 
   const renderImage = useReviewImages(reviewId, changes)
 
+  // A link in a changed document opens the file it names in the review's
+  // Browse tab, which can show any file of the repository - the diff only has
+  // the ones this branch touched.
+  const scope = useHostScope()
+  const openPath = useCallback<PathOpener>(
+    (path) => navigate({ name: 'review', reviewId, tab: 'browse', focus: { filePath: path }, ...scope }),
+    [reviewId, scope]
+  )
+
   if (rows === null) {
     const problem =
       file.truncated
@@ -195,6 +211,7 @@ export function MarkdownDiffPreview({
       filePath={file.path}
       comments={comments}
       renderImage={renderImage}
+      openPath={openPath}
     />
   )
 }
@@ -207,12 +224,18 @@ export function MarkdownFilePreview({
   lines,
   filePath,
   comments,
-  renderImage
+  renderImage,
+  openPath,
+  anchor
 }: {
   lines: readonly string[]
   filePath: string
   comments?: PreviewComments
   renderImage?: ImageRenderer
+  /** Where a link to another file of the repository goes. */
+  openPath?: PathOpener
+  /** A heading to scroll to once the document is drawn. */
+  anchor?: string | null
 }) {
   const rows = useMemo<PreviewRow[]>(
     () => markdownBlocks(lines).map((block) => ({ kind: 'same', before: block, after: block })),
@@ -226,6 +249,8 @@ export function MarkdownFilePreview({
       filePath={filePath}
       comments={comments}
       renderImage={renderImage}
+      openPath={openPath}
+      anchor={anchor}
     />
   )
 }
@@ -288,29 +313,6 @@ export function DocumentImage({
   )
 }
 
-/**
- * Where a relative image path in a document lands in the repository, or null
- * when it is not one: a URL, an absolute path, an attachment token, or a path
- * that climbs out of the repository.
- */
-export function resolveDocumentPath(documentPath: string, src: string): string | null {
-  if (src === '' || /^[a-z][a-z0-9+.-]*:/i.test(src) || src.startsWith('/') || src.startsWith('#')) {
-    return null
-  }
-  const clean = decodeURI(src.split(/[?#]/)[0] ?? '')
-  const parts = documentPath.split('/').slice(0, -1)
-  for (const part of clean.split('/')) {
-    if (part === '' || part === '.') continue
-    if (part === '..') {
-      if (parts.length === 0) return null
-      parts.pop()
-    } else {
-      parts.push(part)
-    }
-  }
-  return parts.length === 0 ? null : parts.join('/')
-}
-
 /** The block's source as it is handed to the renderer. */
 function renderable(block: MarkdownBlock, source: string, definitions: string): string {
   if (block.kind === 'frontmatter') {
@@ -336,7 +338,9 @@ const DOCUMENT_TYPE = cn(
   '[&_h1]:text-2xl [&_h1]:font-bold [&_h1]:tracking-tight',
   '[&_h2]:text-xl [&_h2]:font-semibold [&_h2]:tracking-tight',
   '[&_h3]:text-lg [&_h4]:text-base',
-  '[&_blockquote]:italic'
+  '[&_blockquote]:italic',
+  // A heading a link scrolls to lands below the card's sticky header, not under it.
+  '[&_:is(h1,h2,h3,h4,h5,h6)]:scroll-mt-16'
 )
 
 function BlockBody({
@@ -357,22 +361,86 @@ function BlockBody({
   return (
     <Markdown
       body={renderable(block, source, definitions)}
-      remarkPlugins={marked ? CHANGE_PLUGINS : undefined}
+      remarkPlugins={marked ? CHANGE_PLUGINS : DOCUMENT_PLUGINS}
       overrides={overrides}
       className={cn(DOCUMENT_TYPE, block.kind === 'heading' && 'pt-3', className)}
     />
   )
 }
 
-/** The `img` override for one side of the document, or none to keep links. */
-function useImageOverrides(
+/**
+ * Opens a file of the repository that a document links to - in whichever screen
+ * the document is on, which this component does not know.
+ */
+export type PathOpener = (path: string, fragment: string | null) => void
+
+/** Scroll the document to the heading a `#fragment` names. */
+function revealHeading(fragment: string): void {
+  revealElement(headingDomId(fragment), { block: 'start', behavior: 'smooth' })
+}
+
+/**
+ * The `a` and `img` overrides for one side of the document.
+ *
+ * A link to another file of the repository opens it here, through `openPath`,
+ * rather than in the real browser - which could only have resolved it against
+ * the app's own address and opened nothing. A `#heading` scrolls this document.
+ * A URL keeps the default, which hands it to the browser.
+ */
+function useDocumentOverrides(
   filePath: string,
   side: DiffSide,
-  renderImage: ImageRenderer | undefined
-): Partial<Components> | undefined {
+  renderImage: ImageRenderer | undefined,
+  openPath: PathOpener | undefined
+): Partial<Components> {
   return useMemo(() => {
-    if (renderImage === undefined) return undefined
-    const img: Components['img'] = ({ src, alt }) => {
+    const a: Components['a'] = ({ node: _node, href, className, children, ...props }) => {
+      const url = typeof href === 'string' ? href : ''
+      const link = documentLink(filePath, url)
+      if (link.kind === 'external') {
+        return (
+          <a
+            href={url}
+            target="_blank"
+            rel="noreferrer noopener"
+            className={cn(LINK_CLASS, className)}
+            {...props}
+          >
+            {children}
+          </a>
+        )
+      }
+      if (link.kind === 'outside' || (link.kind === 'file' && openPath === undefined)) {
+        // A path with nowhere to go here: shown as what it is, not as a link
+        // that silently does nothing.
+        return (
+          <span title={`${url} — not a file this screen can open`} className="underline decoration-dotted underline-offset-2">
+            {children}
+          </span>
+        )
+      }
+      return (
+        <a
+          href={url}
+          className={cn(LINK_CLASS, className)}
+          title={link.kind === 'file' ? link.path + (link.fragment === null ? '' : `#${link.fragment}`) : undefined}
+          {...props}
+          onClick={(event) => {
+            event.preventDefault()
+            if (link.kind === 'anchor') revealHeading(link.fragment)
+            else openPath?.(link.path, link.fragment)
+          }}
+          // A middle click would otherwise ask the window to open the app's own
+          // address with this path on the end.
+          onAuxClick={(event) => event.preventDefault()}
+        >
+          {children}
+        </a>
+      )
+    }
+
+    if (renderImage === undefined) return { a }
+    const img: Components['img'] = ({ src, alt, width }) => {
       const url = typeof src === 'string' ? src : ''
       const path = resolveDocumentPath(filePath, url)
       if (path === null || imageMediaType(path) === null) {
@@ -383,17 +451,28 @@ function useImageOverrides(
             href={url}
             target="_blank"
             rel="noreferrer noopener"
-            className="text-primary underline underline-offset-2 hover:no-underline"
+            className={LINK_CLASS}
           >
             {alt && alt.length > 0 ? alt : url}
           </a>
         )
       }
-      return renderImage(path, side, alt ?? '')
+      const drawn = renderImage(path, side, alt ?? '')
+      // The width an `<img width="120">` asked for - see `remark-document.ts`.
+      // The image keeps its own `max-w-full`, so this only ever narrows it.
+      const asked = Number(width)
+      if (!Number.isFinite(asked) || asked <= 0) return drawn
+      return (
+        <span className="inline-block max-w-full align-top" style={{ width: asked }}>
+          {drawn}
+        </span>
+      )
     }
-    return { img }
-  }, [filePath, side, renderImage])
+    return { a, img }
+  }, [filePath, side, renderImage, openPath])
 }
+
+const LINK_CLASS = 'text-primary underline underline-offset-2 hover:no-underline'
 
 /** Where a comment on a row goes: the block's lines, on the side it lives on. */
 function rowAddress(row: PreviewRow): { side: DiffSide; block: MarkdownBlock } {
@@ -441,7 +520,9 @@ function PreviewDocument({
   fold,
   filePath,
   comments,
-  renderImage
+  renderImage,
+  openPath,
+  anchor
 }: {
   rows: readonly PreviewRow[]
   layout: DiffLayout
@@ -449,6 +530,9 @@ function PreviewDocument({
   filePath: string
   comments: PreviewComments | undefined
   renderImage: ImageRenderer | undefined
+  openPath?: PathOpener
+  /** A heading to scroll to, from a link that named one. */
+  anchor?: string | null
 }) {
   const [opened, setOpened] = useState<ReadonlySet<number>>(() => new Set())
   const [composingOn, setComposingOn] = useState<number | null>(null)
@@ -461,8 +545,16 @@ function PreviewDocument({
     () => definitionsOf(rows.flatMap((row) => (row.kind === 'removed' ? [] : [row.after]))),
     [rows]
   )
-  const beforeImages = useImageOverrides(filePath, 'base', renderImage)
-  const afterImages = useImageOverrides(filePath, 'head', renderImage)
+  const beforeImages = useDocumentOverrides(filePath, 'base', renderImage, openPath)
+  const afterImages = useDocumentOverrides(filePath, 'head', renderImage, openPath)
+
+  // A link from another file named a heading in this one: go to it once the
+  // blocks are on the page. `revealElement` retries for a few frames, which is
+  // what a freshly rendered document needs.
+  useEffect(() => {
+    if (anchor === undefined || anchor === null || rows.length === 0) return
+    return revealElement(headingDomId(anchor), { block: 'start', behavior: 'smooth' })
+  }, [anchor, rows.length])
 
   const placed = useMemo(
     () => (comments === undefined ? new Map<number, AnchoredThread[]>() : threadsByRow(rows, comments.threads)),

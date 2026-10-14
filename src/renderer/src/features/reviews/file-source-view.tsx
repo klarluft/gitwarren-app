@@ -47,9 +47,10 @@ import {
   MarkdownViewToggle,
   useReviewImages,
   type ImageRenderer,
-  type MarkdownView
+  type MarkdownView,
+  type PathOpener
 } from './markdown-preview'
-import { isMarkdownPath, isProsePath } from '@/lib/prose'
+import { isMarkdownPath } from '@/lib/prose'
 import { useStoredPreference } from '@/lib/preferences'
 import { SquareArrowOutUpRight } from 'lucide-react'
 import { resolveAnchorInFile } from '@shared/comment-anchors'
@@ -114,8 +115,15 @@ export interface FileSourceCardProps {
   search?: DiffSearch
   editorLabel?: string | null
   onOpenInEditor?: (path: string, line: number) => void
-  /** Long lines wrap inside the card instead of scrolling sideways. */
+  /**
+   * Long lines wrap inside the card instead of scrolling sideways. The answer
+   * for this file, prose or code, from `useLineWrap().wrapFor`.
+   */
   wrap?: boolean
+  /** Where a link in the Markdown preview to another file of the repository goes. */
+  onOpenPath?: PathOpener
+  /** A heading in the preview to scroll to - the `#part` of the link that got here. */
+  anchor?: string | null
 }
 
 const NO_THREADS: CommentThread[] = []
@@ -130,7 +138,9 @@ export function FileSourceCard({
   search,
   editorLabel,
   onOpenInEditor,
-  wrap = false
+  wrap = false,
+  onOpenPath,
+  anchor
 }: FileSourceCardProps) {
   // Both reads are always called - hooks cannot be conditional - and the one
   // that does not apply is handed a null id and reads nothing.
@@ -255,8 +265,8 @@ export function FileSourceCard({
     // column of nothing down the whole document.
     oneGutter: true,
     highlight,
-    // The reader's Wrap toggle, or prose regardless - see `FileDiffCard`.
-    wrap: wrap || isProsePath(path)
+    // Already decided for this file by the caller - see `lib/line-wrap.ts`.
+    wrap
   }
 
   const renderImage = useSourceImages(source)
@@ -422,6 +432,8 @@ export function FileSourceCard({
             comments === undefined ? undefined : { ...comments, threads: anchored }
           }
           renderImage={renderImage}
+          openPath={onOpenPath}
+          anchor={anchor}
         />
       ) : (
         <div

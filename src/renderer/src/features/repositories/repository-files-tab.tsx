@@ -24,7 +24,7 @@
  * be a review nobody asked for. The line gutter therefore has no comment
  * button here, which `LineRow` already does when it is given no comments.
  */
-import { useCallback, useMemo } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import {
   AlertCircle,
   FolderTree,
@@ -42,8 +42,10 @@ import { errorMessage, isDisconnection } from '@/lib/errors'
 import { plural } from '@/lib/format'
 import { useHostScope } from '@/lib/host-scope'
 import { useNarrow } from '@/lib/narrow'
+import { useLineWrap } from '@/lib/line-wrap'
 import { useStoredFlag } from '@/lib/preferences'
-import { replace } from '@/lib/router'
+import { navigate, replace } from '@/lib/router'
+import { fileForLink } from '@/features/reviews/document-links'
 import { FileSourceCard } from '@/features/reviews/file-source-view'
 import { RefSelect } from '@/features/reviews/ref-select'
 import { RepositoryFilesTree } from '@/features/reviews/repository-files-tree'
@@ -68,12 +70,14 @@ export function RepositoryFilesTab({
   const scope = useHostScope()
   const narrow = useNarrow()
   const [treeOpen, setTreeOpen] = useStoredFlag('repository-files-tree', true)
-  const [wrap, setWrap] = useStoredFlag('diff-wrap', false)
+  const lineWrap = useLineWrap()
   const ref = gitRef ?? null
   const tree = useRepositoryTree(repository.id, ref)
   const refs = useRepositoryRefs(repository.id)
 
   const selectedPath = filePath ?? null
+  /** What the button shows and flips: whether the file on screen wraps. */
+  const wrap = selectedPath === null ? lineWrap.code : lineWrap.wrapFor(selectedPath)
 
   /** A move within this tab, keeping whatever was not changed. */
   const go = useCallback(
@@ -94,6 +98,15 @@ export function RepositoryFilesTab({
 
   const selectFile = useCallback((path: string) => go({ filePath: path }), [go])
 
+  /**
+   * The heading a link asked for, held only until that file is open.
+   *
+   * Not in the route: it is where a click wanted to land, not a place worth
+   * linking to on its own, and a route that kept it would scroll back to it on
+   * every revisit.
+   */
+  const [anchor, setAnchor] = useState<{ path: string; fragment: string } | null>(null)
+
   const source = useMemo(
     () => ({ kind: 'repository' as const, repositoryId: repository.id, ref }),
     [repository.id, ref]
@@ -101,7 +114,31 @@ export function RepositoryFilesTab({
 
   const checkedOut = repository.git.branch
   const shownRef = ref ?? checkedOut ?? 'HEAD'
-  const paths = tree.data?.paths ?? []
+  const paths = useMemo(() => tree.data?.paths ?? [], [tree.data?.paths])
+
+  /**
+   * Follow a link in a Markdown file to another file of the repository.
+   *
+   * Pushed rather than replaced, unlike picking a file from the tree: following
+   * a link is reading onwards, and Back should return to the page the link was
+   * on - the way it does in a browser.
+   */
+  const openPath = useCallback(
+    (path: string, fragment: string | null) => {
+      const target = fileForLink(paths, path)
+      setAnchor(fragment === null ? null : { path: target, fragment })
+      navigate({
+        name: 'repository',
+        repositoryId: repository.id,
+        tab: 'files',
+        filePath: target,
+        ...(gitRef === undefined ? {} : { ref: gitRef }),
+        ...scope
+      })
+    },
+    [paths, repository.id, gitRef, scope]
+  )
+
   const listOpen = narrow ? selectedPath === null || treeOpen : treeOpen
 
   return (
@@ -129,7 +166,7 @@ export function RepositoryFilesTab({
         <Button
           variant={wrap ? 'secondary' : 'outline'}
           size="sm"
-          onClick={() => setWrap(!wrap)}
+          onClick={() => lineWrap.setWrap(!wrap)}
           aria-pressed={wrap}
           title={wrap ? 'Stop wrapping long lines' : 'Wrap long lines'}
         >
@@ -226,6 +263,8 @@ export function RepositoryFilesTab({
                     path={selectedPath}
                     isChanged={false}
                     wrap={wrap}
+                    onOpenPath={openPath}
+                    anchor={anchor?.path === selectedPath ? anchor.fragment : null}
                   />
                 )}
               </div>

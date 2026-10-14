@@ -53,6 +53,7 @@ import { formatStep } from '@/lib/keys'
 import { plural } from '@/lib/format'
 import { useApi, useHost, useHostScope } from '@/lib/host-scope'
 import { useNarrow } from '@/lib/narrow'
+import { useLineWrap } from '@/lib/line-wrap'
 import { useStoredFlag, useStoredPreference } from '@/lib/preferences'
 import { revealElement, scrollToElement } from '@/lib/reveal'
 import { scrollParent } from '@/lib/scroll-parent'
@@ -480,7 +481,10 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
   const [editorId, setEditorId] = useStoredPreference('editor', null)
   // Shared with the browse tab: whether a long line should wrap is about the
   // reader's window and their taste, not about which tab they are reading in.
-  const [wrap, setWrap] = useStoredFlag('diff-wrap', false)
+  // The button shows the code switch and sets both - see `lib/line-wrap.ts`.
+  const lineWrap = useLineWrap()
+  const wrap = lineWrap.code
+  const setWrap = lineWrap.setWrap
   const [openError, setOpenError] = useState<unknown>(null)
   const { narrow, listOpen, setListOpen, selectFile } = useFilesLayout()
   /**
@@ -1315,7 +1319,7 @@ export function ReviewFilesTab({ review, focus }: { review: Review; focus?: Diff
                 focus={focus?.filePath === file.path ? focus : undefined}
                 search={find.searchFor(file.path)}
                 layout={layout}
-                wrap={wrap}
+                wrap={lineWrap.wrapFor(file.path)}
                 marked={marked?.filePath === file.path ? marked : undefined}
                 isReviewed={reviewedPaths.has(file.path)}
                 hasChangedSince={changedSincePaths.has(file.path)}

@@ -81,7 +81,7 @@ import { matchOffsets, rowPosition, type DiffSearch } from './diff-search'
 import { useLineSelection, type LineRange } from './line-selection'
 import { useDiffHighlight } from './diff-highlight'
 import { MarkdownDiffPreview, MarkdownViewToggle, type MarkdownView } from './markdown-preview'
-import { isMarkdownPath, isProsePath } from '@/lib/prose'
+import { isMarkdownPath } from '@/lib/prose'
 import { useStoredPreference } from '@/lib/preferences'
 import type { LineHighlighter } from '@/lib/highlight/diff-blocks'
 import { markChanged, segmentLine, type MarkedPiece } from '@/lib/highlight/segments'
@@ -291,8 +291,8 @@ export const FileDiffCard = memo(function FileDiffCard({
   layout?: DiffLayout
   /**
    * Long lines wrap inside the card instead of scrolling sideways - the
-   * reader's Wrap toggle. Side by side and prose wrap whatever it says; see
-   * `wrap` below.
+   * reader's Wrap toggle, as it applies to this file (prose has its own
+   * default; see `lib/line-wrap.ts`). Side by side wraps whatever it says.
    */
   wrap?: boolean
 }) {
@@ -456,17 +456,15 @@ export const FileDiffCard = memo(function FileDiffCard({
     [expanded, file.hunks]
   )
   /**
-   * Whether long lines wrap: the reader's toggle, or two cases that wrap
-   * regardless.
+   * Whether long lines wrap: the reader's toggle, or side by side regardless,
+   * because each version has half the card and no scrollbar of its own - a
+   * long line could only push its column wider than half, which is the one
+   * thing the layout exists not to do.
    *
-   * Side by side, because each version has half the card and no scrollbar of
-   * its own - a long line could only push its column wider than half, which
-   * is the one thing the layout exists not to do. Prose, because a paragraph
-   * of Markdown is a single line, and a toggle that is off by default for the
-   * sake of code would leave every chapter scrolling sideways a screen at a
-   * time until somebody found it.
+   * Prose used to wrap regardless too, which made the toggle do nothing on a
+   * Markdown file. It now only *starts* wrapped - see `lib/line-wrap.ts`.
    */
-  const wrap = wrapChosen || layout === 'split' || isProsePath(file.path)
+  const wrap = wrapChosen || layout === 'split'
 
   const rowContext: RowContext = {
     placed,
