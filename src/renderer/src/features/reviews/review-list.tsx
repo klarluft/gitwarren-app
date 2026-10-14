@@ -17,7 +17,8 @@ import { useHostScope } from '@/lib/host-scope'
 import { navigate } from '@/lib/router'
 import { cn } from '@/lib/utils'
 import { ReviewFormDialog } from './review-form-dialog'
-import { useReviews } from './use-reviews'
+import { useRepositoryRefs, useReviews } from './use-reviews'
+import { WorktreeFolder } from './worktree-location'
 import { isSelfReview } from '@shared/schemas'
 import type { Review, ReviewStatus } from '@shared/schemas'
 
@@ -37,6 +38,22 @@ export function ReviewList({ repositoryId }: { repositoryId: number }) {
   const { data: reviews, error, isLoading, isRefreshing, refresh } = useReviews(
     repositoryId,
     filter === 'all' ? undefined : filter
+  )
+
+  // One read for the whole list rather than a comparison per row: which
+  // directory each branch is checked out in is all a row needs, and the
+  // worktree list answers it for every branch at once. Matched the way the
+  // core picks a review's head worktree (`resolveCompare`), so a row and the
+  // review it opens never disagree about where the work is.
+  const { data: refs } = useRepositoryRefs(repositoryId)
+  const worktreeByBranch = useMemo(
+    () =>
+      new Map(
+        (refs?.worktrees ?? []).flatMap((worktree) =>
+          worktree.branch === null ? [] : [[worktree.branch, worktree.path] as const]
+        )
+      ),
+    [refs]
   )
 
   // The list we already have outlives the machine that served it going away -
@@ -146,7 +163,10 @@ export function ReviewList({ repositoryId }: { repositoryId: number }) {
         <ul className="flex flex-col gap-2">
           {reviews.map((review) => (
             <li key={review.id}>
-              <ReviewCard review={review} />
+              <ReviewCard
+                review={review}
+                worktreePath={worktreeByBranch.get(review.headRef.replace(/^refs\/heads\//, ''))}
+              />
             </li>
           ))}
         </ul>
@@ -164,7 +184,14 @@ export function ReviewList({ repositoryId }: { repositoryId: number }) {
   )
 }
 
-function ReviewCard({ review }: { review: Review }) {
+function ReviewCard({
+  review,
+  worktreePath
+}: {
+  review: Review
+  /** Where the head branch is checked out, when anywhere. */
+  worktreePath: string | undefined
+}) {
   const scope = useHostScope()
 
   function open(): void {
@@ -207,7 +234,9 @@ function ReviewCard({ review }: { review: Review }) {
 
             The row is a navigation target, so the refs still cannot be
             selected here - copying them lives on the review itself - but they
-            can now at least be read. */}
+            can now at least be read. The worktree folder is the exception: it
+            carries its own copy button, because "which directory is that
+            branch in" is asked from this list, before opening anything. */}
         <p className="mt-1 flex flex-wrap items-center gap-x-1.5 font-mono text-xs text-muted-foreground">
           {/* One endpoint, not two, when the review is a ref against itself. */}
           {!isSelfReview(review) && (
@@ -221,6 +250,11 @@ function ReviewCard({ review }: { review: Review }) {
           <span className="min-w-0 break-words">
             <Breakable text={review.headRef} />
           </span>
+          {worktreePath !== undefined && (
+            <span className="ml-1.5 inline-flex min-w-0">
+              <WorktreeFolder path={worktreePath} />
+            </span>
+          )}
         </p>
       </div>
 
