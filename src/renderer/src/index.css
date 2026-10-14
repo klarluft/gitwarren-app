@@ -22,12 +22,18 @@
 
 /*
  * Theme tokens. The palette is defined once here in both schemes; the `.dark`
- * class is applied to <html> from main.tsx following the OS setting, so the app
- * matches the rest of the desktop without the user configuring anything.
+ * class is applied to <html> by `lib/theme.ts` - following the OS setting
+ * unless the switch on the home screen says otherwise.
+ *
+ * `color-scheme` is set alongside it because the tokens only reach what this
+ * stylesheet paints. Scrollbars, native form controls and the caret are drawn
+ * by the browser from `prefers-color-scheme`, which is the OS - so a window
+ * forced dark on a light desktop kept white scrollbars until this said dark.
  */
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
+  color-scheme: light;
   --background: oklch(0.99 0.002 265);
   --foreground: oklch(0.21 0.01 265);
   --muted: oklch(0.96 0.004 265);
@@ -51,6 +57,7 @@
 }
 
 .dark {
+  color-scheme: dark;
   --background: oklch(0.17 0.008 265);
   --foreground: oklch(0.95 0.004 265);
   --muted: oklch(0.24 0.01 265);
@@ -70,6 +77,12 @@
   --success: oklch(0.72 0.15 155);
   --warning: oklch(0.78 0.14 70);
   --ring: oklch(0.68 0.16 264);
+}
+
+/* See `apply` in lib/theme.ts: one frame with no fades while the class moves. */
+.theme-switching,
+.theme-switching * {
+  transition: none !important;
 }
 
 @theme inline {

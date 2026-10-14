@@ -17,9 +17,15 @@ import {
   Search,
   Server
 } from 'lucide-react'
+import { THEME_OPTIONS } from '@/components/theme-switch'
 import { formatStep } from '@/lib/keys'
 import { useHotkeys, type Hotkey } from '@/lib/hotkeys'
 import { goBack, navigate } from '@/lib/router'
+import {
+  setThemePreference,
+  THEME_PREFERENCES,
+  useThemePreference
+} from '@/lib/theme'
 import { CommandPalette } from './command-palette'
 import { ShortcutsDialog } from './shortcuts-dialog'
 import { bindableCommands, useCommands, useRegisterCommands, type Command } from './command-registry'
@@ -55,6 +61,7 @@ function moveFocus(delta: number): void {
 export function CommandCenter({ scroller }: { scroller: RefObject<HTMLElement | null> }) {
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  const theme = useThemePreference()
 
   const scrollToTop = useCallback(() => {
     scroller.current?.scrollTo({ top: 0, behavior: 'smooth' })
@@ -86,6 +93,21 @@ export function CommandCenter({ scroller }: { scroller: RefObject<HTMLElement | 
         icon: Keyboard,
         run: () => setShortcutsOpen(true)
       },
+      // The switch on the home screen, from every other screen. All three
+      // rather than one "toggle", because which way a toggle goes depends on a
+      // state the palette row would have to explain; the current one is marked
+      // instead, and offered anyway so that picking it is never an error.
+      ...THEME_PREFERENCES.map(
+        (option): Command => ({
+          id: `app:theme-${option}`,
+          label: `Theme: ${THEME_OPTIONS[option].label}`,
+          group: 'Application',
+          keywords: 'appearance color colour scheme dark mode light mode night day os',
+          icon: THEME_OPTIONS[option].icon,
+          ...(option === theme ? { hint: 'Current' } : {}),
+          run: () => setThemePreference(option)
+        })
+      ),
       {
         id: 'nav:home',
         label: 'Go to repositories',
@@ -158,7 +180,7 @@ export function CommandCenter({ scroller }: { scroller: RefObject<HTMLElement | 
         run: () => moveFocus(-1)
       }
     ],
-    [scrollToTop]
+    [scrollToTop, theme]
   )
 
   useRegisterCommands(commands)

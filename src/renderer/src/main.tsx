@@ -5,6 +5,7 @@ import { App } from './App'
 import { api } from './lib/api'
 import { isDisconnection } from './lib/errors'
 import { startListeningForEvents } from './lib/events'
+import { startTheme } from './lib/theme'
 import './index.css'
 
 /**
@@ -18,17 +19,9 @@ import './index.css'
  */
 const OFFLINE_RETRY_MS = 15_000
 
-/** Follow the OS appearance, and keep following it if the user switches. */
-function applyColourScheme(): void {
-  const media = window.matchMedia('(prefers-color-scheme: dark)')
-  const sync = (): void => {
-    document.documentElement.classList.toggle('dark', media.matches)
-  }
-  sync()
-  media.addEventListener('change', sync)
-}
-
-applyColourScheme()
+// Before the first paint, so a window set to dark on a light desktop never
+// shows a frame of the wrong one. See `lib/theme.ts`.
+startTheme()
 
 /**
  * Deep links that arrive while the app is already open.
