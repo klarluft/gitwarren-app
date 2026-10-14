@@ -51,6 +51,7 @@ import { ReviewConversationTab } from './review-conversation-tab'
 import { ReviewFilesTab } from './review-files-tab'
 import { ReviewFormDialog } from './review-form-dialog'
 import { RemoveReviewDialog } from './remove-review-dialog'
+import { WorktreeLocation } from './worktree-location'
 import {
   DEFAULT_DIFF_CHANGES,
   useReview,
@@ -345,6 +346,11 @@ export function ReviewDetail({ reviewId, tab, focus, search }: ReviewDetailProps
                 </Badge>
               )}
             </p>
+            {/* The directory, not just the branch: the branch is what a
+                reviewer remembers, the directory is where they go next. */}
+            {commits.data?.headWorktree && (
+              <WorktreeLocation worktree={commits.data.headWorktree} />
+            )}
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
