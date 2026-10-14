@@ -18,7 +18,7 @@
  * same ranking, the same name-first result row - means the gesture that finds a
  * file is one gesture in this app rather than one per tab.
  */
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { Check, ChevronDown, ChevronRight, History } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { plural } from '@/lib/format'
@@ -40,6 +40,12 @@ export interface ChangedFilesTreeProps {
   reviewedPaths: ReadonlySet<string>
   /** Files ticked off against an older version of themselves. */
   changedSincePaths: ReadonlySet<string>
+  /**
+   * Keep the highlighted row in view as the diff scrolls. Only where the tree
+   * scrolls on its own, beside the diff: on the narrow layout it scrolls with
+   * the page, and following there would move the page itself.
+   */
+  follow?: boolean
 }
 
 /**
@@ -51,8 +57,101 @@ export interface ChangedFilesTreeProps {
  */
 const FILTER_FROM = 15
 
-export function ChangedFilesTree({ files, ...rowProps }: ChangedFilesTreeProps) {
+/**
+ * How long a click on a row keeps the tree from following, at most.
+ *
+ * Longer than the smooth scroll a click starts. It is only a backstop for a
+ * file that never becomes the active one - the last file of a short diff, which
+ * cannot scroll up to the top - so that the hold does not outlive its scroll.
+ */
+const CLICK_HOLD_MS = 1500
+
+/** The nearest ancestor that scrolls - the sidebar the tree sits in. */
+function scrollParent(element: HTMLElement): HTMLElement | null {
+  for (let node = element.parentElement; node !== null; node = node.parentElement) {
+    const overflow = getComputedStyle(node).overflowY
+    if (overflow === 'auto' || overflow === 'scroll') return node
+  }
+  return null
+}
+
+/**
+ * Scrolls the tree so the highlighted row stays on screen as the diff scrolls.
+ *
+ * A long branch makes the tree a column taller than the window, and reading the
+ * diff file by file walks the highlight off the bottom of it. So whenever the
+ * active row leaves the visible part of the tree, the tree brings it back - to
+ * the middle rather than the nearest edge, so the files coming next are on
+ * screen too and the tree moves once every half a column rather than on every
+ * file. A row already in view is left alone: the tree never moves under a
+ * reader who can already see where they are.
+ *
+ * It scrolls the tree's own column and nothing else. `scrollIntoView` would
+ * scroll every ancestor too, and drag the diff along with it.
+ *
+ * A click on a row is the exception. The smooth scroll it starts passes every
+ * file between here and there, and following each of them would carry the row
+ * just clicked out from under the pointer. So a click holds the tree still
+ * until the clicked file becomes the active one, which is in view already.
+ *
+ * `rendered` is not read - it is whatever changes which rows exist (the
+ * filter), so the row is looked for again once it may have come back.
+ */
+function useFollowActiveRow(
+  root: RefObject<HTMLElement | null>,
+  activePath: string | null,
+  enabled: boolean,
+  rendered: unknown
+): (path: string) => void {
+  const held = useRef<{ path: string; until: number } | null>(null)
+
+  useEffect(() => {
+    if (!enabled || activePath === null || root.current === null) return
+    const hold = held.current
+    if (hold !== null) {
+      if (hold.path === activePath) {
+        held.current = null
+        return
+      }
+      if (Date.now() <= hold.until) return
+      held.current = null
+    }
+
+    // Missing when its directory is folded or a filter hides it, and then
+    // there is no row to bring into view.
+    const row = root.current.querySelector<HTMLElement>('[aria-current="true"]')
+    const scroller = row === null ? null : scrollParent(row)
+    if (row === null || scroller === null) return
+
+    // The filter box, when there is one, sticks to the top of the column and
+    // covers whatever row is scrolled under it, so the visible part starts
+    // below it.
+    const view = scroller.getBoundingClientRect()
+    const cover = row.closest('nav')?.previousElementSibling?.getBoundingClientRect()
+    const top = Math.max(view.top, cover?.bottom ?? view.top)
+    const box = row.getBoundingClientRect()
+    if (box.top >= top && box.bottom <= view.bottom) return
+
+    const middle = top + (view.bottom - top - box.height) / 2
+    scroller.scrollTo({
+      top: Math.max(0, scroller.scrollTop + box.top - middle),
+      behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
+    })
+  }, [root, activePath, enabled, rendered])
+
+  return useCallback((path: string) => {
+    held.current = { path, until: Date.now() + CLICK_HOLD_MS }
+  }, [])
+}
+
+export function ChangedFilesTree({
+  files,
+  follow = false,
+  onSelect,
+  ...rest
+}: ChangedFilesTreeProps) {
   const [query, setQuery] = useState('')
+  const rootRef = useRef<HTMLDivElement>(null)
   const paths = useMemo(() => files.map((file) => file.path), [files])
   const tree = useMemo(() => buildPathTree(paths), [paths])
   // What each row needs about its own file, looked up by path - see `path-tree.ts`.
@@ -63,8 +162,18 @@ export function ChangedFilesTree({ files, ...rowProps }: ChangedFilesTreeProps) 
     [paths, query]
   )
 
+  const holdFollow = useFollowActiveRow(rootRef, rest.activePath, follow, matches)
+  const select = useCallback(
+    (path: string) => {
+      holdFollow(path)
+      onSelect(path)
+    },
+    [holdFollow, onSelect]
+  )
+  const rowProps = { ...rest, onSelect: select }
+
   return (
-    <div className="flex min-h-0 flex-col">
+    <div ref={rootRef} className="flex min-h-0 flex-col">
       {files.length >= FILTER_FROM && (
         <FilterBox
           value={query}
@@ -115,7 +224,7 @@ function TreeRows({
   node: PathNode
   depth: number
   byPath: Map<string, FileDiff>
-} & Omit<ChangedFilesTreeProps, 'files'>) {
+} & Omit<ChangedFilesTreeProps, 'files' | 'follow'>) {
   const [open, setOpen] = useState(true)
   // Indent by nesting depth, but stop growing it before the column runs out of
   // room; a path fifteen directories deep should still show its file name.
@@ -173,7 +282,7 @@ function FileRow({
   indices?: number[]
   /** Set on a tree row, where the depth is what the indent is measuring. */
   indent?: { paddingLeft: string }
-} & Omit<ChangedFilesTreeProps, 'files'>) {
+} & Omit<ChangedFilesTreeProps, 'files' | 'follow'>) {
   const path = file.path
   const unresolved = unresolvedByFile.get(path) ?? 0
   const isActive = path === activePath
